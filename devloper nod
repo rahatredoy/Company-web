@@ -3,9 +3,26 @@ company admin :
  ChangeMe!Admin2026
 
 
-client admin : 
+client admin :
 
+  Plain http://localhost:3002 always opens the store named by DEV_STORE_SLUG
+  (client-api/.env) and NEXT_PUBLIC_DEV_STORE_SLUG (client-admin/.env, client-store/.env).
+  That is riyad-store right now. Every other store is at http://<slug>.localhost:3002
+  — browsers resolve *.localhost even though Windows and Node do not.
 
+  Riyad Store          http://localhost:3002  (or riyad-store.localhost:3002)
+    shaikriyad198@gmail.com / StoreAdmin1@2026
+
+  e comarch            http://e-comarch.localhost:3002
+    redoyahmed198@gmail.com / StoreAdmin1@2026
+
+  ABC Fashion          http://abc-fashion.localhost:3002
+    owner@abcfashion.com / OwnerPass2026
+
+  The panel login is NOT the company website login — they are separate accounts
+  on purpose, and changing one never changes the other. To reset a panel password:
+    cd client/client-api
+    npx tsx scripts/set-store-password.ts --slug <slug> --email <email> --password '<new>'
 
 
 All 6 ports are already distinct — no conflict. Here's the current map:
