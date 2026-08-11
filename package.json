@@ -1,0 +1,18 @@
+{
+  "name": "multi-tenant-ecommerce-saas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Root launcher only. Deliberately has no dependencies and no npm workspaces - every app owns its own package.json, node_modules and build. Do not run npm install here.",
+  "scripts": {
+    "dev": "node dev.mjs",
+    "dev:company": "node dev.mjs company",
+    "dev:client": "node dev.mjs client",
+    "dev:api": "node dev.mjs api",
+    "dev:web": "node dev.mjs web",
+    "dev:workers": "node dev.mjs all --workers",
+    "dev:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ./dev.ps1 all"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

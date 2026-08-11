@@ -1,0 +1,34 @@
+company admin :
+ admin@company.com
+ ChangeMe!Admin2026
+
+
+client admin : 
+
+
+
+
+All 6 ports are already distinct — no conflict. Here's the current map:
+
+App	Port	Command
+company/company-web	3000	next dev --port 3000
+company/company-admin	3001	next dev --port 3001
+client/client-admin	3002	next dev --port 3002
+client/client-store	3003	next dev --port 3003
+company/company-api	4000	API_PORT=4000
+client/client-api	4100	API_PORT=4100
+
+
+
+
+
+Client 1 — Test Store One
+
+URL       http://test-store-one.localhost:3002/sign-in
+email     admin1@teststore.com
+password  StoreAdmin1@2026
+Client 2 — Test Store Two
+
+URL       http://test-store-two.localhost:3002/sign-in
+email     admin2@teststore.com
+password  StoreAdmin2@2026

@@ -1,0 +1,67 @@
+import { ArrowDown, ArrowUp, type LucideIcon } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Sparkline } from './sparkline';
+import { cn } from '@/lib/utils';
+import type { MetricDelta } from '@/lib/types';
+
+export function KpiCard({
+  label,
+  value,
+  metric,
+  icon: Icon,
+  tint = 'primary',
+  /** Set when a rise is bad (failed payments, suspensions). */
+  invertTrend = false,
+  showSpark = true,
+  compareLabel = 'vs last 30 days',
+}: {
+  label: string;
+  value: string;
+  metric?: MetricDelta;
+  icon: LucideIcon;
+  tint?: 'primary' | 'success' | 'warning' | 'info' | 'danger';
+  invertTrend?: boolean;
+  showSpark?: boolean;
+  compareLabel?: string;
+}) {
+  const change = metric?.changePct ?? null;
+  const rising = (change ?? 0) >= 0;
+  const good = invertTrend ? !rising : rising;
+
+  const tints = {
+    primary: { badge: 'bg-primary-soft text-accent-foreground', line: 'var(--chart-1)' },
+    success: { badge: 'bg-success-soft text-success', line: 'var(--chart-3)' },
+    warning: { badge: 'bg-warning-soft text-warning', line: 'var(--chart-4)' },
+    info: { badge: 'bg-info-soft text-info', line: 'var(--chart-2)' },
+    danger: { badge: 'bg-destructive-soft text-destructive', line: 'var(--chart-5)' },
+  } as const;
+
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="space-y-3 p-5">
+        <div className="flex items-center gap-3">
+          <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg', tints[tint].badge)}>
+            <Icon className="size-4.5" aria-hidden />
+          </span>
+          <p className="text-sm text-muted-foreground">{label}</p>
+        </div>
+
+        <p className="text-2xl font-bold tracking-tight tabular-nums">{value}</p>
+
+        {change === null ? (
+          <p className="text-xs text-muted-foreground">No comparison data</p>
+        ) : (
+          <p className={cn('flex items-center gap-1 text-xs font-medium', good ? 'text-success' : 'text-destructive')}>
+            {rising ? <ArrowUp className="size-3" aria-hidden /> : <ArrowDown className="size-3" aria-hidden />}
+            {Math.abs(change).toFixed(1)}%
+            <span className="font-normal text-muted-foreground">{compareLabel}</span>
+          </p>
+        )}
+
+        {showSpark && metric?.spark?.length ? (
+          <Sparkline data={metric.spark} color={tints[tint].line} className="-mx-1 w-[calc(100%+0.5rem)]" />
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}

@@ -1,0 +1,348 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   Design tokens — light is the default, dark is opt-in via the `.dark` class
+   set by next-themes on <html>. Every colour used by the app is declared in
+   BOTH palettes, so nothing borrows a colour from the host page.
+--------------------------------------------------------------------------- */
+:root {
+  --background: #ffffff;
+  --foreground: #0b1220;
+
+  --surface: #f8fafc;
+  --surface-strong: #f1f4f9;
+
+  --card: #ffffff;
+  --card-foreground: #0b1220;
+
+  --popover: #ffffff;
+  --popover-foreground: #0b1220;
+
+  --primary: #6d4aff;
+  --primary-hover: #5c3af0;
+  --primary-foreground: #ffffff;
+  --primary-soft: #f0ecff;
+
+  --secondary: #f1f3f9;
+  --secondary-foreground: #1e293b;
+
+  --muted: #f5f7fb;
+  --muted-foreground: #64748b;
+
+  --accent: #f2eeff;
+  --accent-foreground: #4c2fd7;
+
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
+  --destructive-soft: #fdecec;
+
+  --success: #16a34a;
+  --success-foreground: #ffffff;
+  --success-soft: #e8f7ee;
+
+  --warning: #d97706;
+  --warning-foreground: #ffffff;
+  --warning-soft: #fdf3e3;
+
+  --info: #2563eb;
+  --info-foreground: #ffffff;
+  --info-soft: #e8f0fe;
+
+  --border: #e6e9f0;
+  --border-strong: #d5dae5;
+  --input: #e6e9f0;
+  --ring: #7c5cfc;
+
+  --chart-1: #7c5cfc;
+  --chart-2: #3b82f6;
+  --chart-3: #22c55e;
+  --chart-4: #f59e0b;
+  --chart-5: #ef4444;
+  --chart-6: #06b6d4;
+
+  --radius: 0.75rem;
+
+  --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -12px rgb(15 23 42 / 0.12);
+  --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.06), 0 20px 40px -24px rgb(15 23 42 / 0.24);
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+
+  --surface: #0c0c0f;
+  --surface-strong: #131316;
+
+  --card: #101013;
+  --card-foreground: #fafafa;
+
+  --popover: #131316;
+  --popover-foreground: #fafafa;
+
+  --primary: #7c5cfc;
+  --primary-hover: #8f74ff;
+  --primary-foreground: #ffffff;
+  --primary-soft: #1c1630;
+
+  --secondary: #1a1a1e;
+  --secondary-foreground: #d4d4d8;
+
+  --muted: #161619;
+  --muted-foreground: #a1a1aa;
+
+  --accent: #1d1b25;
+  --accent-foreground: #c4b5fd;
+
+  --destructive: #f0616d;
+  --destructive-foreground: #170507;
+  --destructive-soft: #2a1216;
+
+  --success: #34d399;
+  --success-foreground: #04150e;
+  --success-soft: #10231a;
+
+  --warning: #fbbf24;
+  --warning-foreground: #1a1204;
+  --warning-soft: #251c0c;
+
+  --info: #60a5fa;
+  --info-foreground: #050f1f;
+  --info-soft: #121c2e;
+
+  --border: #232327;
+  --border-strong: #34343a;
+  --input: #232327;
+  --ring: #8b5cf6;
+
+  --chart-1: #8b5cf6;
+  --chart-2: #3b82f6;
+  --chart-3: #22c55e;
+  --chart-4: #f59e0b;
+  --chart-5: #ef4444;
+  --chart-6: #22d3ee;
+
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.5), 0 24px 48px -24px rgb(0 0 0 / 0.8);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-soft: var(--destructive-soft);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-soft: var(--info-soft);
+
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --shadow-soft: var(--shadow-soft);
+  --shadow-raised: var(--shadow-raised);
+
+  --animate-accordion-down: accordion-down 200ms ease-out;
+  --animate-accordion-up: accordion-up 200ms ease-out;
+  --animate-fade-up: fade-up 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-marquee: marquee 32s linear infinite;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--primary) 28%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Wide content scrolls inside its own container, never the page body. */
+  .scroll-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--muted-foreground) 32%, transparent);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* Section shell used across the marketing pages. */
+  .container-page {
+    width: 100%;
+    max-width: 80rem;
+    margin-inline: auto;
+    padding-inline: 1.25rem;
+  }
+
+  @media (min-width: 1024px) {
+    .container-page {
+      padding-inline: 2rem;
+    }
+  }
+
+  .text-gradient {
+    background-image: linear-gradient(
+      92deg,
+      var(--primary) 0%,
+      color-mix(in oklab, var(--primary) 55%, #22d3ee) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Ambient glow behind the hero — purely decorative. */
+  .glow-primary {
+    background: radial-gradient(
+      42rem 24rem at 50% 0%,
+      color-mix(in oklab, var(--primary) 22%, transparent) 0%,
+      transparent 70%
+    );
+  }
+
+  .card-hover {
+    transition:
+      transform 180ms ease,
+      box-shadow 180ms ease,
+      border-color 180ms ease;
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-raised);
+    border-color: color-mix(in oklab, var(--primary) 35%, var(--border));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

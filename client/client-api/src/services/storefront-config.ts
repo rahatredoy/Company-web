@@ -1,0 +1,248 @@
+import { and, asc, eq, isNotNull, or } from 'drizzle-orm';
+import type { StoreContext } from '../plugins/tenant';
+import {
+  categories,
+  navigationItems,
+  navigationMenus,
+  pages,
+  paymentMethods,
+  storeSettings,
+  storefrontSettings,
+} from '../db/schema/index';
+import {
+  DEFAULT_TEMPLATE,
+  DEFAULT_THEME,
+  normaliseTemplateKey,
+  normaliseThemeKey,
+  type ColorTheme,
+  type StorefrontTemplate,
+} from '../lib/constants';
+import { CACHE_TTL, cached, invalidateTenantCache, tenantKey } from '../lib/cache';
+import { storeBaseUrl } from '../lib/urls';
+
+export interface AnnouncementConfig {
+  enabled: boolean;
+  text: string | null;
+  linkUrl: string | null;
+  linkLabel: string | null;
+}
+
+export interface ContactConfig {
+  businessName: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  whatsappNumber: string | null;
+  whatsappEnabled: boolean;
+}
+
+export interface NavigationNode {
+  id: string;
+  label: string;
+  targetType: 'page' | 'category' | 'url';
+  href: string;
+  opensInNewTab: boolean;
+  children: NavigationNode[];
+}
+
+export interface StorefrontConfig {
+  store: {
+    slug: string;
+    name: string;
+    tagline: string | null;
+    currency: string;
+    language: string;
+    timezone: string;
+    logoUrl: string | null;
+    faviconUrl: string | null;
+    /** Absolute origin canonical URLs and the sitemap must use. */
+    canonicalOrigin: string;
+  };
+  design: {
+    templateKey: StorefrontTemplate;
+    colorThemeKey: ColorTheme;
+  };
+  announcement: AnnouncementConfig;
+  contact: ContactConfig;
+  navigation: {
+    header: NavigationNode[];
+    footer: NavigationNode[];
+  };
+  /** Top-level categories for the mega-menu and mobile drawer. */
+  categoryMenu: { id: string; name: string; slug: string; iconUrl: string | null; children: { id: string; name: string; slug: string }[] }[];
+  policyPages: { slug: string; title: string; systemKey: string | null }[];
+  payment: { providers: { provider: string; label: string; description: string | null }[] };
+  seo: { title: string | null; description: string | null; socialImageUrl: string | null };
+  /** Surfaced so the storefront can render its own "temporarily unavailable" state. */
+  status: StoreContext['status'];
+}
+
+/** Header/footer JSON is free-form in the database; read it defensively. */
+function readAnnouncement(raw: unknown): AnnouncementConfig {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const bar = (value.announcement ?? {}) as Record<string, unknown>;
+  const text = typeof bar.text === 'string' && bar.text.trim() ? bar.text.trim() : null;
+
+  return {
+    enabled: bar.enabled === true && text !== null,
+    text,
+    linkUrl: typeof bar.linkUrl === 'string' && bar.linkUrl.trim() ? bar.linkUrl.trim() : null,
+    linkLabel: typeof bar.linkLabel === 'string' && bar.linkLabel.trim() ? bar.linkLabel.trim() : null,
+  };
+}
+
+function readTagline(raw: unknown): string | null {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  return typeof value.tagline === 'string' && value.tagline.trim() ? value.tagline.trim() : null;
+}
+
+/** Turns a stored nav target into a path the storefront can link to directly. */
+function hrefFor(item: { targetType: string; targetValue: string }, pageSlugs: Map<string, string>, categorySlugs: Map<string, string>): string {
+  if (item.targetType === 'page') return `/page/${pageSlugs.get(item.targetValue) ?? item.targetValue}`;
+  if (item.targetType === 'category') return `/category/${categorySlugs.get(item.targetValue) ?? item.targetValue}`;
+
+  // A stored URL is only ever used as a link target; anything that is not a
+  // path or an http(s) URL is dropped rather than rendered, so a `javascript:`
+  // value saved by a compromised admin cannot become an href.
+  const value = item.targetValue.trim();
+  if (value.startsWith('/')) return value;
+  return /^https?:\/\//i.test(value) ? value : '/';
+}
+
+export function storefrontConfigKey(tenantRef: string): string {
+  return tenantKey(tenantRef, 'storefront', 'config');
+}
+
+export async function invalidateStorefrontConfig(tenantRef: string): Promise<void> {
+  await invalidateTenantCache(tenantRef, 'storefront');
+}
+
+/**
+ * Everything the storefront shell needs, in one cached read.
+ *
+ * The storefront calls this on every page render, so it must be one round trip
+ * and it must be cacheable — hence no per-visitor data of any kind in here.
+ */
+export async function loadStorefrontConfig(store: StoreContext): Promise<StorefrontConfig> {
+  return cached(storefrontConfigKey(store.tenantRef), CACHE_TTL.storefrontConfig, async () => {
+    const db = store.db;
+
+    const [settingsRow] = await db.select().from(storeSettings).limit(1);
+    const [designRow] = await db.select().from(storefrontSettings).limit(1);
+
+    const menus = await db
+      .select({ id: navigationMenus.id, location: navigationMenus.location })
+      .from(navigationMenus)
+      .where(eq(navigationMenus.isActive, true));
+
+    const items = await db
+      .select()
+      .from(navigationItems)
+      .where(eq(navigationItems.isActive, true))
+      .orderBy(asc(navigationItems.sortOrder));
+
+    const categoryRows = await db
+      .select({
+        id: categories.id,
+        name: categories.name,
+        slug: categories.slug,
+        parentId: categories.parentId,
+        iconUrl: categories.iconUrl,
+        sortOrder: categories.sortOrder,
+      })
+      .from(categories)
+      .where(and(eq(categories.isActive, true), eq(categories.showInMenu, true)))
+      .orderBy(asc(categories.sortOrder), asc(categories.name));
+
+    const pageRows = await db
+      .select({ slug: pages.slug, title: pages.title, systemKey: pages.systemKey, id: pages.id, showInFooter: pages.showInFooter })
+      .from(pages)
+      .where(eq(pages.status, 'published'))
+      .orderBy(asc(pages.sortOrder), asc(pages.title));
+
+    const methodRows = await db
+      .select({
+        provider: paymentMethods.provider,
+        label: paymentMethods.label,
+        description: paymentMethods.description,
+      })
+      .from(paymentMethods)
+      .where(eq(paymentMethods.isEnabled, true))
+      .orderBy(asc(paymentMethods.sortOrder));
+
+    const pageSlugs = new Map(pageRows.map((p) => [p.id, p.slug]));
+    const categorySlugs = new Map(categoryRows.map((c) => [c.id, c.slug]));
+
+    const buildTree = (location: 'header' | 'footer'): NavigationNode[] => {
+      const menuIds = new Set(menus.filter((m) => m.location === location).map((m) => m.id));
+      const scoped = items.filter((item) => menuIds.has(item.menuId));
+
+      const toNode = (item: (typeof scoped)[number]): NavigationNode => ({
+        id: item.id,
+        label: item.label,
+        targetType: item.targetType,
+        href: hrefFor(item, pageSlugs, categorySlugs),
+        opensInNewTab: item.opensInNewTab,
+        children: scoped.filter((child) => child.parentId === item.id).map(toNode),
+      });
+
+      return scoped.filter((item) => !item.parentId).map(toNode);
+    };
+
+    const preferences = (settingsRow?.preferences ?? {}) as Record<string, unknown>;
+
+    return {
+      store: {
+        slug: store.slug,
+        name: settingsRow?.storeName ?? store.storeName,
+        tagline: readTagline(designRow?.footerConfiguration),
+        currency: settingsRow?.currency ?? store.currency,
+        language: settingsRow?.language ?? store.language,
+        timezone: settingsRow?.timezone ?? store.timezone,
+        logoUrl: designRow?.logoUrl ?? settingsRow?.logoUrl ?? null,
+        faviconUrl: designRow?.faviconUrl ?? settingsRow?.faviconUrl ?? null,
+        // A connected primary domain wins, so the same page is never indexed
+        // under both the custom domain and the platform subdomain.
+        canonicalOrigin: store.primaryDomain ? `https://${store.primaryDomain}` : storeBaseUrl(store.slug),
+      },
+      design: {
+        templateKey: designRow ? normaliseTemplateKey(designRow.templateKey) : DEFAULT_TEMPLATE,
+        colorThemeKey: designRow ? normaliseThemeKey(designRow.colorThemeKey) : DEFAULT_THEME,
+      },
+      announcement: readAnnouncement(designRow?.headerConfiguration),
+      contact: {
+        businessName: settingsRow?.businessName ?? null,
+        email: settingsRow?.businessEmail ?? null,
+        phone: settingsRow?.businessPhone ?? null,
+        address: settingsRow?.businessAddress ?? null,
+        whatsappNumber:
+          typeof preferences.whatsappNumber === 'string' ? preferences.whatsappNumber : null,
+        whatsappEnabled: preferences.whatsappEnabled === true,
+      },
+      navigation: { header: buildTree('header'), footer: buildTree('footer') },
+      categoryMenu: categoryRows
+        .filter((c) => !c.parentId)
+        .map((parent) => ({
+          id: parent.id,
+          name: parent.name,
+          slug: parent.slug,
+          iconUrl: parent.iconUrl,
+          children: categoryRows
+            .filter((child) => child.parentId === parent.id)
+            .map((child) => ({ id: child.id, name: child.name, slug: child.slug })),
+        })),
+      policyPages: pageRows
+        .filter((p) => p.showInFooter || p.systemKey)
+        .map((p) => ({ slug: p.slug, title: p.title, systemKey: p.systemKey })),
+      payment: { providers: methodRows },
+      seo: {
+        title: settingsRow?.seoTitle ?? null,
+        description: settingsRow?.seoDescription ?? null,
+        socialImageUrl: settingsRow?.socialImageUrl ?? null,
+      },
+      status: store.status,
+    } satisfies StorefrontConfig;
+  });
+}
+
+export { isNotNull, or };

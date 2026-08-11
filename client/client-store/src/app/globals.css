@@ -1,0 +1,392 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* ---------------------------------------------------------------------------
+   Storefront design tokens.
+
+   Colour values are NOT declared here. They arrive per request from the store's
+   chosen theme, injected as a `:root` block by `ThemeStyle` before first paint —
+   which is what lets one deployment serve eight different brands without a
+   flash of the wrong colour and without any client-side theming JavaScript.
+
+   What lives here is everything a theme must NOT be able to change: spacing,
+   radius, type scale, shadows, motion. That separation is the whole reason
+   "changing the colour cannot change the layout" holds.
+
+   The fallbacks below are the Royal Blue palette, used only if a page somehow
+   renders before the theme block — a blank unstyled page would be worse.
+--------------------------------------------------------------------------- */
+
+:root {
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-foreground: #ffffff;
+  --primary-soft: #eff6ff;
+  --secondary: #1e40af;
+  --secondary-foreground: #ffffff;
+  --accent: #60a5fa;
+  --accent-soft: #dbeafe;
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --surface-alt: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --ring: #2563eb;
+  --success: #16a34a;
+  --warning: #f59e0b;
+  --error: #dc2626;
+  --sale: #dc2626;
+  --star: #f59e0b;
+
+  /* --- structure: never theme-controlled ---------------------------------- */
+  --radius-card: 0.75rem;
+  --radius-button: 0.5rem;
+  --radius-input: 0.5rem;
+  --radius-pill: 9999px;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -16px rgb(15 23 42 / 0.16);
+  --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.06), 0 20px 40px -24px rgb(15 23 42 / 0.22);
+  --shadow-header: 0 1px 0 0 var(--border);
+
+  --header-height: 4rem;
+  --container-max: 80rem;
+}
+
+/* Templates opt into their own rhythm by setting these on <body>. */
+.template-dense {
+  --radius-card: 0.5rem;
+  --radius-button: 0.375rem;
+  --heading-tracking: -0.011em;
+}
+
+.template-editorial {
+  --radius-card: 0;
+  --radius-button: 0;
+  /* Editorial designs are the reason the display face is loaded at all. */
+  --font-heading: var(--font-display-family);
+  --heading-tracking: -0.006em;
+}
+
+.template-soft {
+  --radius-card: 1rem;
+  --radius-button: 0.75rem;
+  --heading-tracking: -0.014em;
+}
+
+/* Composed with a radius class, e.g. `template-dense template-technical`. */
+.template-technical {
+  --font-heading: var(--font-technical-family);
+  --heading-tracking: -0.02em;
+}
+
+@theme inline {
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-alt: var(--surface-alt);
+
+  --color-foreground: var(--text-primary);
+  --color-muted: var(--text-secondary);
+  --color-subtle: var(--text-muted);
+
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ring: var(--ring);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-sale: var(--sale);
+  --color-star: var(--star);
+
+  --radius-card: var(--radius-card);
+  --radius-button: var(--radius-button);
+  --radius-pill: var(--radius-pill);
+
+  /*
+    The utility name and the source variable must differ. `--font-sans:
+    var(--font-sans)` resolves to nothing, which is how this file spent its
+    first life silently rendering every serif masthead in the body sans.
+    `next/font` writes the `*-family` variables; Tailwind reads them here.
+  */
+  --font-sans: var(--font-sans-family);
+  --font-display: var(--font-display-family);
+  --font-technical: var(--font-technical-family);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    /* Stops the page shifting sideways when a dialog locks scrolling. */
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--text-primary);
+    font-family: var(--font-sans), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Focus must be visible on every theme, including the two dark-primary ones. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /*
+    Headings follow the template, not the theme — an editorial store gets a
+    serif and a tech store a technical sans, on all eight palettes. Templates
+    set `--font-heading` via their body class; the fallback keeps a template
+    that sets nothing on the body face.
+
+    Colour is deliberately NOT set here. `body` already carries the text colour
+    and headings inherit it, so the common case is unchanged — but a heading
+    inside a coloured band (the newsletter block, a flash-sale bar, a dark
+    footer) then inherits that band's foreground instead of being forced back to
+    the page's near-black. Setting it here made every such heading invisible,
+    while the paragraph beside it was correct.
+  */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-heading, var(--font-sans-family)), system-ui, sans-serif;
+    letter-spacing: var(--heading-tracking, -0.01em);
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Product imagery must never cause layout shift. */
+  img,
+  video {
+    max-width: 100%;
+    height: auto;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .container-store {
+    width: 100%;
+    max-width: var(--container-max);
+    margin-inline: auto;
+    padding-inline: 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .container-store {
+      padding-inline: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container-store {
+      padding-inline: 2rem;
+    }
+  }
+
+  /* Consistent aspect for every product image, so grids never jump. */
+  .product-media {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--surface-alt);
+    border-radius: var(--radius-card);
+    aspect-ratio: 1 / 1;
+  }
+
+  .product-media-portrait {
+    aspect-ratio: 3 / 4;
+  }
+
+  .product-media-landscape {
+    aspect-ratio: 4 / 3;
+  }
+
+  /* Screen-reader-only text, for icon buttons and skip links. */
+  .sr-only-focusable:not(:focus):not(:focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .skeleton {
+    background-color: var(--surface-alt);
+    border-radius: var(--radius-button);
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
+  }
+
+  /*
+     Typography for store-authored HTML.
+
+     Scoped to `.cms-content` rather than applied globally, because the elements
+     it styles — `p`, `ul`, `h2` — appear all over the app with their own
+     layout. This is the only place markup arrives as a blob and has to look
+     right without a component around each tag.
+  */
+  .cms-content {
+    color: var(--text-secondary);
+    line-height: 1.7;
+  }
+
+  .cms-content > * + * {
+    margin-top: 1rem;
+  }
+
+  .cms-content h2 {
+    margin-top: 2.5rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+
+  .cms-content h3 {
+    margin-top: 2rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
+
+  .cms-content ul,
+  .cms-content ol {
+    padding-left: 1.25rem;
+  }
+
+  .cms-content ul {
+    list-style: disc;
+  }
+
+  .cms-content ol {
+    list-style: decimal;
+  }
+
+  .cms-content li + li {
+    margin-top: 0.4rem;
+  }
+
+  .cms-content a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .cms-content strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .cms-content blockquote {
+    border-left: 2px solid var(--primary);
+    padding-left: 1rem;
+    font-style: italic;
+  }
+
+  .cms-content table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  .cms-content th,
+  .cms-content td {
+    border: 1px solid var(--border);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+  }
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/*
+   Radix measures the panel and publishes its height as a custom property, so
+   the accordion can animate to `auto` — which CSS otherwise cannot do.
+*/
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
+.animate-accordion-down {
+  animation: accordion-down 0.2s ease-out;
+}
+
+.animate-accordion-up {
+  animation: accordion-up 0.2s ease-out;
+}
+
+/*
+   WebKit draws its own clear button inside `<input type="search">`, which sits
+   beside ours and gives the search box two X icons that do different things.
+   Ours stays: it also closes the suggestion list.
+*/
+input[type='search']::-webkit-search-decoration,
+input[type='search']::-webkit-search-cancel-button,
+input[type='search']::-webkit-search-results-button,
+input[type='search']::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Horizontal scrollers (brand strips, product rails) hide their scrollbar. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

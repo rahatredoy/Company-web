@@ -1,0 +1,43 @@
+import Link from 'next/link';
+import type { Metadata } from 'next';
+import { PackageSearch } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+
+export const metadata: Metadata = {
+  title: 'Page not found',
+  robots: { index: false, follow: true },
+};
+
+/**
+ * The 404.
+ *
+ * Renders inside the store's own header and footer, so a mistyped URL still
+ * lands the visitor somewhere they can shop from rather than on a bare page
+ * that looks like the site is broken.
+ */
+export default function NotFound() {
+  return (
+    <div className="container-store grid min-h-[55vh] place-items-center py-16">
+      <div className="max-w-md text-center">
+        <span className="mx-auto mb-6 grid size-14 place-items-center rounded-full bg-primary-soft text-primary">
+          <PackageSearch className="size-6" aria-hidden />
+        </span>
+
+        <p className="text-sm font-semibold uppercase tracking-wide text-subtle">Error 404</p>
+        <h1 className="mt-2 text-3xl font-semibold">Page not found</h1>
+        <p className="mt-3 text-muted">
+          The page you are looking for does not exist, or it may have moved.
+        </p>
+
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <Button asChild size="lg">
+            <Link href="/">Go home</Link>
+          </Button>
+          <Button asChild size="lg" variant="outline">
+            <Link href="/shop">Shop products</Link>
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
