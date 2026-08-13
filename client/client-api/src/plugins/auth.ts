@@ -2,9 +2,15 @@ import fp from 'fastify-plugin';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index';
-import { storeAdmins } from '../db/schema/index';
+import { customers, storeAdmins } from '../db/schema/index';
 import { AppError, ERROR_CODES, forbidden, unauthorized } from '../lib/errors';
-import { findAdminSession, readSessionToken, touchAdminSession } from '../lib/session';
+import {
+  findAdminSession,
+  findCustomerSession,
+  readSessionToken,
+  touchAdminSession,
+  touchCustomerSession,
+} from '../lib/session';
 import { addMinutes } from '../lib/utils';
 import type { Permission, StoreRole } from '../lib/constants';
 import { STORE_ROLES } from '../lib/constants';
@@ -56,6 +62,7 @@ async function loadAdmin(request: FastifyRequest, adminId: string): Promise<Admi
 export default fp(async function authPlugin(app: FastifyInstance) {
   app.decorateRequest('storeAdmin', undefined);
   app.decorateRequest('storeAdminPartial', undefined);
+  app.decorateRequest('customer', undefined);
 
   /**
    * The gate every authenticated route passes through.
@@ -169,5 +176,66 @@ export default fp(async function authPlugin(app: FastifyInstance) {
       if (!admin) throw unauthorized('Sign in to continue.');
       assertPermission(admin.permissions, key);
     };
+  });
+
+  /**
+   * Resolves a shopper's session if one is present, and says nothing when it is
+   * not.
+   *
+   * Checkout uses this: an order placed by a signed-in customer should be
+   * attached to them, but requiring a sign-in to buy something is how a shop
+   * loses the sale. Everything it populates is optional by construction.
+   */
+  app.decorate('optionalCustomer', async function optionalCustomer(request: FastifyRequest) {
+    const store = storeOf(request);
+    const token = readSessionToken(request, 'customer');
+    if (!token) return;
+
+    const session = await findCustomerSession(store.db, token);
+    if (!session) return;
+
+    // A token minted for another store is simply absent from this store's table,
+    // so reaching here with a mismatch means something is badly wrong.
+    if (session.tenantRef !== store.tenantRef) {
+      request.log.error(
+        { sessionTenant: session.tenantRef, storeTenant: store.tenantRef },
+        'customer session tenant mismatch',
+      );
+      return;
+    }
+
+    const rows = await store.db
+      .select({
+        id: customers.id,
+        email: customers.email,
+        fullName: customers.fullName,
+        status: customers.status,
+      })
+      .from(customers)
+      .where(eq(customers.id, session.customerId))
+      .limit(1);
+
+    const customer = rows[0];
+    if (!customer || customer.status === 'blocked') return;
+
+    request.customer = {
+      customerId: customer.id,
+      email: customer.email,
+      fullName: customer.fullName,
+      sessionId: session.id,
+      tenantRef: session.tenantRef,
+    };
+
+    await touchCustomerSession(store.db, session.id);
+  });
+
+  /**
+   * The account area. Refuses with 401 — the storefront's own `/account` layout
+   * redirects to the sign-in page on a null customer, so the one endpoint that
+   * must **not** use this guard is `GET /account/me`, which answers 404 instead.
+   */
+  app.decorate('requireCustomer', async function requireCustomer(request: FastifyRequest, reply: FastifyReply) {
+    await app.optionalCustomer(request, reply);
+    if (!request.customer) throw unauthorized('Sign in to continue.');
   });
 });

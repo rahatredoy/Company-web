@@ -10,7 +10,8 @@ import {
   trials,
   subscriptions,
 } from '../db/schema/index';
-import { config } from '../config/index';
+import { config, type TenantShard } from '../config/index';
+import { locateShard, pickShardForNewTenant, resolveShard } from './tenant-shards';
 import { logger } from '../lib/logger';
 import { AppError, ERROR_CODES } from '../lib/errors';
 import { PROVISIONING_STEPS, type ProvisioningStepName } from '../lib/constants';
@@ -46,24 +47,24 @@ async function markStep(jobId: string, step: ProvisioningStepName, completed: st
   return next;
 }
 
-async function createTenantDatabase(databaseName: string): Promise<void> {
-  const client = tenantAdminConnection();
+async function createTenantDatabase(shard: TenantShard, databaseName: string): Promise<void> {
+  const client = tenantAdminConnection(shard);
   await client.connect();
   try {
     const existing = await client.query('select 1 from pg_database where datname = $1', [databaseName]);
     if ((existing.rowCount ?? 0) === 0) {
       await client.query(`create database ${quoteIdentifier(databaseName)}`);
-      logger.info({ databaseName }, 'tenant database created');
+      logger.info({ databaseName, shard: shard.id }, 'tenant database created');
     } else {
-      logger.warn({ databaseName }, 'tenant database already existed, reusing');
+      logger.warn({ databaseName, shard: shard.id }, 'tenant database already existed, reusing');
     }
   } finally {
     await client.end().catch(() => undefined);
   }
 }
 
-async function runTenantSchema(databaseName: string): Promise<void> {
-  const client = tenantAdminConnection(databaseName);
+async function runTenantSchema(shard: TenantShard, databaseName: string): Promise<void> {
+  const client = tenantAdminConnection(shard, databaseName);
   await client.connect();
   try {
     await client.query(TENANT_BOOTSTRAP_SQL);
@@ -88,8 +89,12 @@ interface StoreSeed {
   ownerPasswordHash: string;
 }
 
-async function seedStoreConfiguration(databaseName: string, seed: StoreSeed): Promise<void> {
-  const client = tenantAdminConnection(databaseName);
+async function seedStoreConfiguration(
+  shard: TenantShard,
+  databaseName: string,
+  seed: StoreSeed,
+): Promise<void> {
+  const client = tenantAdminConnection(shard, databaseName);
   await client.connect();
   try {
     await client.query(
@@ -153,8 +158,8 @@ async function seedStoreConfiguration(databaseName: string, seed: StoreSeed): Pr
  * that back. The address does move, because the address is what setup proved and
  * the company side is its only authority.
  */
-async function seedStoreAdmin(databaseName: string, seed: StoreSeed): Promise<void> {
-  const client = tenantAdminConnection(databaseName);
+async function seedStoreAdmin(shard: TenantShard, databaseName: string, seed: StoreSeed): Promise<void> {
+  const client = tenantAdminConnection(shard, databaseName);
   await client.connect();
   try {
     // Scoped to one row by id rather than left unqualified: the singleton index
@@ -253,6 +258,20 @@ export async function runProvisioning(tenantId: string): Promise<ProvisionResult
     }
 
     const databaseName = tenant.databaseName ?? tenantDatabaseName(tenant.slug, config.tenantDb.namePrefix);
+
+    // Which server this store's database lives on. An existing database always
+    // wins: picking again would create a second, empty one on another shard and
+    // repoint the tenant at it.
+    //
+    // `tenant.databaseName` is not the test for that — it is written when the
+    // store is *named*, several steps before anything is created — so a store
+    // that has never been built is asked for by name and the cluster is searched
+    // for it. Only when no server has it is a shard chosen.
+    const existingShard = tenant.databaseShard
+      ? resolveShard(tenant.databaseShard)
+      : await locateShard(databaseName);
+    const shard: TenantShard = existingShard ?? (await pickShardForNewTenant());
+
     const subdomain = platformSubdomain(tenant.slug, config.urls.platformRootDomain);
     const storefrontUrl = buildStorefrontUrl(tenant.slug, config.urls.platformRootDomain);
     const adminUrl = buildClientAdminUrl(tenant.slug, config.urls.clientAdminPattern);
@@ -262,14 +281,17 @@ export async function runProvisioning(tenantId: string): Promise<ProvisionResult
 
     // 2. Dedicated database
     if (!completed.includes('tenant_database')) {
-      await createTenantDatabase(databaseName);
-      await db.update(tenants).set({ databaseName, updatedAt: new Date() }).where(eq(tenants.id, tenantId));
+      await createTenantDatabase(shard, databaseName);
+      await db
+        .update(tenants)
+        .set({ databaseName, databaseShard: shard.id, updatedAt: new Date() })
+        .where(eq(tenants.id, tenantId));
       completed = await markStep(job.id, 'tenant_database', completed);
     }
 
     // 3. Schema
     if (!completed.includes('tenant_schema')) {
-      await runTenantSchema(databaseName);
+      await runTenantSchema(shard, databaseName);
       completed = await markStep(job.id, 'tenant_schema', completed);
     }
 
@@ -302,7 +324,7 @@ export async function runProvisioning(tenantId: string): Promise<ProvisionResult
 
     // 4. Store configuration
     if (!completed.includes('store_configuration')) {
-      await seedStoreConfiguration(databaseName, seed);
+      await seedStoreConfiguration(shard, databaseName, seed);
       completed = await markStep(job.id, 'store_configuration', completed);
     }
 
@@ -310,7 +332,7 @@ export async function runProvisioning(tenantId: string): Promise<ProvisionResult
     // the staging copy here is redundant, so it is dropped — the live password
     // hash then exists in exactly one place.
     if (!completed.includes('store_admin')) {
-      await seedStoreAdmin(databaseName, seed);
+      await seedStoreAdmin(shard, databaseName, seed);
       completed = await markStep(job.id, 'store_admin', completed);
       if (tenant.storeAdminPasswordHash) {
         await db

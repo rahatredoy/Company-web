@@ -117,7 +117,7 @@ function Footer({ config, locale }: TemplateChromeProps) {
   return <SiteFooter config={config} locale={locale} tone="dark" serif />;
 }
 
-function Homepage({ config, sections, locale }: TemplateHomepageProps) {
+function Homepage({ config, sections }: TemplateHomepageProps) {
   const context = { config, cardVariant: 'editorial' as const, gridClassName: GRID, preset };
 
   /*

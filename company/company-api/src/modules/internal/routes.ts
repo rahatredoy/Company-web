@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { db } from '../../db/client';
 import { domains, plans, subscriptions, tenants, trials } from '../../db/schema/index';
 import { notFound } from '../../lib/errors';
@@ -54,6 +54,15 @@ async function tenantPayload(row: TenantJoin) {
     timezone: row.tenant.timezone,
     /** Initial value only — the tenant's own storefront_settings is authoritative. */
     storefrontTemplate: row.tenant.storefrontTemplate,
+    /**
+     * Which shard of the tenant cluster holds this store's database.
+     *
+     * The id and nothing else: the host and credentials behind it are each
+     * platform's own configuration, so this cannot redirect a store's traffic to
+     * a server the commerce API was not already set up for. `null` is a store
+     * provisioned before the cluster was sharded — the `legacy` shard.
+     */
+    databaseShard: row.tenant.databaseShard,
     /** Every hostname this store may legitimately be reached on. */
     domains: domainRows.map((d) => ({
       domain: d.domain,
@@ -103,6 +112,36 @@ function tenantQuery() {
 }
 
 export default async function internalRoutes(app: FastifyInstance) {
+  /**
+   * Every provisioned store, for the operations that have to visit all of them
+   * rather than one — `client-api`'s `db:migrate:tenants` after a deploy, above
+   * all. Without this there was no way to enumerate tenants from the commerce
+   * side, so "migrate every tenant" fell back to the single dev store and a
+   * deploy left older stores on an older schema until a shopper happened to
+   * trigger the in-band migration.
+   *
+   * Deliberately thinner than the by-ref payload: a slug, a ref and the shard is
+   * all a sweep needs, and entitlements for hundreds of stores would be a large
+   * response nobody reads. Drafts are excluded — `database_name` is null until
+   * provisioning has actually made something.
+   */
+  app.get('/tenants', { preHandler: app.requireInternalKey }, async (request, reply) => {
+    const rows = await db
+      .select({
+        tenantRef: tenants.tenantRef,
+        slug: tenants.slug,
+        storeName: tenants.storeName,
+        status: tenants.status,
+        storeStatus: tenants.storeStatus,
+        databaseShard: tenants.databaseShard,
+      })
+      .from(tenants)
+      .where(isNotNull(tenants.databaseName))
+      .orderBy(tenants.createdAt);
+
+    return ok(reply, rows);
+  });
+
   app.get('/tenants/:tenantRef', { preHandler: app.requireInternalKey }, async (request, reply) => {
     const { tenantRef } = parseParams(
       z.object({ tenantRef: z.string().trim().min(4).max(24) }),

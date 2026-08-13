@@ -76,7 +76,7 @@ function Footer({ config, locale }: TemplateChromeProps) {
   return <SiteFooter config={config} locale={locale} tone="surface" className="mt-24" />;
 }
 
-function Homepage({ config, sections, locale }: TemplateHomepageProps) {
+function Homepage({ config, sections }: TemplateHomepageProps) {
   /*
    * Minimal means fewer sections, not smaller ones. The trust strip, the brand
    * rail and the promo trio are dropped: they are merchandising furniture, and

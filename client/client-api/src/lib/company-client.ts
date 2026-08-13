@@ -32,6 +32,13 @@ export interface TenantRecord {
   language: string;
   timezone: string;
   storefrontTemplate: string;
+  /**
+   * Which shard of the tenant cluster holds this store's database. An id only —
+   * the connection details for it are this API's own configuration, so a
+   * compromised control plane cannot redirect a store onto a server of its
+   * choosing. `null` means a store provisioned before the cluster was sharded.
+   */
+  databaseShard: string | null;
   /** Every hostname this store may legitimately be reached on. */
   domains: TenantDomain[];
   /** The hostname canonical URLs must use, when a custom one is connected. */
@@ -41,7 +48,25 @@ export interface TenantRecord {
   trial: { status: string; endsAt: string | null; daysRemaining: number } | null;
 }
 
-const CACHE_PREFIX = 'tenant:v1:';
+/**
+ * Bumped to `v2` when `databaseShard` was added. A cached `v1` record has no
+ * shard, which now reads as "the pre-sharding server" — so a store that had just
+ * been moved would be served from the copy left behind. A new prefix retires
+ * every old entry at once instead of waiting out the TTL.
+ *
+ * `company-api/src/lib/tenant-cache.ts` deletes by this same prefix; the two
+ * must be changed together.
+ */
+const CACHE_PREFIX = 'tenant:v2:';
+
+/**
+ * Exported so the verification scripts, which poison this cache to exercise the
+ * blocked-store paths, cannot drift onto a stale prefix when it is bumped —
+ * which is exactly what happened when it went from `v1` to `v2`.
+ */
+export function tenantCacheKey(slug: string): string {
+  return `${CACHE_PREFIX}${slug}`;
+}
 const NEGATIVE_TTL_SECONDS = 15;
 
 async function callCompany<T>(path: string, init?: RequestInit): Promise<T | null> {
@@ -115,6 +140,27 @@ export async function fetchTenantBySlug(slug: string): Promise<TenantRecord | nu
 
 export async function fetchTenantByRef(tenantRef: string): Promise<TenantRecord | null> {
   return callCompany<TenantRecord>(`/api/v1/internal/tenants/${encodeURIComponent(tenantRef)}`);
+}
+
+/** One row per provisioned store, as `GET /internal/tenants` returns them. */
+export interface TenantSummary {
+  tenantRef: string;
+  slug: string;
+  storeName: string;
+  status: TenantRecord['status'];
+  storeStatus: TenantRecord['storeStatus'];
+  databaseShard: string | null;
+}
+
+/**
+ * Every provisioned store on the platform.
+ *
+ * For the operations that must visit all of them — pre-warming the schema after
+ * a deploy, above all. Deliberately not cached: a sweep wants the list as it is
+ * right now, and a stale entry here means a store silently missed.
+ */
+export async function fetchAllTenants(): Promise<TenantSummary[]> {
+  return (await callCompany<TenantSummary[]>('/api/v1/internal/tenants')) ?? [];
 }
 
 const HOSTNAME_RE = /^[a-z0-9.-]+$/;

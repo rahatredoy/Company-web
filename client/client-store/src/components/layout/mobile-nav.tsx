@@ -22,10 +22,15 @@ export function MobileNav({ config }: { config: StoreConfig }) {
   const pathname = usePathname();
   const [open, setOpen] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);
+  const [lastPathname, setLastPathname] = React.useState(pathname);
 
   // Navigating must close the drawer, or the visitor lands on a page they
-  // cannot see.
-  React.useEffect(() => setOpen(false), [pathname]);
+  // cannot see. Adjusted during render rather than in an effect, which would
+  // paint the new page behind the drawer for a frame first.
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
+    setOpen(false);
+  }
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isMockData } from '@/config';
+import { isMockCommerce } from '@/config';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
 
 /**
@@ -48,7 +48,7 @@ export async function POST(
     return NextResponse.json({ error: 'Please check your request and try again.' }, { status: 422 });
   }
 
-  if (isMockData) {
+  if (isMockCommerce) {
     const { mockOrder } = await import('@/lib/api/mock/orders');
     const order = await mockOrder(orderNumber);
 

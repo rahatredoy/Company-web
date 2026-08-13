@@ -1,7 +1,7 @@
 import 'server-only';
 import { cookies } from 'next/headers';
 import { cache } from 'react';
-import { isMockData } from '@/config';
+import { isMockCommerce } from '@/config';
 import type { Address, Customer, ReturnSummary } from '@/types';
 import { cookieHeader, storeCall } from '@/lib/tenant';
 import { apiFetch } from './client';
@@ -34,7 +34,7 @@ async function sessionToken(): Promise<string | undefined> {
  * exception means every caller writes the same try/catch.
  */
 export const getCustomer = cache(async (): Promise<Customer | null> => {
-  if (isMockData) {
+  if (isMockCommerce) {
     const { mockCustomer } = await import('./mock/account');
     return mockCustomer(await sessionToken());
   }
@@ -49,7 +49,7 @@ export const getCustomer = cache(async (): Promise<Customer | null> => {
 });
 
 export async function getAddresses(): Promise<Address[]> {
-  if (isMockData) {
+  if (isMockCommerce) {
     const { mockAddresses } = await import('./mock/account');
     return mockAddresses(await sessionToken());
   }
@@ -61,7 +61,7 @@ export async function getAddresses(): Promise<Address[]> {
 }
 
 export async function getReturns(): Promise<ReturnSummary[]> {
-  if (isMockData) {
+  if (isMockCommerce) {
     const { mockReturns } = await import('./mock/account');
     return mockReturns(await sessionToken());
   }
@@ -75,7 +75,7 @@ export async function getReturns(): Promise<ReturnSummary[]> {
 export async function updateCustomer(
   patch: Partial<Pick<Customer, 'fullName' | 'phone' | 'acceptsMarketing'>>,
 ): Promise<Customer | null> {
-  if (isMockData) {
+  if (isMockCommerce) {
     const { mockUpdateCustomer } = await import('./mock/account');
     return mockUpdateCustomer(await sessionToken(), patch);
   }

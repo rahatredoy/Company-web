@@ -7,14 +7,21 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 /**
+ * `useSyncExternalStore` answers false while the server renders and true once
+ * the client has hydrated, which is the whole of what a mount flag was for. The
+ * store never changes, so `subscribe` has nothing to do — the two snapshot
+ * functions carry the difference.
+ */
+const subscribeToNothing = () => () => {};
+const useHydrated = () => React.useSyncExternalStore(subscribeToNothing, () => true, () => false);
+
+/**
  * Two-state theme control (light / dark). Renders a stable placeholder until
- * mounted so the server and client markup match.
+ * hydrated so the server and client markup match.
  */
 export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = React.useState(false);
-
-  React.useEffect(() => setMounted(true), []);
+  const mounted = useHydrated();
 
   if (!mounted) {
     return (

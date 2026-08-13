@@ -99,7 +99,7 @@ function Footer({ config, locale }: TemplateChromeProps) {
   return <SiteFooter config={config} locale={locale} tone="surface" className="mt-14" />;
 }
 
-function Homepage({ config, sections, locale }: TemplateHomepageProps) {
+function Homepage({ config, sections }: TemplateHomepageProps) {
   const heroIndex = sections.findIndex((section) => section.type === 'hero');
   const hero = heroIndex === -1 ? null : sections[heroIndex]!;
   const rest = sections.filter((_, index) => index !== heroIndex);

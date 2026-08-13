@@ -60,12 +60,20 @@ npm run db:seed      # plans, settings, the single admin
 npm run db:studio
 ```
 
-### Database — client-api (one database per tenant)
+### Database — client-api (one database per tenant, across shards)
 
 ```bash
 npm run db:migrate:tenants -- --slug abc-fashion   # pre-warm one store after deploy
 npm run db:migrate:tenants                          # all tenants
 npm run db:generate                                 # see the two warnings below
+```
+
+Which server a store's database is on is `company-api`'s decision — see *The tenant cluster is sharded* below. To move one:
+
+```bash
+cd company/company-api
+npx tsx scripts/move-tenant-to-shard.ts --slug abc-fashion --to shard-2
+npx tsx scripts/move-tenant-to-shard.ts --all --to shard-1 --drop-source
 ```
 
 ### A store to sign in to (local development)
@@ -87,6 +95,10 @@ Correctness is checked by `tsx` scripts that hit the **live** API and real datab
 ```bash
 cd client/client-api
 npx tsx scripts/verify-slice0.ts              # 34 checks: tenant isolation + store-admin auth
+npx tsx scripts/verify-catalog.ts             # 40 checks: categories, brands, products
+npx tsx scripts/verify-storefront.ts --slug abc-fashion --password '…' --other e-comarch   # 34 checks: the public read path
+npx tsx scripts/verify-commerce.ts   --slug abc-fashion --password '…' --other e-comarch   # 55 checks: accounts, checkout, orders, returns, reviews
+npx tsx scripts/verify-admin.ts      --slug abc-fashion --password '…'                     # 96 checks: every admin section, uploads included
 npx tsx scripts/verify-schema.ts --slug abc-fashion
 npx tsx scripts/set-store-password.ts
 
@@ -129,6 +141,63 @@ All four frontends are pure API consumers: no database URL, no payment or storag
 ### How a request finds its store (client side)
 
 `client-api/src/plugins/tenant.ts` derives the store from the `Host` header and nothing else — never a query string, body field or token claim. Hostname → slug → `company-api` lookup (Redis-cached) → refuse unless `status ∉ {suspended, expired, cancelled}` **and** `storeStatus === 'ready'` (both are checked because reactivation can leave them disagreeing) → tenant database name derived locally, never transmitted → pooled Drizzle handle from `db/tenant-manager.ts` (LRU of 50 tenants, `max: 4` connections, closed after 10 idle minutes).
+
+### The admin panel
+
+**All 20 sidebar destinations are built.** `client-api`'s admin modules are `catalog`, `orders`, `customers`, `reviews`, `inventory`, `fulfilment` (shipping/returns/refunds), `marketing` (coupons/banners/newsletter), `website` (design/pages/FAQs/homepage) and `settings` (settings/payment methods/attributes/reports); `client-admin` renders each. `app/(dashboard)/[...section]/page.tsx` is now a plain 404 — its "coming soon" branch became unreachable and was removed rather than left to rot.
+
+Every module follows the same shape: `preHandler: [app.requireStoreAdmin, app.requirePermission(k)]` on every route, module-local Zod through `parseBody`/`parseQuery`, `ok`/`paginated`/`noContent`, `audit()` **after** the transaction commits, and `invalidateStorefrontOnWrite(app)` registered once per module that changes public data. On the UI side: async server component + `serverGetPaginated`, `export const dynamic = 'force-dynamic'`, and writes through the browser `api.*` client inside a `'use client'` component — **there is no `serverPost`**. Radix `Select` contributes nothing to `FormData`, so forms use a plain `<select>`.
+
+Rules worth knowing before changing any of it:
+
+- **Status graphs are server-side.** `ORDER_TRANSITIONS` in `lib/constants.ts` — not the enum — decides what an order may become next, and returns and refunds have their own maps in `modules/fulfilment/`. The panel only renders `allowedTransitions`; the API re-checks, so a stale page gets a clear 409 rather than a bad write.
+- **Stock only ever moves by a single conditional `UPDATE`**, and every movement writes an `inventory_transactions` row in the same transaction. The `>= 0` CHECK constraints are the backstop: an overdraw fails as `INSUFFICIENT_STOCK` (matched on SQLSTATE `23514`, because Drizzle wraps the driver error and the constraint name is on the `cause`, not the message).
+- **`sold_count` moves on dispatch, nowhere else** — counting it at checkout would rank abandoned and cancelled orders as best sellers.
+- **Deleting is often archiving**: a product that has sold, a coupon that has been claimed, a customer at all (there is no delete — order history points at them; blocking is the lever). A newsletter subscriber is marked unsubscribed rather than deleted, because a deleted row is one the next signup silently re-adds.
+- **`pages.body_html` is sanitised on write** by `lib/sanitise.ts` — the storefront renders it as HTML trusting exactly that. It is a deliberate copy of `client-store/src/lib/sanitise-html.ts`, which runs again at render.
+- **A policy page cannot be deleted** (`systemKey` set): the footer and checkout copy link to it, and removing one leaves dead links nobody looks for.
+- **Currency cannot change once the store has taken an order.** Prices are decimals with no currency of their own, so switching the code re-labels every past total rather than converting it.
+- **A store has exactly one admin**, enforced by `store_admins_singleton_key`. No endpoint creates one, so `/staff` explains that rather than offering an invite that the database would refuse.
+
+### File storage
+
+Cloudflare R2, signed by hand in `lib/storage.ts` — ~60 lines of SigV4 HMAC chaining rather than `@aws-sdk/client-s3`, which would be the largest dependency in an API that has seventeen and hand-rolls its own TOTP and HTML sanitiser for the same reason. Take the SDK the moment multipart, resumable or lifecycle work is needed; a single signed `PUT` is not that moment.
+
+`POST /api/v1/admin/uploads?purpose=…` is **proxied, not presigned**. A presigned `PUT` is faster and is the usual advice, but it moves the size and type checks to the one party that cannot be trusted to apply them. `purpose` also picks the permission — `products` needs `products.update`, `banners` needs `marketing.manage` — because a single "can upload" permission does not exist in the seeded catalogue and inventing one would let an admin bypass the section they are barred from.
+
+Three things worth knowing. `@fastify/multipart`'s `toBuffer()` **resolves even when the stream was truncated at the limit**, so `file.file.truncated` is the only thing separating a 10MB file from the first 10MB of a 400MB one. Keys are `stores/<tenantRef>/<folder>/<uuid>.<ext>` — namespaced so a shared bucket stays legible, and UUID-named because a user-chosen filename can collide or carry a path. And **deleting removes the object immediately but not the CDN copy**: the public domain sits behind a four-hour `max-age`, so the old URL keeps answering `200` from the edge. That is harmless only because keys are never reused.
+
+Credentials live in `client-api/.env` as `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` (Cloudflare's own names) and never leave `lib/storage.ts`; files are addressed on `R2_PUBLIC_URL`, never the credentialed endpoint.
+
+Two rules the rest of the catalogue has to keep. **A `simple` product still owns exactly one variant** — the schema says so, so that pricing, stock and order lines never need two code paths — and `products.routes.ts` writes the product and that variant in one transaction, denormalising its price onto `products.price_from`. **A rename never moves a slug**: it is re-derived only when the slug itself was the field being changed, because a live storefront URL that silently moves breaks every link to it. A slug that is *derived* and clashes gets a numeric suffix; one that was *asked for* and clashes is refused (`SLUG_TAKEN`).
+
+Deleting is not always deleting: a product with `sold_count > 0` is set inactive instead and the response says `deleted: false`, because order lines point at it. A category with children is refused outright (`CATEGORY_HAS_CHILDREN`) — `parent_id` carries no foreign key, so nothing else would stop the subtree being orphaned.
+
+### The storefront
+
+`client-api/src/modules/storefront/` serves `/api/v1/storefront/*` and has two halves.
+
+**The catalogue half is unguarded, and therefore may never return an unpublished row** — the same fact twice. The store admin session is what separates the panel's view of the catalogue from a shopper's, and there is no session here, so the filter lives in the query: `status = 'active'`, `is_active`, `status = 'published'`, `status = 'approved'`. `scripts/verify-storefront.ts` is what proves it still does.
+
+**The account half is guarded by `requireCustomer`** — a fourth cookie family (`store_customer_session`, rows in `customer_sessions`) that satisfies none of the other three and carries no permissions at all. `lib/session.ts` owns it alongside the admin ones so it inherits `cookieDomain`, the per-store `.{slug}.{root}` scoping that is the reason one store's session cannot be offered to another store's origin.
+
+**Checkout sits between the two.** `optionalCustomer` attaches a shopper when one is signed in and says nothing when there is not, because requiring an account in order to buy something is how a shop loses the sale. The request carries **ids and quantities and no money at all** — price, sale window, coupon, shipping and totals are every one of them recomputed from the tenant database, because the basket lives in `localStorage` and anything priced there is a number the customer could have edited. Stock moves `available → reserved` with a **single conditional `UPDATE`**, never read-modify-write; the `>= 0` CHECK constraints are what turn a race for the last unit into `INSUFFICIENT_STOCK` rather than an oversell.
+
+Two things worth knowing. `GET /account/me` answers **404, not 401**, when signed out — the storefront's account layout redirects on a null customer and a 401 would throw instead. And a guest who has just paid is let back onto their own receipt by `store_guest_orders`, an opaque cookie whose SHA-256 keys a Redis set of the order numbers that browser placed; without it `/checkout/success/<n>` would 401 the customer who had just bought something.
+
+Payment is **COD plus a `mock` gateway** (`services`… `payments.routes.ts`), both live in the `payment_provider` enum and neither needing credentials. Stripe and SSLCommerz are adapter seams. The mock gateway confirms over GET because a form POST from the API's own origin would be refused by the CSRF hook; a real gateway posts a signed webhook to the tenant-exempt `/api/v1/webhooks` prefix instead, where `payment_webhook_events`' unique `(provider, event_id)` makes a redelivery a no-op.
+
+Three things worth knowing. `surfaceOf` in `lib/urls.ts` already reads every path that is not `/api/v1/admin` as the storefront, so these routes inherit the storefront's CORS origins and are refused to an admin-panel origin without naming themselves in `plugins/security.ts` — which is why they are registered as their own prefix in `app.ts` rather than beside the admin routes. `lib/cache.ts#invalidateStorefrontOnWrite` is an `onResponse` hook registered by `modules/catalog/routes.ts`, not a call in each handler, because a rule that says "remember to invalidate" holds only until somebody adds a route; without it a save takes up to five minutes to reach the shop. And a homepage section that names a `source` (`new_arrivals`, `featured`, `best_selling`, `sale`) has its `productIds` resolved server-side in `home.routes.ts` — the storefront renders product blocks from an explicit id list, which can never contain a product that did not exist when the section was saved.
+
+A newly provisioned store is seeded with a usable shop by `services/store-content-seed.ts`: navigation, a homepage, the six policy pages, FAQs, cash-on-delivery, a default warehouse, zone and shipping method. It is guarded on the `content_seed_version` key in `platform_sync`, **not** on "is the table empty" — an owner who deletes the seeded pages must not get them back on the next request.
+
+### The tenant cluster is sharded
+
+No single PostgreSQL server holds every store. `TENANT_SHARDS` is a JSON registry of servers, listed identically in **both** APIs' `.env`, and each store records which one it landed on in `tenants.database_shard`. `company-api` picks the shard with the most room left when a store is provisioned (`services/tenant-shards.ts#pickShardForNewTenant`); a shard at `capacity: 0` is never chosen, which is how one is drained.
+
+Only the shard **id** crosses between the platforms — `/internal/tenants/by-slug` publishes it and each side resolves it against its own registry, so hosts and passwords stay put and the control plane cannot point a store's traffic at a server the commerce API was not configured for. An id `client-api` does not know fails loudly (`TENANT_UNAVAILABLE`) rather than falling back to a guess. `TENANT_DB_*` is the pre-sharding server, registered as the `legacy` shard at zero capacity and used for any tenant whose row names no shard.
+
+`company-api/scripts/move-tenant-to-shard.ts` moves a store: dump, restore, compare every table's row count, and only then repoint the tenant row — the source database is left behind unless `--drop-source` is passed. Because that leftover copy answers to the same name, **the recorded shard is the only authority**; `locateShard` is a fallback for a store the control plane cannot answer for, and it tries `legacy` last.
 
 `X-Store-Slug` is a development-only escape hatch because Windows and Node do not resolve `*.localhost`; the API honours it only while `DEV_STORE_SLUG` is set, which `config` forces to `undefined` in production. The frontends send it from `lib/api.ts` / `lib/api/client.ts` under the same condition. The bare fallback — no header and no slug in the host — applies only to a **loopback** hostname, so a real hostname is resolved as a custom domain even in development.
 
@@ -197,9 +266,12 @@ Success is `{ data }` or `{ data, meta: { page, pageSize, total, totalPages } }`
 ## Traps worth knowing
 
 - **`client-api/drizzle/0000_*.sql` is hand-edited.** Company provisioning already created `store_settings`, `store_admins` and `platform_sync`, so 0000 uses `CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` for those three to preserve the seeded owner row. Re-running `drizzle-kit generate` over it discards the edits and drops the owner — add a new migration instead.
-- **`client-api`'s `drizzle.config.ts` points at one reference tenant database** (`DRIZZLE_REFERENCE_SLUG`, default `abc-fashion`). There is no single app database on that side; `src/db/tenant-migrate.ts` applies migrations to each tenant on first use under a `pg_advisory_lock`.
+- **`client-api`'s `drizzle.config.ts` points at one reference tenant database** (`DRIZZLE_REFERENCE_SLUG`, default `abc-fashion`) **on one shard** (`DRIZZLE_REFERENCE_SHARD`, default the first shard taking new stores). drizzle-kit reads the config synchronously, so it cannot go and find the store — if the reference store is not on the default shard, set both. There is no single app database on that side; `src/db/tenant-migrate.ts` applies migrations to each tenant on first use under a `pg_advisory_lock`.
 - **The READMEs predate the current auth flow.** `company/README.md` and `company/company-admin/README.md` describe TOTP MFA with recovery codes for the company admin; migration `0003_drop_admin_mfa.sql` removed that. Company admin **and** company client sign-in now use emailed one-time codes (`POST /admin/otp/verify`, `/admin/otp/resend`, `/public/login/otp/verify`, `/public/login/otp/resend`; see `lib/otp.ts`). Store-admin MFA in `client-api` **is** still TOTP. Trust the code over the READMEs on auth.
-- **`client-store` renders from fixtures by default.** `NEXT_PUBLIC_DATA_SOURCE` defaults to `mock`, and `src/lib/api/mock/` is imported only on that branch. Set `live` once the commerce endpoints exist. Template keys are authoritative with **underscores** (`modern_shop`); the company side seeds hyphenated values and `normaliseTemplateKey()` translates on read.
+- **`client-store` has two data-source flags, not one.** `NEXT_PUBLIC_DATA_SOURCE` drives the catalogue — products, categories, brands, config, CMS, search. `NEXT_PUBLIC_COMMERCE_SOURCE` drives customer accounts, orders, returns, checkout and review submission. **Both are now `live`**; they were split when only the first half existed, and the seam stays because it is what lets one half be developed against fixtures while the other is real. `src/lib/api/mock/` is imported only on a `mock` branch, so a `live` build bundles none of it. Cart, wishlist and compare are browser-local by design and answer to neither flag. Template keys are authoritative with **underscores** (`modern_shop`); the company side seeds hyphenated values and `normaliseTemplateKey()` translates on read.
+- **`app/api/auth/[action]/route.ts` calls `fetch` directly, not `apiFetch`.** It has to: `apiFetch` returns the parsed body and discards the `Response`, so routing sign-in through it threw the API's `Set-Cookie` away. The symptom was not an error — login answered `200`, no session was stored, and `/account` bounced back to `/login`. Anything proxying a response whose **headers** matter has the same constraint.
+- **A verification script must clear its own rate-limit keys.** `verify-commerce.ts` registers, signs in, tracks orders and requests returns several times in a few seconds, which is exactly what the limiter exists to stop. It calls `lib/rate-limit.ts#reset` for its own IP and test identities on start-up; without that the second run inside fifteen minutes fails on the limiter rather than on anything under test.
+- **Bumping `COMMERCE_SCHEMA_VERSION` is part of adding a migration.** `db/tenant-migrate.ts` returns early on a version match *without opening the migrator*, so a new `drizzle/000N_*.sql` that does not come with a bump reaches no existing tenant and fails silently.
 - **Cookie domain is per store**, scoped to `.<slug>.company.com`. Scoping to the platform root is refused in code, because it would offer one store's session to every other store's origin.
 - **`client-admin/AGENTS.md`** is generated by `next dev` (Next.js 16 agent rules) and re-created if deleted; `client-admin/CLAUDE.md` just imports it.
 - With `MAIL_DRIVER=log`, verification codes and reset links appear in the API log — that is how you read them locally.

@@ -99,8 +99,15 @@ export function DashboardShell({
 }) {
   const [open, setOpen] = React.useState(false);
   const pathname = usePathname();
+  const [lastPathname, setLastPathname] = React.useState(pathname);
 
-  React.useEffect(() => setOpen(false), [pathname]);
+  // Navigating on mobile closes the drawer; leaving it open hides the page that
+  // was just asked for. Adjusted during render rather than in an effect, which
+  // would paint the new page underneath the drawer first.
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
+    setOpen(false);
+  }
 
   // Above every page while the bill is outstanding — except on the pages that
   // already lead with the gate in full.

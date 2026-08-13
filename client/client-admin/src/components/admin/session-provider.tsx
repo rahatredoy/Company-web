@@ -47,7 +47,10 @@ export function SessionProvider({
 
   const signOut = React.useCallback(async () => {
     await api.post('/api/v1/admin/auth/logout').catch(() => undefined);
-    // A hard navigation, so no stale server-rendered page survives the sign-out.
+    // A hard navigation on purpose, so no stale server-rendered page survives
+    // the sign-out. `router.replace` would keep the cached RSC payload of every
+    // page this admin had already visited.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = '/sign-in';
   }, []);
 

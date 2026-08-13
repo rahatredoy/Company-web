@@ -32,6 +32,7 @@ import { config } from '../src/config/index';
 import { db, pool } from '../src/db/client';
 import { clientAccounts, clientSessions, plans, tenants } from '../src/db/schema/index';
 import { tenantAdminConnection } from '../src/db/tenant-connection';
+import { resolveShard } from '../src/services/tenant-shards';
 import { generateToken, sha256 } from '../src/lib/crypto';
 import { hashOtp } from '../src/lib/otp';
 import { hashPassword } from '../src/lib/password';
@@ -394,7 +395,7 @@ async function applyPanelLogin(
   if (!tenant?.databaseName) throw new Error('The store has no database yet.');
 
   const passwordHash = await hashPassword(options.storeAdminPassword);
-  const client = tenantAdminConnection(tenant.databaseName);
+  const client = tenantAdminConnection(resolveShard(tenant.databaseShard), tenant.databaseName);
   await client.connect();
 
   try {

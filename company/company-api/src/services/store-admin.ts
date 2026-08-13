@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { tenantAdminConnection } from '../db/tenant-connection';
+import { resolveShard } from './tenant-shards';
 import { tenants } from '../db/schema/index';
 import { AppError, ERROR_CODES, conflict } from '../lib/errors';
 import { logger } from '../lib/logger';
@@ -185,7 +186,7 @@ export async function applyStoreAdminPassword(tenant: Tenant, passwordHash: stri
     throw new AppError(ERROR_CODES.STORE_ADMIN_NOT_FOUND, 'This store has no admin login recorded.', 409);
   }
 
-  const client = tenantAdminConnection(tenant.databaseName);
+  const client = tenantAdminConnection(resolveShard(tenant.databaseShard), tenant.databaseName);
   await client.connect();
   try {
     const updated = await client.query(

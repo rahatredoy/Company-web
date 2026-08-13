@@ -2,9 +2,14 @@ import { Queue, type JobsOptions } from 'bullmq';
 import { createQueueConnection } from '../lib/redis';
 import { logger } from '../lib/logger';
 
+/**
+ * One entry per queue that actually exists. `notifications` was listed here
+ * without a queue or a worker behind it, so the worker announced a queue on
+ * start-up that nothing could ever deliver to — add the queue below at the same
+ * time as the name, or the log tells an operator something untrue.
+ */
 export const QUEUE_NAMES = {
   provisioning: 'provisioning',
-  notifications: 'notifications',
   trials: 'trials',
   domains: 'domains',
   billing: 'billing',
@@ -71,9 +76,21 @@ function getQueues() {
  * Returns false instead of throwing when the queue is unavailable, so callers
  * can fall back to running the work inline.
  */
+/**
+ * A job id BullMQ will accept.
+ *
+ * Custom ids may not contain `:` — BullMQ builds its own Redis keys around that
+ * separator and rejects the `add` outright. These ids were written with colons,
+ * so every enqueue threw, `queueProvisioning` always answered false, and the
+ * "run it inline if the queue is down" fallback quietly became the only path a
+ * store was ever provisioned by. The queue existed, the worker consumed nothing,
+ * and provisioning ran inside the HTTP request that asked for it.
+ */
+const jobId = (...parts: Array<string | number>): string => parts.join('-');
+
 export async function queueProvisioning(tenantId: string): Promise<boolean> {
   try {
-    await getQueues().provisioning.add('provision', { tenantId }, { jobId: `provision:${tenantId}` });
+    await getQueues().provisioning.add('provision', { tenantId }, { jobId: jobId('provision', tenantId) });
     return true;
   } catch (error) {
     logger.error({ err: (error as Error).message, tenantId }, 'failed to enqueue provisioning');
@@ -83,7 +100,11 @@ export async function queueProvisioning(tenantId: string): Promise<boolean> {
 
 export async function queueDomainVerification(domainId: string, delayMs = 0): Promise<boolean> {
   try {
-    await getQueues().domains.add('verify', { domainId }, { delay: delayMs, jobId: `domain:${domainId}:${delayMs}` });
+    await getQueues().domains.add(
+      'verify',
+      { domainId },
+      { delay: delayMs, jobId: jobId('domain', domainId, delayMs) },
+    );
     return true;
   } catch (error) {
     logger.error({ err: (error as Error).message, domainId }, 'failed to enqueue domain verification');

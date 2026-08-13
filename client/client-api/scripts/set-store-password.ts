@@ -13,7 +13,7 @@
  * does — otherwise an old cookie would keep working after a reset.
  */
 import { config } from '../src/config/index';
-import { openTenantPool } from '../src/db/tenant-manager';
+import { openTenantPoolForSlug } from '../src/db/tenant-manager';
 import { hashPassword } from '../src/lib/password';
 import { closeRedis } from '../src/lib/redis';
 
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const pool = openTenantPool(slug);
+  const pool = await openTenantPoolForSlug(slug);
 
   try {
     const { rows } = await pool.query(

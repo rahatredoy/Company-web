@@ -8,10 +8,15 @@ import { AdminTopbar } from './admin-topbar';
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [lastPathname, setLastPathname] = React.useState(pathname);
 
   // Navigating on mobile should close the drawer; leaving it open hides the page
-  // the user just asked for.
-  React.useEffect(() => setMenuOpen(false), [pathname]);
+  // the user just asked for. Adjusted during render rather than in an effect —
+  // an effect would paint the new page with the drawer still over it first.
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
+    setMenuOpen(false);
+  }
 
   return (
     <div className="min-h-svh bg-surface">

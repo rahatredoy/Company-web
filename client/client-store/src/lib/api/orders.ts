@@ -1,5 +1,5 @@
 import 'server-only';
-import { isMockData, PAGE_SIZE } from '@/config';
+import { isMockCommerce, PAGE_SIZE } from '@/config';
 import type { OrderDetail, OrderSummary } from '@/types';
 import { cookieHeader, storeCall } from '@/lib/tenant';
 import { apiFetch } from './client';
@@ -17,7 +17,7 @@ export async function getOrders(query: { page?: number; status?: string } = {}):
   items: OrderSummary[];
   meta: { page: number; pageSize: number; total: number; totalPages: number };
 }> {
-  if (isMockData) {
+  if (isMockCommerce) {
     const { mockOrders } = await import('./mock/orders');
     const all = await mockOrders();
     const filtered = query.status && query.status !== 'all'
@@ -49,7 +49,7 @@ export async function getOrders(query: { page?: number; status?: string } = {}):
 }
 
 export async function getOrder(orderNumber: string): Promise<OrderDetail | null> {
-  if (isMockData) {
+  if (isMockCommerce) {
     const { mockOrder } = await import('./mock/orders');
     return mockOrder(orderNumber);
   }
@@ -72,7 +72,7 @@ export async function getOrder(orderNumber: string): Promise<OrderDetail | null>
  * must not be enough to reveal an address and a phone number.
  */
 export async function trackOrder(orderNumber: string, email: string): Promise<OrderDetail | null> {
-  if (isMockData) {
+  if (isMockCommerce) {
     const { mockTrackOrder } = await import('./mock/orders');
     return mockTrackOrder(orderNumber, email);
   }

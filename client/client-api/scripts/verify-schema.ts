@@ -5,14 +5,14 @@
  *   npx tsx scripts/verify-schema.ts [--slug abc-fashion]
  */
 import { config } from '../src/config/index';
-import { openTenantPool } from '../src/db/tenant-manager';
+import { openTenantPoolForSlug } from '../src/db/tenant-manager';
 import { COMMERCE_SCHEMA_VERSION } from '../src/db/tenant-migrate';
 import { closeRedis } from '../src/lib/redis';
 
 const slugArg = process.argv.indexOf('--slug');
 const SLUG = slugArg > -1 ? process.argv[slugArg + 1]! : (config.devStoreSlug ?? 'abc-fashion');
 
-const pool = openTenantPool(SLUG);
+const pool = await openTenantPoolForSlug(SLUG);
 
 let passed = 0;
 let failed = 0;

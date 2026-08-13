@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
@@ -19,7 +18,6 @@ import { safeRedirectPath } from '@/lib/utils';
  * afterwards is not.
  */
 export function LoginForm({ next }: { next?: string }) {
-  const router = useRouter();
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 

@@ -214,6 +214,26 @@ export function errorCode(error: unknown): string | null {
   return error instanceof ApiError ? error.code : null;
 }
 
+/**
+ * `{ email: ['Taken.'] }` → `{ email: 'Taken.' }`.
+ *
+ * The API reports every message it has for a field, because a panel can afford
+ * to list them. A storefront form shows one line under one input, and every
+ * form on this side is typed for a single string — without this the field would
+ * render the array.
+ */
+export function flattenDetails(details: unknown): Record<string, string> | undefined {
+  if (!details || typeof details !== 'object') return undefined;
+
+  const flat: Record<string, string> = {};
+  for (const [key, value] of Object.entries(details as Record<string, unknown>)) {
+    const first = Array.isArray(value) ? value[0] : value;
+    if (typeof first === 'string') flat[key] = first;
+  }
+
+  return Object.keys(flat).length > 0 ? flat : undefined;
+}
+
 /** Never surfaces a status code, a request path or a stack to a customer. */
 export function errorMessage(
   error: unknown,

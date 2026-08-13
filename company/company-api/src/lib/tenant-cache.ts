@@ -23,7 +23,7 @@ import { redis } from './redis';
  * purpose, like the rest of the shared helpers in this repo — but the two must
  * be changed together, so both sides name the other in a comment.
  */
-const CACHE_PREFIX = 'tenant:v1:';
+const CACHE_PREFIX = 'tenant:v2:';
 
 function keysFor(slug: string, hostnames: string[]): string[] {
   return [

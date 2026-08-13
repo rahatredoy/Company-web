@@ -1,19 +1,27 @@
 /**
  * Applies the commerce schema to one or more tenant databases.
  *
+ *   npm run db:migrate:tenants                       every provisioned store
  *   npm run db:migrate:tenants -- --slug abc-fashion
  *   npm run db:migrate:tenants -- --slug abc-fashion --slug gadget-hub
- *   npm run db:migrate:tenants                      (uses DEV_STORE_SLUG)
+ *   npm run db:migrate:tenants -- --dev-store        just DEV_STORE_SLUG
  *
  * Migration also happens automatically on a tenant's first request; this exists
  * to pre-warm after a deploy so no store pays the cost in-band.
+ *
+ * With no `--slug`, the store list comes from the control plane rather than from
+ * `DEV_STORE_SLUG`. It used to be the other way round, and that was the bug this
+ * script existed to prevent: run after a deploy, it pre-warmed the one dev store
+ * and reported success, while every other tenant stayed on the old schema until
+ * a shopper happened to trigger the in-band migration. In production, where
+ * `DEV_STORE_SLUG` is forced to undefined, it warmed nothing at all.
  */
 import { config } from '../config/index';
 import { logger } from '../lib/logger';
 import { isValidStoreSlug, tenantDatabaseName } from '../lib/utils';
 import { closeRedis } from '../lib/redis';
-import { fetchTenantBySlug } from '../lib/company-client';
-import { openTenantPool } from './tenant-manager';
+import { fetchAllTenants, fetchTenantBySlug } from '../lib/company-client';
+import { openTenantPoolForSlug } from './tenant-manager';
 import { ensureTenantSchema } from './tenant-migrate';
 
 function parseSlugs(argv: string[]): string[] {
@@ -24,8 +32,30 @@ function parseSlugs(argv: string[]): string[] {
       i += 1;
     }
   }
-  if (slugs.length === 0 && config.devStoreSlug) slugs.push(config.devStoreSlug);
   return [...new Set(slugs)];
+}
+
+/**
+ * What to migrate when nothing was named: every provisioned store, asked of the
+ * control plane. `--dev-store` is the old behaviour, kept for the local loop
+ * where warming one store is the point.
+ */
+async function resolveTargets(argv: string[]): Promise<string[]> {
+  const named = parseSlugs(argv);
+  if (named.length) return named;
+
+  if (argv.includes('--dev-store')) {
+    if (!config.devStoreSlug) {
+      console.error('--dev-store needs DEV_STORE_SLUG set in .env.');
+      return [];
+    }
+    return [config.devStoreSlug];
+  }
+
+  const tenants = await fetchAllTenants();
+  // A store that is not ready has no database to migrate yet; provisioning
+  // creates the schema when it makes one.
+  return tenants.filter((tenant) => tenant.storeStatus === 'ready').map((tenant) => tenant.slug);
 }
 
 async function migrateOne(slug: string): Promise<boolean> {
@@ -41,7 +71,7 @@ async function migrateOne(slug: string): Promise<boolean> {
     return false;
   }
 
-  const pool = openTenantPool(slug);
+  const pool = await openTenantPoolForSlug(slug);
   try {
     const result = await ensureTenantSchema(pool, tenant.tenantRef);
     const db = tenantDatabaseName(slug, config.tenantDb.namePrefix);
@@ -58,10 +88,10 @@ async function migrateOne(slug: string): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-  const slugs = parseSlugs(process.argv.slice(2));
+  const slugs = await resolveTargets(process.argv.slice(2));
 
   if (slugs.length === 0) {
-    console.error('No stores given. Pass --slug <store-slug>, or set DEV_STORE_SLUG in .env.');
+    console.error('No stores to migrate. Pass --slug <store-slug>, or check the control plane is reachable.');
     process.exit(1);
   }
 

@@ -178,13 +178,18 @@ Hiding a button is not authorisation. The sidebar filters itself for tidiness on
 
 ## Templates and themes
 
-**6 templates × 6 themes = 36 combinations.** A theme only ever redefines CSS custom properties, so
+**6 templates × 8 themes = 48 combinations.** A theme only ever redefines CSS custom properties, so
 changing colour cannot change layout, and changing layout cannot change product data.
 
 ```
 marketplace  modern_shop (default)  fashion_boutique  minimal_store  electronics  lifestyle
-royal_blue (default)  emerald_green  luxury_black  rose_pink  modern_purple  sunset_orange
+royal_blue (default)  emerald_green  luxury_black  rose_pink
+modern_purple  sunset_orange  midnight_navy  olive_premium
 ```
+
+A template exports only chrome and a 12-field preset — header, footer, homepage, card variant, grid
+classes, section rhythm. No commerce logic lives in one, which is why all six render the same
+`components/commerce/*` and the same section renderer.
 
 `storefront_settings.template_key` is authoritative and uses **underscore** keys. The company side
 seeds hyphenated values (`modern-shop`); `normaliseTemplateKey()` translates on read and
@@ -230,6 +235,69 @@ stored only as a hash and pinned to the tenant · `requirePermission` refuses an
 suspended/expired/cancelled/not-ready stores each refused with their own code · sign-in throttled
 per IP.
 
+`scripts/verify-storefront.ts` covers the public surface, and needs two real stores because the
+claim it exists to check is about the boundary between them:
+
+```
+npx tsx scripts/verify-storefront.ts --slug abc-fashion --password '…' --other e-comarch
+                                        →  34 passed, 0 failed
+```
+
+Covering: every storefront route reads with no session · an unknown hostname is `STORE_NOT_FOUND` ·
+a fresh store has navigation, a homepage, policy pages and a payment method · **a draft product is
+absent from the listing and its detail page 404s** · publishing it puts it on the website on the
+very next read, with no TTL to wait out · unpublishing takes it off again · an inactive category is
+missing rather than "hidden" · stock is a band and never a count · cost price is never serialised ·
+a storefront origin still cannot reach the admin API · a slug in the query string is ignored ·
+**and a product created on one store is absent from the other store's website.**
+
+---
+
+## The storefront read path
+
+`client-api/src/modules/storefront/` is the public surface. It has no auth guard of any kind, which
+is exactly why every query filters to published rows — `status = 'active'`, `is_active`,
+`status = 'published'`, `status = 'approved'`. The store admin session is what separates the panel's
+view of a catalogue from a shopper's, and there is no session here.
+
+`client-store` consumes it with `NEXT_PUBLIC_DATA_SOURCE=live`. Its second flag,
+`NEXT_PUBLIC_COMMERCE_SOURCE`, is still `mock`: there is no cart, checkout or customer session on
+this API yet, and one flag would have made every account page a 404 the moment the shop started
+working.
+
+An admin write drops this store's storefront cache on its way out — an `onResponse` hook registered
+once in `modules/catalog/routes.ts`, rather than a call in each handler that a future route could
+forget. The remaining delay is the storefront's own ISR window (60s on listings, 300s on taxonomy),
+which is a deliberate trade and the honest ceiling on freshness.
+
+---
+
+## Taking an order
+
+The account half of the surface is guarded by `requireCustomer` — `store_customer_session`, rows in
+`customer_sessions`, a fourth cookie family that satisfies none of the other three and carries no
+permissions at all. Checkout itself uses `optionalCustomer`: it is a **guest flow**, because
+requiring an account in order to buy something is how a shop loses the sale.
+
+**The request carries ids and quantities and no money.** Price, sale window, coupon, shipping and
+every total are recomputed from the tenant database, because the basket lives in `localStorage` and
+anything priced there is a number the customer could have edited. Stock moves `available → reserved`
+in a single conditional `UPDATE`; the `>= 0` CHECK constraints turn a race for the last unit into
+`INSUFFICIENT_STOCK` rather than an oversell.
+
+Three details that are easy to get wrong and are checked by the script:
+
+- `GET /account/me` answers **404, not 401**, when signed out. The account layout redirects on a
+  null customer; a 401 would throw and take the page out instead.
+- A guest who has just paid gets back onto their own receipt through `store_guest_orders` — an
+  opaque cookie whose SHA-256 keys a Redis set of the orders that browser placed. An order number
+  alone is still never enough to read an order.
+- Coupons are validated **only** on the server. The storefront used to hold two hardcoded tables
+  that already disagreed with each other about one code's minimum; both are gone.
+
+Payment is cash on delivery plus a `mock` gateway, neither needing credentials. Stripe and
+SSLCommerz are adapter seams.
+
 ---
 
 ## Status
@@ -237,5 +305,28 @@ per IP.
 | Slice | State |
 | --- | --- |
 | 0 — foundation, tenant resolution, store-admin auth, admin shell | **done, verified** |
-| 1–8 — catalogue, inventory, orders, customers, money-out, growth, website, operations | pending |
-| 9–12 — storefront API, `client-store` app, 6 templates, checkout & account | pending |
+| 1 — catalogue: categories, brands, products | **done, verified** (`scripts/verify-catalog.ts`, 40 checks) |
+| 9 — storefront **read** path, `client-store` on live data | **done, verified** (`scripts/verify-storefront.ts`, 34 checks) |
+| 10–12 — customer accounts, checkout, orders, tracking, returns, reviews | **done, verified** (`scripts/verify-commerce.ts`, 55 checks) |
+| 2–8 — the admin panel's own sections | **done, verified** (`scripts/verify-admin.ts`, 96 checks) |
+
+The storefront is a working shop: a visitor can register, buy as a guest or as an account holder,
+pay by cash on delivery or through the test gateway, track, cancel and return an order, and leave a
+review that waits for moderation. Cart, wishlist and compare stay in the visitor's own browser by
+design.
+
+**All 20 of `client-admin`'s sidebar destinations are built.** An owner can run the shop end to end:
+take an order through to delivery, adjust stock against a ledger, moderate reviews, quote delivery,
+work a return through to a refund, issue discount codes, edit the pages the storefront renders, and
+change the layout and colour. `app/(dashboard)/[...section]/page.tsx` is now a plain 404 — its
+"coming soon" branch is unreachable and was removed.
+
+Images upload straight from the panel to Cloudflare R2 — product photos, banners, logo and favicon.
+`lib/storage.ts` signs the request itself rather than pulling in the AWS SDK, and uploads are
+**proxied through the API rather than presigned**, so size, type and the caller's permission are all
+checked by something the uploader cannot edit. Files are served from `R2_PUBLIC_URL`; the
+credentialed endpoint never reaches a page.
+
+259 checks pass across the five verification scripts, and each is repeatable back to back — they
+clear their own rate-limit counters and delete their own fixtures in SQL, since the API's protective
+soft-delete would otherwise leave a SKU or a code taken.

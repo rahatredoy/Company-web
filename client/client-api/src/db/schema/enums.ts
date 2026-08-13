@@ -168,11 +168,30 @@ export const cartStatus = pgEnum('cart_status', ['active', 'converted', 'abandon
 export const customerTokenPurpose = pgEnum('customer_token_purpose', ['password_reset', 'email_verify']);
 
 /** The only section types the storefront will render. Anything else is ignored. */
+/**
+ * Every block the homepage builder can place.
+ *
+ * The storefront's `HomepageSectionType` is the authority here — a value it can
+ * render but this enum cannot store is a section the owner is simply unable to
+ * add, which is how the first seven values ended up describing a fraction of the
+ * templates' capability. The pairs that look redundant are not: `category_grid`
+ * is picture cards and `category_circle` an icon rail, `product_grid` is static
+ * and `product_carousel` scrolls. Section order and per-section settings live in
+ * `homepage_sections.config`, never in this enum.
+ */
 export const homepageSectionType = pgEnum('homepage_section_type', [
   'hero',
   'category_grid',
+  'category_circle',
   'product_grid',
+  'product_carousel',
   'banner',
+  'deal',
+  'promo_trio',
+  'flash_sale',
+  'benefits',
+  'lookbook',
+  'testimonial',
   'brands',
   'newsletter',
   'text',

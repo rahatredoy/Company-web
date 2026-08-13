@@ -20,6 +20,7 @@ import { and, eq } from 'drizzle-orm';
 import { db, pool } from '../src/db/client';
 import { clientAccounts, clientSessions, plans, subscriptions, tenants } from '../src/db/schema/index';
 import { config } from '../src/config/index';
+import { resolveShard, shardClientOptions } from '../src/services/tenant-shards';
 import { generateToken, sha256 } from '../src/lib/crypto';
 import { hashOtp } from '../src/lib/otp';
 import { hashPassword, verifyPassword } from '../src/lib/password';
@@ -95,7 +96,7 @@ async function plantOtp(): Promise<void> {
 
 async function cleanup(): Promise<void> {
   const tenantRows = await db
-    .select({ databaseName: tenants.databaseName })
+    .select({ databaseName: tenants.databaseName, databaseShard: tenants.databaseShard })
     .from(tenants)
     .innerJoin(clientAccounts, eq(tenants.clientAccountId, clientAccounts.id))
     .where(eq(clientAccounts.email, EMAIL));
@@ -104,14 +105,7 @@ async function cleanup(): Promise<void> {
 
   for (const row of tenantRows) {
     if (!row.databaseName) continue;
-    const admin = new pg.Client({
-      host: config.tenantDb.host,
-      port: config.tenantDb.port,
-      user: config.tenantDb.user,
-      password: config.tenantDb.password,
-      database: 'postgres',
-      ssl: config.tenantDb.ssl ? { rejectUnauthorized: false } : undefined,
-    });
+    const admin = new pg.Client(shardClientOptions(resolveShard(row.databaseShard), 'postgres'));
     await admin.connect();
     try {
       await admin.query(`drop database if exists "${row.databaseName}" with (force)`);
@@ -345,14 +339,9 @@ async function main(): Promise<void> {
 
   console.log('\nStep 7 — the tenant database holds that login, and only that login');
   if (tenant?.databaseName) {
-    const client = new pg.Client({
-      host: config.tenantDb.host,
-      port: config.tenantDb.port,
-      user: config.tenantDb.user,
-      password: config.tenantDb.password,
-      database: tenant.databaseName,
-      ssl: config.tenantDb.ssl ? { rejectUnauthorized: false } : undefined,
-    });
+    const client = new pg.Client(
+      shardClientOptions(resolveShard(tenant.databaseShard), tenant.databaseName),
+    );
     await client.connect();
     try {
       const admins = await client.query('select email, password_hash, role, status from store_admins');
@@ -406,14 +395,9 @@ async function main(): Promise<void> {
   check('the same code cannot be used twice', replay.status !== 200, replay.status);
 
   if (tenant?.databaseName) {
-    const client = new pg.Client({
-      host: config.tenantDb.host,
-      port: config.tenantDb.port,
-      user: config.tenantDb.user,
-      password: config.tenantDb.password,
-      database: tenant.databaseName,
-      ssl: config.tenantDb.ssl ? { rejectUnauthorized: false } : undefined,
-    });
+    const client = new pg.Client(
+      shardClientOptions(resolveShard(tenant.databaseShard), tenant.databaseName),
+    );
     await client.connect();
     try {
       const rows = await client.query('select password_hash from store_admins');

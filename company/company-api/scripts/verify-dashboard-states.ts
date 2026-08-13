@@ -14,6 +14,7 @@ import { and, eq } from 'drizzle-orm';
 import { db, pool } from '../src/db/client';
 import { clientAccounts, clientSessions, plans, tenants } from '../src/db/schema/index';
 import { config } from '../src/config/index';
+import { resolveShard, shardClientOptions } from '../src/services/tenant-shards';
 import { generateToken, sha256 } from '../src/lib/crypto';
 import { hashOtp } from '../src/lib/otp';
 import { hashPassword } from '../src/lib/password';
@@ -263,20 +264,17 @@ async function main() {
   );
 
   console.log('\nCleaning up…');
-  const tenantRows = await db.select({ databaseName: tenants.databaseName }).from(tenants).where(eq(tenants.slug, 'state-check-store'));
+  const tenantRows = await db
+    .select({ databaseName: tenants.databaseName, databaseShard: tenants.databaseShard })
+    .from(tenants)
+    .where(eq(tenants.slug, 'state-check-store'));
   for (const email of ['state-1@example.test', 'state-2@example.test', 'state-3@example.test']) {
     await db.delete(clientAccounts).where(eq(clientAccounts.email, email));
   }
   const pg = (await import('pg')).default;
   for (const row of tenantRows) {
     if (!row.databaseName) continue;
-    const admin = new pg.Client({
-      host: config.tenantDb.host,
-      port: config.tenantDb.port,
-      user: config.tenantDb.user,
-      password: config.tenantDb.password,
-      database: 'postgres',
-    });
+    const admin = new pg.Client(shardClientOptions(resolveShard(row.databaseShard), 'postgres'));
     await admin.connect();
     await admin.query(`drop database if exists "${row.databaseName}" with (force)`);
     await admin.end();

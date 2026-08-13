@@ -6,6 +6,8 @@ import { logger } from '../lib/logger';
 import { isValidStoreSlug, tenantDatabaseName } from '../lib/utils';
 import * as schema from './schema/index';
 import { ensureTenantSchema } from './tenant-migrate';
+import { locateShard, resolveShard } from './tenant-shards';
+import type { TenantShard } from '../config/index';
 
 export type TenantDb = NodePgDatabase<typeof schema>;
 
@@ -22,16 +24,21 @@ interface TenantConnection {
   pool: pg.Pool;
   db: TenantDb;
   databaseName: string;
+  shardId: string;
   lastUsedAt: number;
 }
 
 /**
  * One PostgreSQL database per tenant, reached through a small cache of pools.
  *
- * Connections are lazy and bounded: hundreds of tenants share one cluster, so a
- * pool is small (`TENANT_POOL_MAX`), only the most recently used tenants stay
- * resident (`TENANT_POOL_CACHE`), and idle pools are closed. Tenant identity is
- * never taken from a request body or query — see `plugins/tenant.ts`.
+ * Connections are lazy and bounded: many tenants share one shard, so a pool is
+ * small (`TENANT_POOL_MAX`), only the most recently used tenants stay resident
+ * (`TENANT_POOL_CACHE`), and idle pools are closed. Tenant identity is never
+ * taken from a request body or query — see `plugins/tenant.ts`.
+ *
+ * *Which server* a tenant's database is on comes from the control plane, so a
+ * store that has been moved to another shard is reconnected rather than served
+ * from the pool still pointing at where it used to live.
  */
 class TenantDatabaseManager {
   private readonly connections = new Map<string, TenantConnection>();
@@ -45,24 +52,35 @@ class TenantDatabaseManager {
     this.sweeper.unref?.();
   }
 
-  async get(tenantRef: string, slug: string): Promise<TenantDb> {
+  async get(tenantRef: string, slug: string, shardId?: string | null): Promise<TenantDb> {
+    const shard = resolveShard(shardId);
+
     const existing = this.connections.get(tenantRef);
     if (existing) {
-      existing.lastUsedAt = Date.now();
-      return existing.db;
+      // A resident pool for the shard the store used to be on would keep serving
+      // the copy left behind by a move. Drop it and reconnect.
+      if (existing.shardId === shard.id) {
+        existing.lastUsedAt = Date.now();
+        return existing.db;
+      }
+      logger.info(
+        { tenantRef, from: existing.shardId, to: shard.id },
+        'tenant moved shard — reopening',
+      );
+      await this.evict(tenantRef);
     }
 
     const inFlight = this.pending.get(tenantRef);
     if (inFlight) return (await inFlight).db;
 
-    const setup = this.connect(tenantRef, slug).finally(() => this.pending.delete(tenantRef));
+    const setup = this.connect(tenantRef, slug, shard).finally(() => this.pending.delete(tenantRef));
     this.pending.set(tenantRef, setup);
 
     const connection = await setup;
     return connection.db;
   }
 
-  private async connect(tenantRef: string, slug: string): Promise<TenantConnection> {
+  private async connect(tenantRef: string, slug: string, shard: TenantShard): Promise<TenantConnection> {
     if (!isValidStoreSlug(slug)) {
       // The slug becomes part of a database identifier — never interpolate an
       // unvalidated value, even though it arrived from the company API.
@@ -72,12 +90,12 @@ class TenantDatabaseManager {
     const databaseName = tenantDatabaseName(slug, config.tenantDb.namePrefix);
 
     const pool = new pg.Pool({
-      host: config.tenantDb.host,
-      port: config.tenantDb.port,
-      user: config.tenantDb.user,
-      password: config.tenantDb.password,
+      host: shard.host,
+      port: shard.port,
+      user: shard.user,
+      password: shard.password,
       database: databaseName,
-      ssl: config.tenantDb.ssl ? { rejectUnauthorized: false } : undefined,
+      ssl: shard.ssl ? { rejectUnauthorized: false } : undefined,
       max: config.tenantDb.poolMax,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
@@ -94,7 +112,10 @@ class TenantDatabaseManager {
     } catch (error) {
       await pool.end().catch(() => undefined);
       const message = (error as Error).message;
-      logger.error({ tenantRef, databaseName, err: message }, 'cannot reach tenant database');
+      logger.error(
+        { tenantRef, databaseName, shard: shard.id, err: message },
+        'cannot reach tenant database',
+      );
 
       if (/does not exist/i.test(message)) {
         throw new AppError(
@@ -114,6 +135,7 @@ class TenantDatabaseManager {
       pool,
       db: drizzle(pool, { schema, casing: 'snake_case' }),
       databaseName,
+      shardId: shard.id,
       lastUsedAt: Date.now(),
     };
 
@@ -126,7 +148,10 @@ class TenantDatabaseManager {
     this.connections.set(tenantRef, connection);
     await this.evictOverflow();
 
-    logger.info({ tenantRef, databaseName, resident: this.connections.size }, 'tenant pool opened');
+    logger.info(
+      { tenantRef, databaseName, shard: shard.id, resident: this.connections.size },
+      'tenant pool opened',
+    );
     return connection;
   }
 
@@ -176,16 +201,45 @@ class TenantDatabaseManager {
 export const tenantDb = new TenantDatabaseManager();
 
 /** Opens a short-lived connection to a tenant database outside the cache (CLI use). */
-export function openTenantPool(slug: string): pg.Pool {
+export function openTenantPool(slug: string, shard: TenantShard): pg.Pool {
   return new pg.Pool({
-    host: config.tenantDb.host,
-    port: config.tenantDb.port,
-    user: config.tenantDb.user,
-    password: config.tenantDb.password,
+    host: shard.host,
+    port: shard.port,
+    user: shard.user,
+    password: shard.password,
     database: tenantDatabaseName(slug, config.tenantDb.namePrefix),
-    ssl: config.tenantDb.ssl ? { rejectUnauthorized: false } : undefined,
+    ssl: shard.ssl ? { rejectUnauthorized: false } : undefined,
     max: 2,
     connectionTimeoutMillis: 10_000,
     application_name: 'client-api:migrate',
   });
+}
+
+/**
+ * The same thing for a caller that has only a slug — the command-line tools,
+ * which have no tenant record in front of them to read the shard from.
+ *
+ * It asks the control plane, exactly as a request would, because that answer is
+ * the authoritative one: a store that has been moved still has its old database
+ * sitting on the previous shard until someone drops it, and searching the
+ * cluster would find that copy just as readily as the live one. Searching is the
+ * fallback for a store the control plane does not know about.
+ */
+export async function openTenantPoolForSlug(slug: string): Promise<pg.Pool> {
+  const databaseName = tenantDatabaseName(slug, config.tenantDb.namePrefix);
+
+  const { fetchTenantBySlug } = await import('../lib/company-client');
+  const tenant = await fetchTenantBySlug(slug).catch(() => null);
+
+  const shard = tenant ? resolveShard(tenant.databaseShard) : await locateShard(databaseName);
+
+  if (!shard) {
+    throw new AppError(
+      ERROR_CODES.STORE_NOT_READY,
+      `No shard holds ${databaseName}. Has the store been provisioned?`,
+      503,
+    );
+  }
+
+  return openTenantPool(slug, shard);
 }

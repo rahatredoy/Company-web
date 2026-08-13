@@ -8,6 +8,41 @@ export const isProduction = env.NODE_ENV === 'production';
 export const isDevelopment = env.NODE_ENV === 'development';
 export const isTest = env.NODE_ENV === 'test';
 
+/** One PostgreSQL server holding many tenant databases. */
+export interface TenantShard {
+  id: string;
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  ssl: boolean;
+  /** Stores it will accept. `0` means "serve what you hold, take nothing new". */
+  capacity: number;
+}
+
+/**
+ * The shard a tenant is on when its row names none — every store provisioned
+ * before the cluster was sharded. Zero capacity keeps it out of the rotation, so
+ * the set of stores living here can only shrink.
+ */
+export const LEGACY_SHARD_ID = 'legacy';
+
+const legacyShard: TenantShard = {
+  id: LEGACY_SHARD_ID,
+  host: env.TENANT_DB_HOST,
+  port: env.TENANT_DB_PORT,
+  user: env.TENANT_DB_ADMIN_USER,
+  password: env.TENANT_DB_ADMIN_PASSWORD,
+  ssl: env.TENANT_DB_SSL,
+  capacity: 0,
+};
+
+// A shard declared as `legacy` in TENANT_SHARDS would give one id two meanings.
+const shards: TenantShard[] = [
+  legacyShard,
+  ...env.TENANT_SHARDS.filter((shard) => shard.id !== LEGACY_SHARD_ID),
+];
+
 export const config = {
   env: env.NODE_ENV,
   logLevel: env.LOG_LEVEL,
@@ -54,12 +89,10 @@ export const config = {
 
   /** Backend-only. Never surfaced by an endpoint, a log line, or the admin panel. */
   tenantDb: {
-    host: env.TENANT_DB_HOST,
-    port: env.TENANT_DB_PORT,
-    user: env.TENANT_DB_ADMIN_USER,
-    password: env.TENANT_DB_ADMIN_PASSWORD,
-    ssl: env.TENANT_DB_SSL,
     namePrefix: env.TENANT_DB_NAME_PREFIX,
+    /** Every server that holds tenant databases, `legacy` first. */
+    shards,
+    legacyShard,
   },
 
   storage: {

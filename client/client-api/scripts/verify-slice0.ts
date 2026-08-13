@@ -9,7 +9,8 @@
  */
 import { request as httpRequest } from 'node:http';
 import { config } from '../src/config/index';
-import { openTenantPool } from '../src/db/tenant-manager';
+import { openTenantPoolForSlug } from '../src/db/tenant-manager';
+import { tenantCacheKey } from '../src/lib/company-client';
 import { closeRedis, redis } from '../src/lib/redis';
 
 function arg(name: string): string | undefined {
@@ -31,7 +32,7 @@ const PASSWORD = arg('password') ?? 'OwnerPass2026';
 const STAFF = 'staff.tester@abcfashion.com';
 const STAFF_PASSWORD = 'StaffPass2026';
 
-const pool = openTenantPool(SLUG);
+const pool = await openTenantPoolForSlug(SLUG);
 
 let passed = 0;
 let failed = 0;
@@ -341,7 +342,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------- 7 --
   console.log('\n7. Blocked stores');
   {
-    const cacheKey = `tenant:v1:${SLUG}`;
+    const cacheKey = tenantCacheKey(SLUG);
     const cached = await redis.get(cacheKey);
     const record = cached ? JSON.parse(cached) : null;
 

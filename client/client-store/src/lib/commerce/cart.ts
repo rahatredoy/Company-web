@@ -3,7 +3,7 @@
 import * as React from 'react';
 import type { Cart, CartLine, CartTotals } from '@/types';
 import { createPersistedStore } from './persisted-store';
-import { multiply, percentOf, subtract, sum, toMinor } from './money';
+import { multiply, subtract, sum } from './money';
 
 /**
  * The basket.
@@ -42,18 +42,7 @@ interface StoredCart {
 
 const EMPTY: StoredCart = { currency: 'USD', lines: [], coupon: null };
 
-/** Demonstration coupons. Live, the API owns every one of these rules. */
-const COUPONS: Record<string, { label: string; percent: number; minimum: number }> = {
-  WELCOME20: { label: '20% off your first order', percent: 20, minimum: 0 },
-  SAVE10: { label: '10% off', percent: 10, minimum: 5000 },
-  URBAN20: { label: '20% off', percent: 20, minimum: 0 },
-};
-
-export type CouponError =
-  | 'invalid'
-  | 'minimum_not_met'
-  | 'already_applied'
-  | 'empty_cart';
+export type CouponResult = { ok: true } | { ok: false; message: string };
 
 function parseCart(raw: unknown): StoredCart | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -86,8 +75,18 @@ const lineId = (productId: string, variantId: string) => `${productId}::${varian
 function computeTotals(cart: StoredCart): CartTotals {
   const subtotal = sum(cart.lines.map((line) => line.lineTotal));
 
-  const rule = cart.coupon ? COUPONS[cart.coupon.code] : undefined;
-  const discount = rule ? percentOf(subtotal, rule.percent) : '0.00';
+  /*
+   * The discount is the figure the store returned when the code was applied,
+   * never one worked out here — this app deliberately holds no copy of the
+   * coupon rules. It is clamped to the subtotal so that editing the basket after
+   * applying a code can only ever make the estimate too small, never negative.
+   *
+   * Checkout re-derives all of it from the database, and that is the number
+   * charged; like the shipping line above, this is an estimate and the page says
+   * so.
+   */
+  const claimed = cart.coupon?.discount ?? '0.00';
+  const discount = Number(claimed) > Number(subtotal) ? subtotal : claimed;
 
   return {
     subtotal,
@@ -185,28 +184,47 @@ export function useCart() {
   /**
    * Applies a coupon, or explains why it cannot be.
    *
-   * Returns a code rather than a sentence so the caller owns the wording — the
-   * cart page and the checkout summary phrase the same refusal differently.
+   * The rules live on the server and the refusal sentence comes back with the
+   * answer, because the reasons are the store's own — a minimum spend, a usage
+   * cap, a campaign that has not started. Phrasing them here would mean keeping
+   * a copy of rules this app deliberately does not have.
+   *
+   * The two checks that stay local are the two the server cannot see: an empty
+   * basket, and a code that is already on it.
    */
-  const applyCoupon = React.useCallback(
-    (rawCode: string): { ok: true } | { ok: false; reason: CouponError } => {
-      const code = rawCode.trim().toUpperCase();
-      const current = store.get();
+  const applyCoupon = React.useCallback(async (rawCode: string): Promise<CouponResult> => {
+    const code = rawCode.trim().toUpperCase();
+    const current = store.get();
 
-      if (current.lines.length === 0) return { ok: false, reason: 'empty_cart' };
-      if (current.coupon?.code === code) return { ok: false, reason: 'already_applied' };
+    if (current.lines.length === 0) return { ok: false, message: 'Add something to your basket first.' };
+    if (current.coupon?.code === code) return { ok: false, message: 'That code is already applied.' };
 
-      const rule = COUPONS[code];
-      if (!rule) return { ok: false, reason: 'invalid' };
+    const subtotal = Number(sum(current.lines.map((line) => line.lineTotal)));
 
-      const subtotal = toMinor(sum(current.lines.map((line) => line.lineTotal)));
-      if (subtotal < rule.minimum) return { ok: false, reason: 'minimum_not_met' };
+    let body: {
+      data?: { valid?: boolean; message?: string; label?: string | null; discount?: string };
+    } | null = null;
+    try {
+      const response = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, subtotal }),
+      });
+      body = await response.json().catch(() => null);
+    } catch {
+      return { ok: false, message: 'We could not check that code. Try again in a moment.' };
+    }
 
-      store.set({ ...current, coupon: { code, label: rule.label, discount: '0.00' } });
-      return { ok: true };
-    },
-    [],
-  );
+    if (!body?.data?.valid) {
+      return { ok: false, message: body?.data?.message ?? 'That code is not valid.' };
+    }
+
+    store.set({
+      ...store.get(),
+      coupon: { code, label: body.data.label ?? null, discount: body.data.discount ?? '0.00' },
+    });
+    return { ok: true };
+  }, []);
 
   const removeCoupon = React.useCallback(() => {
     store.set((current) => ({ ...current, coupon: null }));
@@ -219,9 +237,4 @@ export function useCart() {
   );
 
   return { cart, add, updateQuantity, remove, clear, applyCoupon, removeCoupon, has };
-}
-
-/** The minimum a coupon needs, for a message that says how much more to spend. */
-export function couponMinimum(code: string): number | null {
-  return COUPONS[code.trim().toUpperCase()]?.minimum ?? null;
 }

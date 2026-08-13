@@ -37,6 +37,22 @@ export const storeSettings = pgTable(
       repeatMinOrders?: number;
       vipMinOrders?: number;
       highValueMinSpend?: number;
+      /**
+       * Every language and display currency this store has switched on.
+       *
+       * Both live here rather than in columns of their own because they are a
+       * store's own choice about its shopfront, not something the control plane
+       * provisions — and a jsonb key needs no migration to appear. Absent means
+       * "only the one in `language` / `currency`", which is what the storefront
+       * reads as "no selector to draw".
+       *
+       * A currency listed here is a currency prices are quoted in, so adding a
+       * second one is a pricing decision, not a display one.
+       */
+      languages?: string[];
+      currencies?: string[];
+      whatsappNumber?: string;
+      whatsappEnabled?: boolean;
     }>(),
     seoTitle: varchar('seo_title', { length: 160 }),
     seoDescription: varchar('seo_description', { length: 300 }),

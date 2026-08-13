@@ -12,6 +12,33 @@ import type { AdminMe } from '@/lib/types';
 
 const STORAGE_KEY = 'admin.sidebar.collapsed';
 
+/**
+ * The collapsed preference lives in `localStorage`, which React cannot see
+ * during the server render. Reading it through `useSyncExternalStore` rather
+ * than in an effect means the value is picked up as part of hydration instead
+ * of a render after it, and a change in one tab reaches the others.
+ */
+const collapseListeners = new Set<() => void>();
+
+function subscribeToCollapse(onChange: () => void): () => void {
+  collapseListeners.add(onChange);
+  window.addEventListener('storage', onChange);
+  return () => {
+    collapseListeners.delete(onChange);
+    window.removeEventListener('storage', onChange);
+  };
+}
+
+// A primitive, so React can compare snapshots without looping.
+const readCollapsed = () => window.localStorage.getItem(STORAGE_KEY) === '1';
+const readCollapsedOnServer = () => false;
+
+function writeCollapsed(next: boolean): void {
+  window.localStorage.setItem(STORAGE_KEY, next ? '1' : '0');
+  // `storage` only fires in *other* tabs, so this tab is notified by hand.
+  for (const listener of collapseListeners) listener();
+}
+
 function titleFor(pathname: string): string {
   const match = ADMIN_NAV.filter((item) => pathname.startsWith(item.href)).sort(
     (a, b) => b.href.length - a.href.length,
@@ -29,23 +56,23 @@ export function AdminShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = React.useState(false);
+  const collapsed = React.useSyncExternalStore(
+    subscribeToCollapse,
+    readCollapsed,
+    readCollapsedOnServer,
+  );
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [lastPathname, setLastPathname] = React.useState(pathname);
 
-  // Restore the collapsed preference after mount so SSR markup stays stable.
-  React.useEffect(() => {
-    setCollapsed(window.localStorage.getItem(STORAGE_KEY) === '1');
-  }, []);
+  // Navigating on mobile closes the drawer; leaving it open hides the page the
+  // admin just asked for. Adjusted during render rather than in an effect,
+  // which would paint the new page underneath the drawer first.
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
+    setMobileOpen(false);
+  }
 
-  React.useEffect(() => setMobileOpen(false), [pathname]);
-
-  const toggle = () => {
-    setCollapsed((current) => {
-      const next = !current;
-      window.localStorage.setItem(STORAGE_KEY, next ? '1' : '0');
-      return next;
-    });
-  };
+  const toggle = () => writeCollapsed(!collapsed);
 
   return (
     <div className="flex min-h-dvh bg-surface">

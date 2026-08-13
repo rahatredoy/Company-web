@@ -28,6 +28,51 @@ const bool = z
 
 const port = z.coerce.number().int().min(1).max(65535);
 
+/**
+ * The tenant database cluster is **sharded**: one PostgreSQL server holds many
+ * stores' databases, and a new store is placed on whichever shard still has
+ * room. Growth is a matter of appending a server here, not of resizing one.
+ *
+ * JSON rather than numbered variables, so adding a shard is one edit and the
+ * whole registry parses or fails as a unit at boot.
+ *
+ * `client-api` carries an identical copy of this list. Credentials are never
+ * transmitted between the two platforms — the internal tenant lookup publishes
+ * only a shard **id**, which each side resolves against its own registry.
+ */
+const tenantShards = z
+  .string()
+  .default('[]')
+  .transform((raw, ctx) => {
+    try {
+      return JSON.parse(raw) as unknown;
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'must be a JSON array of shard objects',
+      });
+      return z.NEVER;
+    }
+  })
+  .pipe(
+    z.array(
+      z.object({
+        id: z.string().trim().min(1).max(40),
+        host: z.string().min(1),
+        port,
+        user: z.string().min(1),
+        password: z.string().min(1),
+        ssl: bool.default(false),
+        /**
+         * How many stores this shard accepts. `0` keeps it serving the stores it
+         * already holds while taking no new ones — which is how a shard is
+         * drained, and how the pre-sharding server stays readable.
+         */
+        capacity: z.coerce.number().int().min(0).default(0),
+      }),
+    ),
+  );
+
 const optionalString = z
   .string()
   .trim()
@@ -98,12 +143,20 @@ export const envSchema = z.object({
   COMPANY_ADMIN_EMAIL: z.string().email().default('admin@company.com'),
   COMPANY_ADMIN_PASSWORD: optionalString,
 
+  /**
+   * The server that held every tenant database before sharding, and still the
+   * answer for any tenant whose row names no shard. It is registered as the
+   * `legacy` shard at zero capacity, so it keeps serving what it has and is
+   * never chosen for a new store.
+   */
   TENANT_DB_HOST: z.string().min(1),
   TENANT_DB_PORT: port.default(5432),
   TENANT_DB_ADMIN_USER: z.string().min(1),
   TENANT_DB_ADMIN_PASSWORD: z.string().min(1),
   TENANT_DB_SSL: bool.default(false),
   TENANT_DB_NAME_PREFIX: z.string().default('tenant_'),
+  /** Where new stores are placed. See the `tenantShards` comment above. */
+  TENANT_SHARDS: tenantShards,
 
   R2_ENDPOINT: optionalString,
   R2_ACCESS_KEY: optionalString,

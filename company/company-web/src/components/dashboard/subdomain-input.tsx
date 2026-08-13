@@ -32,40 +32,53 @@ export function SubdomainInput({
   invalid?: boolean;
   id?: string;
 }) {
-  const [availability, setAvailability] = React.useState<Availability>({ state: 'idle' });
+  /**
+   * The API's answer, remembered alongside the value it was asked about. Keying
+   * it that way is what stops a slow reply for `abc` being shown against `abcd`
+   * — the check below simply stops matching once the term moves on.
+   */
+  const [checked, setChecked] = React.useState<{ value: string; result: Availability } | null>(null);
+
+  const parsed = value ? subdomainSchema.safeParse(value) : null;
+
+  // Idle, invalid and checking are each a pure function of what has been typed,
+  // so they are derived here. Only the network answer needs to be held in state.
+  const availability: Availability = !parsed
+    ? { state: 'idle' }
+    : !parsed.success
+      ? { state: 'invalid', message: parsed.error.issues[0]?.message ?? 'Invalid subdomain.' }
+      : checked?.value === value
+        ? checked.result
+        : { state: 'checking' };
 
   React.useEffect(() => {
-    if (!value) {
-      setAvailability({ state: 'idle' });
+    const valid = value ? subdomainSchema.safeParse(value) : null;
+    if (!valid?.success) {
       onAvailabilityChange?.(false);
       return;
     }
 
-    const parsed = subdomainSchema.safeParse(value);
-    if (!parsed.success) {
-      setAvailability({ state: 'invalid', message: parsed.error.issues[0]?.message ?? 'Invalid subdomain.' });
-      onAvailabilityChange?.(false);
-      return;
-    }
-
-    setAvailability({ state: 'checking' });
+    const asked = valid.data;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
         const result = await api.get<{ available: boolean; reason?: string }>(
           '/api/v1/public/subdomain/check',
-          { query: { value: parsed.data }, signal: controller.signal },
+          { query: { value: asked }, signal: controller.signal },
         );
         if (result.available) {
-          setAvailability({ state: 'available' });
+          setChecked({ value: asked, result: { state: 'available' } });
           onAvailabilityChange?.(true);
         } else {
-          setAvailability({ state: 'taken', message: result.reason ?? 'This address is already taken.' });
+          setChecked({
+            value: asked,
+            result: { state: 'taken', message: result.reason ?? 'This address is already taken.' },
+          });
           onAvailabilityChange?.(false);
         }
       } catch (error) {
         if ((error as Error)?.name === 'AbortError') return;
-        setAvailability({ state: 'idle' });
+        setChecked({ value: asked, result: { state: 'idle' } });
         onAvailabilityChange?.(false);
       }
     }, 450);

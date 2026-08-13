@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isMockData } from '@/config';
+import { isMockCommerce } from '@/config';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
 
 /**
@@ -77,13 +77,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  if (isMockData) {
+  if (isMockCommerce) {
     const { mockPlaceOrder } = await import('@/lib/api/mock/orders');
     const order = await mockPlaceOrder(parsed.data);
     return NextResponse.json({ data: order }, { status: 201 });
   }
 
-  const { apiFetch, ApiError } = await import('@/lib/api/client');
+  const { apiFetch, ApiError, flattenDetails } = await import('@/lib/api/client');
   const { storeCall, cookieHeader } = await import('@/lib/tenant');
 
   try {
@@ -101,7 +101,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     // The API's messages are already customer-safe; anything else is generic.
     if (error instanceof ApiError) {
       return NextResponse.json(
-        { error: error.message, code: error.code, details: error.details },
+        // Flattened because the form reads one string per field, and the API's
+        // per-field keys are the same dotted paths the schema above produces —
+        // `shippingAddress.city` lands under the right input either way.
+        { error: error.message, code: error.code, details: flattenDetails(error.details) },
         { status: error.status || 502 },
       );
     }

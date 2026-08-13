@@ -8,6 +8,35 @@ export const isProduction = env.NODE_ENV === 'production';
 export const isDevelopment = env.NODE_ENV === 'development';
 export const isTest = env.NODE_ENV === 'test';
 
+/** One PostgreSQL server holding many tenant databases. */
+export interface TenantShard {
+  id: string;
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  ssl: boolean;
+  capacity: number;
+}
+
+/** The shard a tenant is on when the control plane names none for it. */
+export const LEGACY_SHARD_ID = 'legacy';
+
+const legacyShard: TenantShard = {
+  id: LEGACY_SHARD_ID,
+  host: env.TENANT_DB_HOST,
+  port: env.TENANT_DB_PORT,
+  user: env.TENANT_DB_ADMIN_USER,
+  password: env.TENANT_DB_ADMIN_PASSWORD,
+  ssl: env.TENANT_DB_SSL,
+  capacity: 0,
+};
+
+const shards: TenantShard[] = [
+  legacyShard,
+  ...env.TENANT_SHARDS.filter((shard) => shard.id !== LEGACY_SHARD_ID),
+];
+
 export const config = {
   env: env.NODE_ENV,
   logLevel: env.LOG_LEVEL,
@@ -28,12 +57,10 @@ export const config = {
 
   /** Backend-only. Never surfaced by an endpoint, a log line, or the admin panel. */
   tenantDb: {
-    host: env.TENANT_DB_HOST,
-    port: env.TENANT_DB_PORT,
-    user: env.TENANT_DB_ADMIN_USER,
-    password: env.TENANT_DB_ADMIN_PASSWORD,
-    ssl: env.TENANT_DB_SSL,
     namePrefix: env.TENANT_DB_NAME_PREFIX,
+    /** Every server that may hold a tenant database, `legacy` first. */
+    shards,
+    legacyShard,
     poolMax: env.TENANT_POOL_MAX,
     poolCache: env.TENANT_POOL_CACHE,
     poolIdleMinutes: env.TENANT_POOL_IDLE_MINUTES,
@@ -60,11 +87,11 @@ export const config = {
 
   storage: {
     endpoint: env.R2_ENDPOINT,
-    accessKey: env.R2_ACCESS_KEY,
-    secretKey: env.R2_SECRET_KEY,
+    accessKey: env.R2_ACCESS_KEY_ID,
+    secretKey: env.R2_SECRET_ACCESS_KEY,
     bucket: env.R2_BUCKET,
     publicUrl: env.R2_PUBLIC_URL,
-    configured: Boolean(env.R2_ENDPOINT && env.R2_ACCESS_KEY && env.R2_SECRET_KEY && env.R2_BUCKET),
+    configured: Boolean(env.R2_ENDPOINT && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET),
   },
 
   payment: {

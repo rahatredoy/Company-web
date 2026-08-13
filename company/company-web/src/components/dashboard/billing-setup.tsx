@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Check, Loader2, Minus, Receipt, ShieldCheck, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/alert';
@@ -79,12 +79,22 @@ export function BillingSetup({
 }) {
   const router = useRouter();
 
+  // Where the gateway sent the browser back to. Read through `useSearchParams`
+  // rather than `window.location` in an effect: the server sees the same query
+  // string on this dynamic page, so the first paint is already the right one
+  // instead of a correct render followed immediately by a corrected one.
+  const paymentOutcome = useSearchParams().get('payment');
+
   const [cycle, setCycle] = React.useState<'monthly' | 'yearly'>(
     (signup?.plan?.billingCycle as 'monthly' | 'yearly') ?? 'monthly',
   );
   const [busy, setBusy] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [confirming, setConfirming] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(
+    paymentOutcome === 'cancelled'
+      ? 'The payment was cancelled. Nothing has been charged — you can try again below.'
+      : null,
+  );
+  const [confirming, setConfirming] = React.useState(paymentOutcome === 'success');
 
   // A plan already chosen means billing setup is behind us and only the bill is
   // outstanding — a reload lands straight back on it rather than asking again.
@@ -112,14 +122,11 @@ export function BillingSetup({
   const onTrial = signup?.payment?.mode === 'method_setup' || Boolean(selected?.isTrial);
   const amountDue = onTrial ? '0.00' : planPrice;
 
+  // Take the gateway's marker back out of the address bar, so a refresh does not
+  // replay the outcome. Purely a URL edit — the state above already has it.
   React.useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('payment') === 'success') setConfirming(true);
-    if (params.get('payment') === 'cancelled') {
-      setError('The payment was cancelled. Nothing has been charged — you can try again below.');
-    }
-    if (params.has('payment')) window.history.replaceState(null, '', window.location.pathname);
-  }, []);
+    if (paymentOutcome) window.history.replaceState(null, '', window.location.pathname);
+  }, [paymentOutcome]);
 
   React.useEffect(() => {
     if (!confirming) return;

@@ -12,7 +12,8 @@ import { rngFor } from './fixtures';
  * **This is not authentication.** Passwords are compared in plain text and
  * sessions are a random string in a `Map`. That is acceptable for a fixture
  * that never leaves a developer's machine and would be indefensible anywhere
- * else — which is why `isMockData` gates every path that reaches it.
+ * else — which is why `isMockCommerce` gates every path that reaches it, and why
+ * that flag defaults to `mock` and has to be turned on deliberately.
  */
 
 interface StoredAccount {

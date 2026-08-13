@@ -1,0 +1,1 @@
+ALTER TABLE "tenants" ADD COLUMN "database_shard" varchar(40);

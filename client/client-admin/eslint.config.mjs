@@ -1,12 +1,19 @@
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { FlatCompat } from '@eslint/eslintrc';
+import nextCoreWebVitals from 'eslint-config-next/core-web-vitals';
+import nextTypescript from 'eslint-config-next/typescript';
 
-const compat = new FlatCompat({ baseDirectory: dirname(fileURLToPath(import.meta.url)) });
-
-export default [
-  ...compat.extends('next/core-web-vitals', 'next/typescript'),
+/**
+ * eslint-config-next 16 ships flat config directly, so it is spread in rather
+ * than pulled through `FlatCompat`. The compat layer serialises a config to
+ * validate it as eslintrc, and these arrays carry live plugin objects that
+ * reference themselves — it threw `Converting circular structure to JSON`
+ * before eslint saw a single file.
+ */
+const config = [
+  ...nextCoreWebVitals,
+  ...nextTypescript,
   {
     ignores: ['.next/**', 'node_modules/**', 'next-env.d.ts'],
   },
 ];
+
+export default config;

@@ -20,7 +20,7 @@ export function ThemeStyle({ themeKey }: { themeKey: string | null | undefined }
     <style
       id="storefront-theme"
       data-theme={theme.key}
-      // eslint-disable-next-line react/no-danger -- generated from a closed set of hex tokens, never from input
+       
       dangerouslySetInnerHTML={{ __html: themeToCss(theme) }}
     />
   );

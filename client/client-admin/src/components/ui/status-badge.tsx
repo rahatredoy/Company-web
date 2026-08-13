@@ -38,6 +38,39 @@ const STATUS_VARIANTS: Record<string, Variant> = {
 
   failed: 'danger',
   refunded: 'danger',
+
+  // orders — the arc from placed to delivered runs info → primary → success, so
+  // a list can be read by colour without stopping to read each word
+  new: 'info',
+  confirmed: 'info',
+  processing: 'primary',
+  packed: 'primary',
+  shipped: 'primary',
+  out_for_delivery: 'primary',
+  delivered: 'success',
+  returned: 'warning',
+
+  // payment
+  cod_pending: 'warning',
+  partially_paid: 'warning',
+  partially_refunded: 'warning',
+  authorized: 'info',
+  not_shipped: 'neutral',
+
+  // moderation and returns
+  approved: 'success',
+  rejected: 'danger',
+  under_review: 'warning',
+  requested: 'info',
+  received: 'info',
+  inspected: 'primary',
+  blocked: 'danger',
+
+  // customers
+  new_customer: 'info',
+  repeat: 'primary',
+  vip: 'success',
+  high_value: 'success',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -48,6 +81,13 @@ const STATUS_LABELS: Record<string, string> = {
   platform_subdomain: 'Platform Subdomain',
   storefront_custom: 'Storefront',
   admin_custom: 'Admin',
+  out_for_delivery: 'Out for Delivery',
+  cod_pending: 'Cash on Delivery',
+  partially_paid: 'Part Paid',
+  partially_refunded: 'Part Refunded',
+  not_shipped: 'Not Shipped',
+  under_review: 'Under Review',
+  high_value: 'High Value',
 };
 
 export function StatusBadge({

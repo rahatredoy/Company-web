@@ -69,6 +69,15 @@ export const tenants = pgTable(
     storeAdminOtpAttempts: integer('store_admin_otp_attempts').notNull().default(0),
     /** Name of the dedicated database created by provisioning. Never exposed by an API. */
     databaseName: varchar('database_name', { length: 80 }),
+    /**
+     * Which server of the sharded tenant cluster holds that database, chosen at
+     * provisioning time from the shard with the most room left.
+     *
+     * The id alone is published to `client-api`; the host and credentials behind
+     * it are configuration on each side, never transmitted. `null` is a store
+     * provisioned before the cluster was sharded, which is on the `legacy` shard.
+     */
+    databaseShard: varchar('database_shard', { length: 40 }),
     activatedAt: timestamp('activated_at', { withTimezone: true }),
     suspendedAt: timestamp('suspended_at', { withTimezone: true }),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),

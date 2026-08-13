@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, or } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { StoreContext } from '../plugins/tenant';
 import {
   categories,
@@ -20,11 +20,23 @@ import {
 import { CACHE_TTL, cached, invalidateTenantCache, tenantKey } from '../lib/cache';
 import { storeBaseUrl } from '../lib/urls';
 
-export interface AnnouncementConfig {
-  enabled: boolean;
-  text: string | null;
+/**
+ * One line in the announcement strip.
+ *
+ * A list rather than a single string because a store runs more than one notice
+ * at a time — a shipping threshold, a live campaign, a holiday cutoff — and
+ * rotating them is the only way to fit all three in a strip that tall.
+ */
+export interface AnnouncementMessage {
+  id: string;
+  text: string;
   linkUrl: string | null;
   linkLabel: string | null;
+}
+
+export interface AnnouncementConfig {
+  enabled: boolean;
+  messages: AnnouncementMessage[];
 }
 
 export interface ContactConfig {
@@ -57,6 +69,14 @@ export interface StorefrontConfig {
     faviconUrl: string | null;
     /** Absolute origin canonical URLs and the sitemap must use. */
     canonicalOrigin: string;
+    /**
+     * Every language and display currency the store has switched on, always
+     * including the one it trades in. The storefront draws a selector only when
+     * there is more than one — a control with a single option cannot do
+     * anything, so offering it is worse than leaving it out.
+     */
+    languages: string[];
+    currencies: string[];
   };
   design: {
     templateKey: StorefrontTemplate;
@@ -77,18 +97,58 @@ export interface StorefrontConfig {
   status: StoreContext['status'];
 }
 
-/** Header/footer JSON is free-form in the database; read it defensively. */
+function trimmedOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/** One `{ text, linkUrl, linkLabel }` object from the header JSON, or null. */
+function readAnnouncementMessage(raw: unknown, index: number): AnnouncementMessage | null {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const text = trimmedOrNull(value.text);
+  if (!text) return null;
+
+  return {
+    // The stored JSON carries no ids, so position is the only stable handle —
+    // enough for a React key, and it is never used to address a row.
+    id: trimmedOrNull(value.id) ?? `announcement-${index}`,
+    text,
+    linkUrl: trimmedOrNull(value.linkUrl),
+    linkLabel: trimmedOrNull(value.linkLabel),
+  };
+}
+
+/**
+ * Header/footer JSON is free-form in the database; read it defensively.
+ *
+ * Two shapes are accepted because the strip used to hold a single message and
+ * stores configured under that version still have `{ text, linkUrl }` sitting
+ * where the list now goes. Reading both here means no data migration and no
+ * store losing its notice on deploy.
+ */
 function readAnnouncement(raw: unknown): AnnouncementConfig {
   const value = (raw ?? {}) as Record<string, unknown>;
   const bar = (value.announcement ?? {}) as Record<string, unknown>;
-  const text = typeof bar.text === 'string' && bar.text.trim() ? bar.text.trim() : null;
 
-  return {
-    enabled: bar.enabled === true && text !== null,
-    text,
-    linkUrl: typeof bar.linkUrl === 'string' && bar.linkUrl.trim() ? bar.linkUrl.trim() : null,
-    linkLabel: typeof bar.linkLabel === 'string' && bar.linkLabel.trim() ? bar.linkLabel.trim() : null,
-  };
+  const messages = Array.isArray(bar.messages)
+    ? bar.messages.map(readAnnouncementMessage).filter((m): m is AnnouncementMessage => m !== null)
+    : [readAnnouncementMessage(bar, 0)].filter((m): m is AnnouncementMessage => m !== null);
+
+  // An enabled strip with nothing to say is not enabled, whatever the flag says.
+  return { enabled: bar.enabled === true && messages.length > 0, messages };
+}
+
+/**
+ * The switched-on locales, always containing the store's own.
+ *
+ * Deduplicated and order-preserving with the store's value first, so a stored
+ * list that happens to repeat it does not produce two identical menu entries.
+ */
+function localeList(stored: unknown, fallback: string): string[] {
+  const values = Array.isArray(stored)
+    ? stored.filter((v): v is string => typeof v === 'string' && v.trim().length > 0).map((v) => v.trim())
+    : [];
+
+  return [...new Set([fallback, ...values])];
 }
 
 function readTagline(raw: unknown): string | null {
@@ -189,21 +249,25 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
       return scoped.filter((item) => !item.parentId).map(toNode);
     };
 
-    const preferences = (settingsRow?.preferences ?? {}) as Record<string, unknown>;
+    const preferences = settingsRow?.preferences ?? {};
+    const currency = settingsRow?.currency ?? store.currency;
+    const language = settingsRow?.language ?? store.language;
 
     return {
       store: {
         slug: store.slug,
         name: settingsRow?.storeName ?? store.storeName,
         tagline: readTagline(designRow?.footerConfiguration),
-        currency: settingsRow?.currency ?? store.currency,
-        language: settingsRow?.language ?? store.language,
+        currency,
+        language,
         timezone: settingsRow?.timezone ?? store.timezone,
         logoUrl: designRow?.logoUrl ?? settingsRow?.logoUrl ?? null,
         faviconUrl: designRow?.faviconUrl ?? settingsRow?.faviconUrl ?? null,
         // A connected primary domain wins, so the same page is never indexed
         // under both the custom domain and the platform subdomain.
         canonicalOrigin: store.primaryDomain ? `https://${store.primaryDomain}` : storeBaseUrl(store.slug),
+        languages: localeList(preferences.languages, language),
+        currencies: localeList(preferences.currencies, currency),
       },
       design: {
         templateKey: designRow ? normaliseTemplateKey(designRow.templateKey) : DEFAULT_TEMPLATE,
@@ -215,8 +279,7 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
         email: settingsRow?.businessEmail ?? null,
         phone: settingsRow?.businessPhone ?? null,
         address: settingsRow?.businessAddress ?? null,
-        whatsappNumber:
-          typeof preferences.whatsappNumber === 'string' ? preferences.whatsappNumber : null,
+        whatsappNumber: preferences.whatsappNumber ?? null,
         whatsappEnabled: preferences.whatsappEnabled === true,
       },
       navigation: { header: buildTree('header'), footer: buildTree('footer') },
@@ -244,5 +307,3 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
     } satisfies StorefrontConfig;
   });
 }
-
-export { isNotNull, or };

@@ -14,6 +14,7 @@ export function SiteHeader() {
   const pathname = usePathname();
   const [open, setOpen] = React.useState(false);
   const [scrolled, setScrolled] = React.useState(false);
+  const [lastPathname, setLastPathname] = React.useState(pathname);
 
   React.useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -22,7 +23,13 @@ export function SiteHeader() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  React.useEffect(() => setOpen(false), [pathname]);
+  // Navigating closes the menu; leaving it open covers the page that was just
+  // asked for. Adjusted during render rather than in an effect, which would
+  // paint the new page behind the open menu for a frame first.
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
+    setOpen(false);
+  }
 
   return (
     <header

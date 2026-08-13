@@ -63,9 +63,12 @@ export function NotificationsMenu({ initialUnread }: { initialUnread: number }) 
     };
   }, []);
 
-  React.useEffect(() => {
-    if (open) void load();
-  }, [open, load]);
+  // Opening the menu is an event, not something to synchronise to — fetching
+  // from the handler keeps the request on the interaction that caused it.
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) void load();
+  };
 
   const markAll = async () => {
     setUnread(0);
@@ -89,7 +92,7 @@ export function NotificationsMenu({ initialUnread }: { initialUnread: number }) 
   };
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon-sm" aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ''}`} className="relative">
           <Bell />

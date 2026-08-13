@@ -119,7 +119,7 @@ export default async function CategoryPage({
     <div className="container-store py-6">
       <script
         type="application/ld+json"
-        // eslint-disable-next-line react/no-danger -- serialised from our own data, not from input
+         
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
 

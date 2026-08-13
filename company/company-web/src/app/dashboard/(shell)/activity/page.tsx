@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { Bell, Mail, MessageSquare, Send } from 'lucide-react';
 import { PageHeader } from '@/components/dashboard/page-header';
 import { EmptyState } from '@/components/dashboard/empty-state';
@@ -73,9 +74,9 @@ export default async function ActivityPage() {
 
       <p className="text-xs text-muted-foreground">
         Not receiving emails? Check your spam folder, or{' '}
-        <a href="/dashboard/support" className="text-primary hover:underline">
+        <Link href="/dashboard/support" className="text-primary hover:underline">
           open a support ticket
-        </a>
+        </Link>
         .
       </p>
     </>

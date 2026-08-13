@@ -34,8 +34,15 @@ export function TableFilters({
   const currentSearch = searchParams.get('search') ?? '';
   const currentStatus = searchParams.get(statusParam) ?? 'all';
   const [term, setTerm] = React.useState(currentSearch);
+  const [lastSearch, setLastSearch] = React.useState(currentSearch);
 
-  React.useEffect(() => setTerm(currentSearch), [currentSearch]);
+  // The box mirrors the URL, so a Reset or a back button has to pull the typed
+  // term back in step. Adjusted during render rather than in an effect, which
+  // would show the stale term for a frame first.
+  if (currentSearch !== lastSearch) {
+    setLastSearch(currentSearch);
+    setTerm(currentSearch);
+  }
 
   const push = (mutate: (params: URLSearchParams) => void) => {
     const params = new URLSearchParams(searchParams.toString());

@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { Sparkles } from 'lucide-react';
-import type { StoreConfig } from '@/types';
 import type { StorefrontTemplate, TemplateChromeProps, TemplateHomepageProps, TemplatePreset } from '../registry';
 import { StoreLogo } from '../chrome';
 import { AnnouncementBar } from '@/components/layout/announcement-bar';
@@ -97,7 +96,7 @@ function Footer({ config, locale }: TemplateChromeProps) {
   return <SiteFooter config={config} locale={locale} tone="surface" />;
 }
 
-function Homepage({ config, sections, locale }: TemplateHomepageProps) {
+function Homepage({ config, sections }: TemplateHomepageProps) {
   const [hero, ...rest] = splitHero(sections);
 
   return (

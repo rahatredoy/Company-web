@@ -30,8 +30,38 @@ interface Remaining {
   done: boolean;
 }
 
-function remainingFrom(deadline: number): Remaining {
-  const ms = deadline - Date.now();
+/**
+ * One interval for every countdown on the page, read through
+ * `useSyncExternalStore` the same way `useHydrated` reads hydration. The clock
+ * is genuinely an external source — subscribing to it is how React is told
+ * about it, and it keeps the first value out of an effect, which would have
+ * rendered the dashes and then immediately re-rendered over them.
+ */
+const tickListeners = new Set<() => void>();
+let tickTimer: number | undefined;
+
+function subscribeToSecond(onChange: () => void): () => void {
+  tickListeners.add(onChange);
+  tickTimer ??= window.setInterval(() => {
+    for (const listener of tickListeners) listener();
+  }, 1000);
+
+  return () => {
+    tickListeners.delete(onChange);
+    if (tickListeners.size === 0 && tickTimer !== undefined) {
+      window.clearInterval(tickTimer);
+      tickTimer = undefined;
+    }
+  };
+}
+
+// Whole seconds, so the snapshot is a primitive that only changes once a second
+// rather than on every comparison React makes.
+const readSecond = () => Math.floor(Date.now() / 1000);
+const readSecondOnServer = () => 0;
+
+function remainingFrom(deadline: number, now: number): Remaining {
+  const ms = deadline - now;
   if (ms <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0, done: true };
 
   const total = Math.floor(ms / 1000);
@@ -59,17 +89,8 @@ export function Countdown({
   expiredLabel?: string;
 }) {
   const hydrated = useHydrated();
-  const [remaining, setRemaining] = React.useState<Remaining | null>(null);
-
-  React.useEffect(() => {
-    setRemaining(remainingFrom(deadline));
-    const timer = window.setInterval(() => {
-      const next = remainingFrom(deadline);
-      setRemaining(next);
-      if (next.done) window.clearInterval(timer);
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [deadline]);
+  const second = React.useSyncExternalStore(subscribeToSecond, readSecond, readSecondOnServer);
+  const remaining = hydrated ? remainingFrom(deadline, second * 1000) : null;
 
   if (hydrated && remaining?.done) {
     return <p className={cn('text-sm font-medium text-muted', className)}>{expiredLabel}</p>;

@@ -76,7 +76,7 @@ function Footer({ config, locale }: TemplateChromeProps) {
   return <SiteFooter config={config} locale={locale} tone="alt" className="mt-20" />;
 }
 
-function Homepage({ config, sections, locale }: TemplateHomepageProps) {
+function Homepage({ config, sections }: TemplateHomepageProps) {
   return (
     <HomepageSections
       sections={sections}

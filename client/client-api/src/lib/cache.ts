@@ -1,3 +1,4 @@
+import type { FastifyInstance } from 'fastify';
 import { redis } from './redis';
 import { logger } from './logger';
 
@@ -64,6 +65,34 @@ export async function invalidateTenantCache(tenantRef: string, ...parts: string[
   } catch (error) {
     logger.warn({ err: (error as Error).message, pattern }, 'cache invalidation failed');
   }
+}
+
+/** Everything the public surface caches lives under this one sub-prefix. */
+export const STOREFRONT_CACHE_SCOPE = 'storefront';
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Drops this store's storefront cache after any successful admin write.
+ *
+ * Registered once per admin module rather than called from each handler,
+ * because "remember to invalidate" is a rule that holds right up until somebody
+ * adds a route — and the failure is invisible for a whole TTL, on somebody
+ * else's shop. A hook cannot be forgotten by a route that does not exist yet.
+ *
+ * `onResponse` runs after the reply has been sent, so this costs the request
+ * nothing, and a failed write (4xx/5xx) changed nothing worth dropping.
+ */
+export function invalidateStorefrontOnWrite(app: FastifyInstance): void {
+  app.addHook('onResponse', async (request, reply) => {
+    if (SAFE_METHODS.has(request.method)) return;
+    if (reply.statusCode >= 400) return;
+
+    const tenantRef = request.store?.tenantRef;
+    if (!tenantRef) return;
+
+    await invalidateTenantCache(tenantRef, STOREFRONT_CACHE_SCOPE);
+  });
 }
 
 export const CACHE_TTL = {

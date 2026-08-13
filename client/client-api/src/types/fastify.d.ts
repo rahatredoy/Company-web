@@ -35,6 +35,21 @@ declare module 'fastify' {
       remember: boolean;
     };
 
+    /**
+     * Present after `requireCustomer` — a signed-in shopper.
+     *
+     * Carries no permissions, and is a separate field from `storeAdmin` on
+     * purpose: a handler that reads the wrong one gets `undefined` rather than a
+     * principal with the wrong authority.
+     */
+    customer?: {
+      customerId: string;
+      email: string;
+      fullName: string;
+      sessionId: string;
+      tenantRef: string;
+    };
+
     /** Raw request body, captured only for webhook signature verification. */
     rawBody?: string;
   }
@@ -52,5 +67,9 @@ declare module 'fastify' {
     ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     /** Refuses anyone who is not a STORE_SUPER_ADMIN. */
     requireSuperAdmin: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    /** A signed-in shopper. Satisfied by no admin cookie, and vice versa. */
+    requireCustomer: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    /** Populates `request.customer` when signed in, and passes either way. */
+    optionalCustomer: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }

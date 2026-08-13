@@ -4,6 +4,7 @@ import { storeAdmins, storeSettings, storefrontSettings } from '../db/schema/ind
 import { DEFAULT_THEME, DEFAULT_TEMPLATE, STORE_ROLES, normaliseTemplateKey } from '../lib/constants';
 import { logger } from '../lib/logger';
 import { seedRolesAndPermissions } from './permissions';
+import { seedDefaultContent } from './store-content-seed';
 
 /** One attempt per tenant per process — the work is idempotent but not free. */
 const seeded = new Set<string>();
@@ -25,6 +26,9 @@ export async function ensureStoreSeed(db: TenantDb, tenantRef: string): Promise<
     await seedRolesAndPermissions(db);
     await normaliseProvisionedOwner(db);
     await ensureStorefrontSettings(db);
+    // Last, because it reads `store_settings` for the store's name and inserts
+    // navigation that points at the pages it created a moment earlier.
+    await seedDefaultContent(db);
   } catch (error) {
     // A failed seed must not poison the pool — let the next request retry.
     seeded.delete(tenantRef);

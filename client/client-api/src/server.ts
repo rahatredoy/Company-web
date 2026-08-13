@@ -1,5 +1,6 @@
 import { buildApp } from './app';
 import { config } from './config/index';
+import { checkConnectionBudget } from './db/connection-budget';
 import { tenantDb } from './db/tenant-manager';
 import { logger } from './lib/logger';
 import { closeRedis } from './lib/redis';
@@ -9,6 +10,16 @@ async function main(): Promise<void> {
 
   await app.listen({ port: config.api.port, host: config.api.host });
   logger.info({ port: config.api.port, env: config.env }, 'client-api listening');
+
+  // After listening, not before: a shard being slow to answer must not delay
+  // the health check, and an oversubscribed pool is a warning about load still
+  // to come rather than a reason to refuse the traffic already arriving.
+  void checkConnectionBudget().catch((error: unknown) => {
+    logger.warn(
+      { err: error instanceof Error ? error.message : String(error) },
+      'connection budget check failed',
+    );
+  });
 
   let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {

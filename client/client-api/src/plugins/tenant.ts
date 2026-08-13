@@ -137,7 +137,8 @@ export async function loadStore(request: FastifyRequest): Promise<StoreContext> 
   }
 
   // First call for a tenant opens the pool and brings its schema up to date.
-  const db = await tenantDb.get(tenant.tenantRef, tenant.slug);
+  // The shard comes from the control plane and nowhere else — see `tenant-shards`.
+  const db = await tenantDb.get(tenant.tenantRef, tenant.slug, tenant.databaseShard);
 
   return {
     slug: tenant.slug,

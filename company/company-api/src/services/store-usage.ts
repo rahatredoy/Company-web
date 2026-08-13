@@ -1,4 +1,5 @@
 import { tenantAdminConnection } from '../db/tenant-connection';
+import { resolveShard } from './tenant-shards';
 import { tenants } from '../db/schema/index';
 import { logger } from '../lib/logger';
 
@@ -32,7 +33,7 @@ export async function readStoreUsage(tenant: Tenant): Promise<StoreUsage> {
   if (!tenant.databaseName) return EMPTY;
   if (tenant.storeStatus !== 'ready' && tenant.storeStatus !== 'suspended') return EMPTY;
 
-  const client = tenantAdminConnection(tenant.databaseName);
+  const client = tenantAdminConnection(resolveShard(tenant.databaseShard), tenant.databaseName);
 
   try {
     await client.connect();

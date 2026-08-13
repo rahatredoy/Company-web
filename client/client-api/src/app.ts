@@ -9,6 +9,17 @@ import tenant from './plugins/tenant';
 import auth from './plugins/auth';
 import healthRoutes from './modules/health/routes';
 import authRoutes from './modules/auth/routes';
+import catalogRoutes from './modules/catalog/routes';
+import customerRoutes from './modules/customers/routes';
+import fulfilmentRoutes from './modules/fulfilment/routes';
+import inventoryRoutes from './modules/inventory/routes';
+import marketingRoutes from './modules/marketing/routes';
+import orderRoutes from './modules/orders/routes';
+import adminReviewRoutes from './modules/reviews/routes';
+import settingsRoutes from './modules/settings/routes';
+import storefrontRoutes from './modules/storefront/routes';
+import uploadRoutes from './modules/uploads/routes';
+import websiteRoutes from './modules/website/routes';
 
 export async function buildApp() {
   const app = Fastify({
@@ -43,9 +54,29 @@ export async function buildApp() {
   await app.register(
     async (instance) => {
       await instance.register(authRoutes);
+      await instance.register(catalogRoutes);
+      await instance.register(orderRoutes);
+      await instance.register(customerRoutes);
+      await instance.register(adminReviewRoutes);
+      await instance.register(inventoryRoutes);
+      await instance.register(fulfilmentRoutes);
+      await instance.register(marketingRoutes);
+      await instance.register(websiteRoutes);
+      await instance.register(settingsRoutes);
+      await instance.register(uploadRoutes);
     },
     { prefix: '/api/v1/admin' },
   );
+
+  /*
+   * The public surface. Registered as its own prefix rather than inside the
+   * block above because the two are told apart by their path: `surfaceOf` in
+   * `lib/urls.ts` reads anything that is not `/api/v1/admin` as the storefront,
+   * and `plugins/security.ts` gives each surface its own allowed origins. A
+   * storefront route registered under the admin prefix would silently inherit
+   * the panel's CORS policy.
+   */
+  await app.register(storefrontRoutes, { prefix: '/api/v1/storefront' });
 
   if (!isProduction) {
     app.log.info(

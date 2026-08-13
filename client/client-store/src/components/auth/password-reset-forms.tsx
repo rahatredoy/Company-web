@@ -114,9 +114,10 @@ export function ResetPasswordForm({ token }: { token: string | undefined }) {
       const response = await fetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // The email field satisfies the endpoint's schema; the token is what
-        // actually identifies the account server-side.
-        body: JSON.stringify({ email: 'reset@placeholder.invalid', token, password }),
+        // The token identifies the account. No email is sent — the reset link is
+        // the proof, and an address alongside it would only be something for the
+        // server to disagree with.
+        body: JSON.stringify({ token, password }),
       });
 
       if (!response.ok) {

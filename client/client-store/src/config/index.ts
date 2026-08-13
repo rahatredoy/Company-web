@@ -8,14 +8,31 @@ export const publicConfig = {
   platformRootDomain: process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? 'company.com',
 
   /**
-   * Where storefront data comes from.
+   * Where the **catalogue** comes from: products, categories, brands, store
+   * configuration, CMS pages, search.
    *
    * `mock` renders the site from fixtures so design work can proceed while the
    * commerce endpoints are still being built. The fixtures live under
-   * `lib/api/mock/` and are imported only on this branch, so a production build
-   * never bundles them. Set `live` the moment the endpoints exist.
+   * `lib/api/mock/` and are imported only on that branch, so a production build
+   * never bundles them.
    */
   dataSource: (process.env.NEXT_PUBLIC_DATA_SOURCE ?? 'mock') as 'live' | 'mock',
+
+  /**
+   * Where the **shopping** half comes from: customer accounts, orders, returns,
+   * checkout and review submission.
+   *
+   * Split from `dataSource` because the two halves were built at different
+   * times. The Commerce API serves the catalogue; it has no cart, checkout or
+   * customer session yet, so a single flag flipped to `live` would have turned
+   * every account and checkout page into a 404 the moment the shop started
+   * working. Keeping them apart is what lets the storefront read real products
+   * today without pretending it can take an order.
+   *
+   * Cart, wishlist and compare are not covered by either flag — they live in
+   * the visitor's own browser by design and talk to no API at all.
+   */
+  commerceSource: (process.env.NEXT_PUBLIC_COMMERCE_SOURCE ?? 'mock') as 'live' | 'mock',
 
   /**
    * Local-only fallback: neither Windows nor Node resolves `*.localhost`, so in
@@ -66,7 +83,11 @@ export const publicConfig = {
   },
 } as const;
 
+/** The catalogue half — products, categories, brands, config, content, search. */
 export const isMockData = publicConfig.dataSource === 'mock';
+
+/** The shopping half — accounts, orders, returns, checkout, review submission. */
+export const isMockCommerce = publicConfig.commerceSource === 'mock';
 
 /**
  * The layout width a phone is given in `desktop` mobile mode.

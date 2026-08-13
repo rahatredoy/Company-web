@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isMockData } from '@/config';
+import { isMockCommerce } from '@/config';
 
 /**
  * Order cancellation.
@@ -34,7 +34,7 @@ export async function POST(
     return NextResponse.json({ error: 'Please choose a reason.' }, { status: 400 });
   }
 
-  if (isMockData) {
+  if (isMockCommerce) {
     const { mockCancelOrder } = await import('@/lib/api/mock/orders');
     const cancelled = await mockCancelOrder(orderNumber);
 

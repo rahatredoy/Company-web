@@ -47,15 +47,7 @@ export function SearchBox({
 
   React.useEffect(() => {
     const term = value.trim();
-
-    if (term.length < 2) {
-      setSuggestions([]);
-      setOpen(false);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
+    if (term.length < 2) return;
 
     const timer = window.setTimeout(async () => {
       abortRef.current?.abort();
@@ -87,9 +79,25 @@ export function SearchBox({
 
   React.useEffect(() => () => abortRef.current?.abort(), []);
 
+  /**
+   * Typing is what arms or clears the suggestion list, so it happens on the
+   * keystroke rather than in the debounce effect. The effect is left with the
+   * one thing that genuinely has to wait — the request.
+   */
+  const applyTerm = (next: string) => {
+    setValue(next);
+
+    if (next.trim().length < 2) {
+      setSuggestions([]);
+      setOpen(false);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+  };
+
   const go = (href: string) => {
-    setOpen(false);
-    setValue('');
+    applyTerm('');
     router.push(href);
   };
 
@@ -172,7 +180,7 @@ export function SearchBox({
           type="search"
           name="q"
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => applyTerm(event.target.value)}
           onFocus={() => suggestions.length > 0 && setOpen(true)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
@@ -195,8 +203,7 @@ export function SearchBox({
             type="button"
             aria-label="Clear search"
             onClick={() => {
-              setValue('');
-              setOpen(false);
+              applyTerm('');
               inputRef.current?.focus();
             }}
             className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-full text-subtle hover:text-foreground"

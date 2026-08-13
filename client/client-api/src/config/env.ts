@@ -28,6 +28,45 @@ const bool = z
 
 const port = z.coerce.number().int().min(1).max(65535);
 
+/**
+ * The tenant database cluster is **sharded**: one PostgreSQL server holds many
+ * stores' databases, and a store's own shard is named on its control-plane
+ * record. Growth is a matter of appending a server here, not of resizing one.
+ *
+ * This registry is a deliberate copy of `company-api`'s. Credentials never cross
+ * between the two platforms — `/internal/tenants/by-slug` publishes only a shard
+ * **id**, and this side turns that id into a connection locally. An id this API
+ * does not know is a configuration error, not a request the tenant can cause.
+ */
+const tenantShards = z
+  .string()
+  .default('[]')
+  .transform((raw, ctx) => {
+    try {
+      return JSON.parse(raw) as unknown;
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'must be a JSON array of shard objects',
+      });
+      return z.NEVER;
+    }
+  })
+  .pipe(
+    z.array(
+      z.object({
+        id: z.string().trim().min(1).max(40),
+        host: z.string().min(1),
+        port,
+        user: z.string().min(1),
+        password: z.string().min(1),
+        ssl: bool.default(false),
+        /** Unused on this side — placement is the company platform's decision. */
+        capacity: z.coerce.number().int().min(0).default(0),
+      }),
+    ),
+  );
+
 const optionalString = z
   .string()
   .trim()
@@ -65,17 +104,38 @@ export const envSchema = z.object({
   TENANT_CACHE_TTL_SECONDS: z.coerce.number().int().min(5).max(600).default(60),
 
   // --- Tenant database cluster ------------------------------------------------
+  /**
+   * The server that held every tenant database before sharding. Registered as
+   * the `legacy` shard, and used for any tenant the control plane names no shard
+   * for — which is what an account provisioned before sharding looks like.
+   */
   TENANT_DB_HOST: z.string().min(1),
   TENANT_DB_PORT: port.default(5432),
   TENANT_DB_ADMIN_USER: z.string().min(1),
   TENANT_DB_ADMIN_PASSWORD: z.string().min(1),
   TENANT_DB_SSL: bool.default(false),
   TENANT_DB_NAME_PREFIX: z.string().default('tenant_'),
+  /** Must list the same ids as company-api's copy. See the comment above. */
+  TENANT_SHARDS: tenantShards,
 
-  /** Per-tenant pool size. Small on purpose — hundreds of tenants share one cluster. */
-  TENANT_POOL_MAX: z.coerce.number().int().min(1).max(20).default(4),
+  /**
+   * Per-tenant pool size. Small on purpose — hundreds of tenants share one
+   * cluster, and a store rarely needs more than a few queries in flight.
+   *
+   * These two multiply. One instance can hold `TENANT_POOL_CACHE ×
+   * TENANT_POOL_MAX` connections open, all of them on whichever shards those
+   * tenants happen to live on, so the product has to fit inside a shard's
+   * `max_connections` with room to spare for the control plane, the workers and
+   * any second instance. The defaults come to 48, which fits PostgreSQL's own
+   * default of 100 twice over; `db/connection-budget.ts` checks the real figure
+   * against the real servers at boot and says so if it does not.
+   *
+   * Raising these past a shard's limit is what a connection pooler (PgBouncer in
+   * transaction mode) is for — not a larger number here.
+   */
+  TENANT_POOL_MAX: z.coerce.number().int().min(1).max(20).default(3),
   /** How many tenant pools stay resident before the least recently used is evicted. */
-  TENANT_POOL_CACHE: z.coerce.number().int().min(1).max(500).default(50),
+  TENANT_POOL_CACHE: z.coerce.number().int().min(1).max(500).default(16),
   /** Idle pools older than this are closed. */
   TENANT_POOL_IDLE_MINUTES: z.coerce.number().int().min(1).max(120).default(10),
 
@@ -103,8 +163,8 @@ export const envSchema = z.object({
 
   // --- Object storage -------------------------------------------------------------
   R2_ENDPOINT: optionalString,
-  R2_ACCESS_KEY: optionalString,
-  R2_SECRET_KEY: optionalString,
+  R2_ACCESS_KEY_ID: optionalString,
+  R2_SECRET_ACCESS_KEY: optionalString,
   R2_BUCKET: optionalString,
   R2_PUBLIC_URL: optionalString,
 

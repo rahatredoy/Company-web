@@ -2,6 +2,24 @@
 export const SESSION_COOKIE = {
   admin: 'store_admin_session',
   adminMfa: 'store_admin_mfa',
+  /**
+   * The shopper's session — a fourth cookie family that interoperates with none
+   * of the others.
+   *
+   * A customer is the least-trusted principal on the platform and holds no
+   * permissions at all, so their token must never be mistakable for a store
+   * admin's. Distinct names are what make that true at the browser rather than
+   * relying on the table lookup to fail.
+   */
+  customer: 'store_customer_session',
+  /**
+   * Names the orders a browser placed as a guest.
+   *
+   * Not a credential and not a session: it authorises reading the confirmation
+   * page for orders this browser actually created, and nothing else. Without it
+   * a guest who has just paid is bounced off their own receipt.
+   */
+  guestOrders: 'store_guest_orders',
 } as const;
 
 /**

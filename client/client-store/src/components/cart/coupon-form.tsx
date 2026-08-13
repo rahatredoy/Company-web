@@ -5,61 +5,38 @@ import { Tag, X } from 'lucide-react';
 import type { Cart } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useCart, couponMinimum, type CouponError } from '@/lib/commerce/cart';
-import { formatMoney } from '@/lib/utils';
+import { useCart } from '@/lib/commerce/cart';
 
 /**
  * Coupon entry.
  *
- * Each refusal gets its own sentence. "Invalid coupon" for a code that is real
- * but needs a larger basket sends people away thinking they mistyped it, when
- * what they needed was to be told how much more to spend.
+ * Each refusal gets its own sentence, and the sentence comes from the store.
+ * "Invalid coupon" for a code that is real but needs a larger basket sends
+ * people away thinking they mistyped it, when what they needed was to be told
+ * how much more to spend — and only the server knows which of those it is.
  *
- * The store applies the discount at checkout from its own rules; what happens
- * here is the optimistic view.
+ * The discount is still applied for real at checkout, against live prices and
+ * live stock; what happens here is the optimistic view of the same rules.
  */
-export function CouponForm({
-  cart,
-  currency,
-  locale,
-}: {
-  cart: Cart;
-  currency: string;
-  locale: string;
-}) {
+export function CouponForm({ cart }: { cart: Cart; currency?: string; locale?: string }) {
   const { applyCoupon, removeCoupon } = useCart();
   const [code, setCode] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
+  const [checking, setChecking] = React.useState(false);
 
-  const message = (reason: CouponError, entered: string): string => {
-    switch (reason) {
-      case 'invalid':
-        return 'That code is not recognised. Check it and try again.';
-      case 'minimum_not_met': {
-        const minimum = couponMinimum(entered);
-        return minimum
-          ? `This code needs a subtotal of at least ${formatMoney(String(minimum / 100), currency, locale)}.`
-          : 'Your basket does not meet this code’s minimum.';
-      }
-      case 'already_applied':
-        return 'That code is already applied.';
-      case 'empty_cart':
-        return 'Add something to your basket first.';
-    }
-  };
-
-  const onSubmit = (event: React.FormEvent) => {
+  const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const entered = code.trim();
-    if (!entered) return;
+    if (!entered || checking) return;
 
-    const result = applyCoupon(entered);
-    if (result.ok) {
-      setCode('');
-      setError(null);
-    } else {
-      setError(message(result.reason, entered));
-    }
+    setChecking(true);
+    setError(null);
+
+    const result = await applyCoupon(entered);
+    setChecking(false);
+
+    if (result.ok) setCode('');
+    else setError(result.message);
   };
 
   if (cart.coupon) {

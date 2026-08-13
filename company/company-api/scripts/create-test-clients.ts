@@ -21,6 +21,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { db, pool } from '../src/db/client';
 import { clientAccounts, clientSessions, plans, tenants } from '../src/db/schema/index';
 import { config } from '../src/config/index';
+import { locateShard, shardClientOptions } from '../src/services/tenant-shards';
 import { generateToken, sha256 } from '../src/lib/crypto';
 import { hashOtp } from '../src/lib/otp';
 import { hashPassword } from '../src/lib/password';
@@ -108,14 +109,12 @@ async function plantOtp(slug: string): Promise<void> {
 }
 
 async function dropTenantDatabase(databaseName: string): Promise<void> {
-  const admin = new pg.Client({
-    host: config.tenantDb.host,
-    port: config.tenantDb.port,
-    user: config.tenantDb.user,
-    password: config.tenantDb.password,
-    database: 'postgres',
-    ssl: config.tenantDb.ssl ? { rejectUnauthorized: false } : undefined,
-  });
+  // The fixtures are rebuilt from scratch each run, so the shard they landed on
+  // last time has to be found rather than assumed.
+  const shard = await locateShard(databaseName);
+  if (!shard) return;
+
+  const admin = new pg.Client(shardClientOptions(shard, 'postgres'));
   await admin.connect();
   try {
     await admin.query(`drop database if exists "${databaseName}" with (force)`);
