@@ -98,7 +98,7 @@ export default async function taxonomyRoutes(app: FastifyInstance) {
     // exists but is hidden" would let anyone map out what a store is preparing.
     if (!row) throw notFound('This category does not exist.');
 
-    const flat = await loadCategoryTree(store.db);
+    const flat = await loadCategoryTree(store);
     const subtree = descendantIds(flat, row.id);
 
     const [tally] = await store.db

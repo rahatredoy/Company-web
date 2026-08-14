@@ -4,6 +4,7 @@
  *
  *   npx tsx scripts/verify-schema.ts [--slug abc-fashion]
  */
+import { readdir } from 'node:fs/promises';
 import { config } from '../src/config/index';
 import { openTenantPoolForSlug } from '../src/db/tenant-manager';
 import { COMMERCE_SCHEMA_VERSION } from '../src/db/tenant-migrate';
@@ -84,8 +85,23 @@ async function main(): Promise<void> {
     version[0]?.value,
   );
 
+  /*
+   * Counted against the migration folder rather than a literal.
+   *
+   * This read `=== '3'` and started failing the moment a fourth migration was
+   * added — which is exactly when a check on "did every migration reach this
+   * tenant" most needs to be working, and is the failure mode
+   * `COMMERCE_SCHEMA_VERSION` exists to catch.
+   */
+  const expected = (await readdir(new URL('../drizzle/', import.meta.url))).filter((name) =>
+    name.endsWith('.sql'),
+  ).length;
   const applied = await rows<{ n: string }>(`select count(*)::text as n from drizzle.__drizzle_migrations`);
-  check('all three migrations recorded', applied[0]?.n === '3', applied[0]);
+  check(
+    `all ${expected} migrations recorded`,
+    Number(applied[0]?.n ?? 0) === expected,
+    { applied: applied[0]?.n, expected },
+  );
 
   console.log('\n3. The provisioned admin is intact, and is the only one');
   const owner = await rows(`select email, role_key, account_status from store_admins order by created_at limit 1`);

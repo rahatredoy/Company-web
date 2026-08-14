@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { publicReadCache } from '../../lib/public-cache';
 import accountRoutes from './account.routes';
 import customerAuthRoutes from './auth.routes';
 import checkoutRoutes from './checkout.routes';
@@ -38,6 +39,16 @@ import taxonomyRoutes from './taxonomy.routes';
  * themselves anywhere in that plugin.
  */
 export default async function storefrontRoutes(app: FastifyInstance) {
+  /*
+   * Registered before the routes, so it applies to every one of them: the
+   * catalogue reads it names become cacheable by browsers and CDNs, and
+   * everything else keeps the `no-store` that `plugins/security.ts` puts on by
+   * default. The allow-list lives in that one file rather than in each handler —
+   * a private response reaching a shared cache is the failure this surface
+   * cannot afford, so escaping `no-store` has to be a deliberate edit.
+   */
+  publicReadCache(app);
+
   await app.register(configRoutes);
   await app.register(homeRoutes);
   await app.register(taxonomyRoutes);

@@ -24,7 +24,38 @@ export interface CategoryMenuEntry {
   name: string;
   slug: string;
   iconUrl: string | null;
+  /**
+   * Glyph key from a closed set the storefront owns, chosen by the store.
+   *
+   * A key rather than a URL: this icon renders in the header of every page,
+   * which makes it the best place on the shopfront to hang a remote image.
+   */
+  iconKey: string | null;
   children: { id: string; name: string; slug: string }[];
+}
+
+/** One social profile in the footer. `platform` picks the glyph. */
+export interface SocialLink {
+  platform: string;
+  url: string;
+}
+
+export interface FooterColumn {
+  id: string;
+  title: string;
+  links: { label: string; href: string }[];
+}
+
+export interface UtilityLink {
+  label: string;
+  href: string;
+}
+
+export interface MobileNavItem {
+  label: string;
+  href: string;
+  /** Closed-set icon key, resolved by `MobileBottomNav`. */
+  icon: string;
 }
 
 /**
@@ -89,7 +120,17 @@ export interface StoreConfig {
     whatsappNumber: string | null;
     whatsappEnabled: boolean;
   };
+  /** Desktop strip above the header. Empty means the store configured none. */
+  utility: UtilityLink[];
   navigation: { header: NavigationNode[]; footer: NavigationNode[] };
+  /**
+   * Footer link columns as the store arranged them. Empty draws the brand block
+   * alone — an invented column is worse than none, because half of it would 404.
+   */
+  footerColumns: FooterColumn[];
+  social: SocialLink[];
+  /** Mobile bottom bar. Empty hides the bar rather than guessing destinations. */
+  mobileNav: MobileNavItem[];
   categoryMenu: CategoryMenuEntry[];
   policyPages: { slug: string; title: string; systemKey: string | null }[];
   payment: { providers: { provider: string; label: string; description: string | null }[] };
@@ -264,7 +305,16 @@ export type HomepageSectionType =
   | 'testimonial'
   | 'brands'
   | 'newsletter'
-  | 'text';
+  | 'text'
+  /** A curated `collections` row: its own name, blurb, cover and products. */
+  | 'collection'
+  /** The shop's social photography — a square feed that links out. */
+  | 'social_gallery'
+  /**
+   * A per-visitor rail. The only section whose contents the server never sees:
+   * the browser holds the list, so the payload carries no ids at all.
+   */
+  | 'recently_viewed';
 
 export interface HomepageSection {
   id: string;
@@ -325,10 +375,34 @@ export interface LookbookTile {
 export interface Testimonial {
   id: string;
   quote: string;
-  authorName: string;
+  /** Null when the store gave no attribution; never a stand-in name. */
+  authorName: string | null;
   authorTitle: string | null;
   avatarUrl: string | null;
   rating: number | null;
+}
+
+/**
+ * A curated collection, resolved server-side from the `collections` table.
+ *
+ * Carries its own name and cover, which is what separates it from a product
+ * grid pointed at the same ids: a collection is a thing the store named, not
+ * just a selection from the catalogue.
+ */
+export interface CollectionBlock {
+  name: string;
+  description: string | null;
+  imageUrl: string | null;
+  productIds: string[];
+}
+
+/** One square in the social gallery. */
+export interface GalleryTile {
+  id: string;
+  imageUrl: string;
+  /** Outbound post permalink — the one place a section may link off-site. */
+  linkUrl: string | null;
+  caption: string | null;
 }
 
 export interface CmsPage {

@@ -17,7 +17,7 @@ import { ProductCarousel } from './product-carousel';
  * showing the sale price correctly.
  */
 export function FlashSaleRail({
-  title = 'Flash Deals',
+  title,
   subtitle,
   deadline,
   products,
@@ -26,9 +26,10 @@ export function FlashSaleRail({
   locale,
   className,
 }: {
-  title?: string;
+  /** The campaign's own name. Null renders the band without a heading. */
+  title: string | null;
   subtitle?: string | null;
-  deadline: number | null;
+  deadline: number;
   products: ProductSummary[];
   perView: TemplatePreset['carouselPerView'];
   cardVariant: ProductCardVariant;
@@ -45,14 +46,12 @@ export function FlashSaleRail({
             <Zap className="size-5" aria-hidden />
           </span>
           <div>
-            <h2 className="text-lg font-semibold leading-tight">{title}</h2>
+            {title ? <h2 className="text-lg font-semibold leading-tight">{title}</h2> : null}
             {subtitle ? <p className="text-xs opacity-75">{subtitle}</p> : null}
           </div>
         </div>
 
-        {deadline ? (
-          <Countdown deadline={deadline} size="sm" tone="surface" expiredLabel="Deals have ended" />
-        ) : null}
+        <Countdown deadline={deadline} size="sm" tone="surface" expiredLabel="Deals have ended" />
       </div>
 
       <div className="bg-surface p-4 sm:p-5">
@@ -61,7 +60,7 @@ export function FlashSaleRail({
           perView={perView}
           cardVariant={cardVariant}
           locale={locale}
-          label={title}
+          label={title ?? 'Flash sale'}
         />
       </div>
     </div>

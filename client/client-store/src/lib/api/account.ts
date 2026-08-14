@@ -1,7 +1,5 @@
 import 'server-only';
-import { cookies } from 'next/headers';
 import { cache } from 'react';
-import { isMockCommerce } from '@/config';
 import type { Address, Customer, ReturnSummary } from '@/types';
 import { cookieHeader, storeCall } from '@/lib/tenant';
 import { apiFetch } from './client';
@@ -21,11 +19,6 @@ import { apiFetch } from './client';
 export const CUSTOMER_SESSION_COOKIE = 'store_customer_session';
 export const CUSTOMER_SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 
-async function sessionToken(): Promise<string | undefined> {
-  const store = await cookies();
-  return store.get(CUSTOMER_SESSION_COOKIE)?.value;
-}
-
 /**
  * The current customer, or null.
  *
@@ -34,10 +27,6 @@ async function sessionToken(): Promise<string | undefined> {
  * exception means every caller writes the same try/catch.
  */
 export const getCustomer = cache(async (): Promise<Customer | null> => {
-  if (isMockCommerce) {
-    const { mockCustomer } = await import('./mock/account');
-    return mockCustomer(await sessionToken());
-  }
 
   return apiFetch<Customer | null>('/api/v1/storefront/account/me', {
     ...(await storeCall()),
@@ -49,10 +38,6 @@ export const getCustomer = cache(async (): Promise<Customer | null> => {
 });
 
 export async function getAddresses(): Promise<Address[]> {
-  if (isMockCommerce) {
-    const { mockAddresses } = await import('./mock/account');
-    return mockAddresses(await sessionToken());
-  }
 
   return apiFetch<Address[]>('/api/v1/storefront/account/addresses', {
     ...(await storeCall()),
@@ -61,10 +46,6 @@ export async function getAddresses(): Promise<Address[]> {
 }
 
 export async function getReturns(): Promise<ReturnSummary[]> {
-  if (isMockCommerce) {
-    const { mockReturns } = await import('./mock/account');
-    return mockReturns(await sessionToken());
-  }
 
   return apiFetch<ReturnSummary[]>('/api/v1/storefront/account/returns', {
     ...(await storeCall()),
@@ -75,10 +56,6 @@ export async function getReturns(): Promise<ReturnSummary[]> {
 export async function updateCustomer(
   patch: Partial<Pick<Customer, 'fullName' | 'phone' | 'acceptsMarketing'>>,
 ): Promise<Customer | null> {
-  if (isMockCommerce) {
-    const { mockUpdateCustomer } = await import('./mock/account');
-    return mockUpdateCustomer(await sessionToken(), patch);
-  }
 
   return apiFetch<Customer>('/api/v1/storefront/account/me', {
     method: 'PUT',

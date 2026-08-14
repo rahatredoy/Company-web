@@ -15,6 +15,7 @@ import {
 import { CACHE_TTL, cached, tenantKey } from '../../lib/cache';
 import { notFound } from '../../lib/errors';
 import { buildMeta, ok, parseParams, parseQuery } from '../../lib/http';
+import { queryKey } from '../../lib/public-cache';
 import { storeOf, type StoreContext } from '../../plugins/tenant';
 import {
   appliedFiltersOf,
@@ -66,6 +67,27 @@ const flagValue = z
   .optional()
   .transform((value) => ((Array.isArray(value) ? value[0] : value) === 'true' ? true : undefined));
 
+/**
+ * A "N stars and up" threshold, which may arrive more than once.
+ *
+ * The rating facet renders as checkboxes, so a shopper can tick both "4 & up"
+ * and "3 & up" and the sidebar sends `?rating=4&rating=3`. A bare
+ * `z.coerce.number()` sees the array, produces `NaN` and fails the whole
+ * request. The union of two lower bounds is the lower one, so the most
+ * inclusive threshold wins — which is also what ticking a second, broader box
+ * looks like it should do.
+ */
+const ratingValue = z
+  .union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))])
+  .optional()
+  .transform((value) => {
+    if (value === undefined) return undefined;
+    const numbers = (Array.isArray(value) ? value : [value])
+      .map((entry) => Number(entry))
+      .filter((entry) => Number.isFinite(entry) && entry >= 0 && entry <= 5);
+    return numbers.length > 0 ? Math.min(...numbers) : undefined;
+  });
+
 const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(500).default(1),
   pageSize: z.coerce.number().int().min(1).max(60).default(24),
@@ -78,7 +100,7 @@ const listQuerySchema = z.object({
   ids: listValue,
   minPrice: z.coerce.number().min(0).optional(),
   maxPrice: z.coerce.number().min(0).optional(),
-  rating: z.coerce.number().min(0).max(5).optional(),
+  rating: ratingValue,
   inStock: flagValue,
   sale: flagValue,
   /** Accepted so it forms part of the cache key; see `loadStoreCurrency`. */
@@ -125,7 +147,7 @@ async function resolveCategoryIds(
 ): Promise<string[] | undefined> {
   if (!categorySlug && !subSlugs?.length) return undefined;
 
-  const tree = await loadCategoryTree(store.db);
+  const tree = await loadCategoryTree(store);
   const bySlug = new Map(tree.map((node) => [node.slug, node]));
 
   // Chips narrow the page rather than replacing it, so when any are ticked they
@@ -165,17 +187,32 @@ export default async function storefrontProductRoutes(app: FastifyInstance) {
       const ids = query.ids.filter((id) => z.string().uuid().safeParse(id).success).slice(0, 60);
       if (ids.length === 0) return ok(reply, []);
 
-      const rows = await store.db
-        .select(productBaseColumns)
-        .from(products)
-        .leftJoin(brands, eq(brands.id, products.brandId))
-        .where(and(PUBLISHED_PRODUCT, inArray(products.id, ids)));
+      /*
+       * Cached like any other listing. This is the branch the homepage uses —
+       * every product block on it resolves through here — so on a store whose
+       * front page has six rails it is the single most requested read in the
+       * API, and its answer is the same for everyone who loads that page.
+       */
+      const summaries = await cached(
+        tenantKey(store.tenantRef, 'storefront', 'ids', queryKey({ ids, currency })),
+        CACHE_TTL.productList,
+        async () => {
+          const rows = await store.db
+            .select(productBaseColumns)
+            .from(products)
+            .leftJoin(brands, eq(brands.id, products.brandId))
+            .where(and(PUBLISHED_PRODUCT, inArray(products.id, ids)));
 
-      const summaries = await decorateSummaries(store.db, rows, currency);
-      // Returned in the order the section named them, not the order the database
-      // happened to scan — the owner's arrangement is the point of the section.
-      const byId = new Map(summaries.map((item) => [item.id, item]));
-      return ok(reply, ids.map((id) => byId.get(id)).filter((item) => item !== undefined));
+          const decorated = await decorateSummaries(store.db, rows, currency);
+          // Returned in the order the section named them, not the order the
+          // database happened to scan — the owner's arrangement is the point of
+          // the section.
+          const byId = new Map(decorated.map((item) => [item.id, item]));
+          return ids.map((id) => byId.get(id)).filter((item) => item !== undefined);
+        },
+      );
+
+      return ok(reply, summaries);
     }
 
     const categoryIds = await resolveCategoryIds(store, query.category, query.sub);
@@ -192,28 +229,61 @@ export default async function storefrontProductRoutes(app: FastifyInstance) {
       attributes: attributeFiltersOf(request.query),
     };
 
-    const conditions = listingConditions(filters);
-    const offset = (query.page - 1) * query.pageSize;
+    /*
+     * The page and the filter panel are cached apart, because they are keyed on
+     * different things.
+     *
+     * A shopper paging through a category re-asks the same *question* — the
+     * filters have not moved — and only the page number changes. Facets are five
+     * aggregates over the whole matching set and do not depend on the page or
+     * the sort at all, so keying them on the filters alone means page 2 through
+     * page 40 of a listing all reuse the one entry that page 1 paid for. Baking
+     * them into a single per-page entry would recompute the expensive half every
+     * time somebody clicked Next.
+     */
+    const filterKey = queryKey(filters);
 
-    const [rows, tally, facets] = await Promise.all([
-      store.db
-        .select(productBaseColumns)
-        .from(products)
-        .leftJoin(brands, eq(brands.id, products.brandId))
-        .where(and(...conditions))
-        .orderBy(...orderFor(query.sort as SortValue))
-        .limit(query.pageSize)
-        .offset(offset),
-      store.db.select({ total: count() }).from(products).where(and(...conditions)),
-      buildFacets(store.db, filters),
+    const [page, facets] = await Promise.all([
+      cached(
+        tenantKey(
+          store.tenantRef,
+          'storefront',
+          'list',
+          queryKey({ filterKey, sort: query.sort, page: query.page, pageSize: query.pageSize, currency }),
+        ),
+        CACHE_TTL.productList,
+        async () => {
+          const conditions = listingConditions(filters);
+
+          const [rows, tally] = await Promise.all([
+            store.db
+              .select(productBaseColumns)
+              .from(products)
+              .leftJoin(brands, eq(brands.id, products.brandId))
+              .where(and(...conditions))
+              .orderBy(...orderFor(query.sort as SortValue))
+              .limit(query.pageSize)
+              .offset((query.page - 1) * query.pageSize),
+            store.db.select({ total: count() }).from(products).where(and(...conditions)),
+          ]);
+
+          return {
+            items: await decorateSummaries(store.db, rows, currency),
+            meta: buildMeta(query.page, query.pageSize, Number(tally[0]?.total ?? 0)),
+          };
+        },
+      ),
+      cached(tenantKey(store.tenantRef, 'storefront', 'facets', filterKey), CACHE_TTL.facets, () =>
+        buildFacets(store.db, filters),
+      ),
     ]);
 
-    const total = Number(tally[0]?.total ?? 0);
-
     return ok(reply, {
-      items: await decorateSummaries(store.db, rows, currency),
-      meta: buildMeta(query.page, query.pageSize, total),
+      items: page.items,
+      meta: page.meta,
       filters: facets,
+      // Derived from what was asked for, not from what was found — no reason to
+      // hold it in a cache entry.
       appliedFilters: appliedFiltersOf(filters, query.category),
     } satisfies ProductListResult);
   });
@@ -388,17 +458,32 @@ async function loadProductDetail(
         saleEndsAt: productVariants.saleEndsAt,
         imageUrl: productVariants.imageUrl,
         isDefault: productVariants.isDefault,
+        /*
+         * `${productVariants}.id`, not `${productVariants.id}`.
+         *
+         * A bare column inside a `sql` template renders **unqualified** when the
+         * outer select has no join — `where il.variant_id = "id"`. Postgres then
+         * resolves that `"id"` against the subquery's own table, so this read
+         * `where il.variant_id = il.id`, matched nothing, and reported every
+         * variant as tracked-by-nobody. `stockBandFor` treats "not tracked" as
+         * in stock, so **every** product page said "In stock" no matter what the
+         * warehouse held — an out-of-stock item still offered Add to Cart.
+         *
+         * Rendering the table instead of the column forces the qualification.
+         * The listing endpoint was never affected: it counts stock in a hand
+         * written `db.execute`, where the aliases are explicit.
+         */
         available: sql<number>`(
           select coalesce(sum(il.available), 0)::int from inventory_levels il
-          where il.variant_id = ${productVariants.id}
+          where il.variant_id = ${productVariants}.id
         )`,
         trackedRows: sql<number>`(
           select count(*)::int from inventory_levels il
-          where il.variant_id = ${productVariants.id}
+          where il.variant_id = ${productVariants}.id
         )`,
         threshold: sql<number>`(
           select coalesce(min(il.low_stock_threshold), 5)::int from inventory_levels il
-          where il.variant_id = ${productVariants.id}
+          where il.variant_id = ${productVariants}.id
         )`,
       })
       .from(productVariants)
@@ -433,7 +518,7 @@ async function loadProductDetail(
       .where(eq(productVariants.productId, row.id))
       .orderBy(asc(attributes.sortOrder), asc(attributeValues.sortOrder)),
 
-    loadCategoryTree(store.db),
+    loadCategoryTree(store),
   ]);
 
   const selectionByVariant = new Map<string, Record<string, string>>();

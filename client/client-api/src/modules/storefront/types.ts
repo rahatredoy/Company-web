@@ -158,7 +158,10 @@ export type HomepageSectionKind =
   | 'testimonial'
   | 'brands'
   | 'newsletter'
-  | 'text';
+  | 'text'
+  | 'collection'
+  | 'social_gallery'
+  | 'recently_viewed';
 
 export interface HomepageSectionView {
   id: string;

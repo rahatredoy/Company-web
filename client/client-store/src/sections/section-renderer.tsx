@@ -16,10 +16,15 @@ import { BrandStrip } from '@/components/sections/brand-strip';
 import { Lookbook } from '@/components/sections/lookbook';
 import { Testimonials } from '@/components/sections/testimonials';
 import { NewsletterBand } from '@/components/sections/newsletter-band';
+import { CollectionShowcase } from '@/components/sections/collection-showcase';
+import { SocialGallery } from '@/components/sections/social-gallery';
+import { RecentlyViewed } from '@/components/sections/recently-viewed';
 import {
   readBanners,
   readBenefits,
+  readCollection,
   readDeadline,
+  readGalleryTiles,
   readLookbookTiles,
   readNumber,
   readString,
@@ -135,12 +140,21 @@ export async function SectionRenderer({
       const products = await getProductsByIds(readStringArray(section.config.productIds));
       if (products.length === 0) return null;
 
+      /*
+       * No deadline, no flash sale. The block is a countdown with products
+       * attached, and `home.routes.ts` only fills `endsAt` in while a campaign
+       * is genuinely running — so an expired one disappears instead of becoming
+       * an ordinary rail still labelled a limited offer.
+       */
+      const deadline = readDeadline(section.config);
+      if (deadline === null) return null;
+
       return (
         <SectionShell rhythm={rhythm}>
           <FlashSaleRail
-            title={section.title ?? 'Flash Deals'}
+            title={section.title}
             subtitle={section.subtitle}
-            deadline={readDeadline(section.config)}
+            deadline={deadline}
             products={products}
             perView={preset.carouselPerView}
             cardVariant={context.cardVariant}
@@ -164,7 +178,7 @@ export async function SectionRenderer({
             }
           >
             <SectionHeading
-              title={section.title ?? 'Top Brands'}
+              title={section.title}
               size="sm"
               action={{ label: 'View all', href: '/brands' }}
             />
@@ -176,15 +190,19 @@ export async function SectionRenderer({
 
     case 'lookbook': {
       const tiles = readLookbookTiles(section.config.tiles);
-      if (tiles.length === 0) return null;
+      const ctaLabel = readString(section.config.ctaLabel);
+      const ctaHref = readString(section.config.ctaHref);
+      // The copy panel is the block's left half; without a title it is a blank
+      // rectangle beside four photographs.
+      if (tiles.length === 0 || !section.title) return null;
 
       return (
         <SectionShell rhythm={rhythm}>
           <Lookbook
-            title={section.title ?? 'Lookbook'}
+            title={section.title}
             subtitle={section.subtitle}
-            ctaLabel={readString(section.config.ctaLabel) ?? 'View Lookbook'}
-            ctaHref={readString(section.config.ctaHref) ?? '/shop'}
+            ctaLabel={ctaLabel}
+            ctaHref={ctaHref}
             tiles={tiles}
           />
         </SectionShell>
@@ -197,24 +215,75 @@ export async function SectionRenderer({
 
       return (
         <SectionShell rhythm={rhythm}>
-          <SectionHeading
-            title={section.title ?? 'What our customers say'}
-            subtitle={section.subtitle}
-            align="center"
-            rule
-          />
+          <SectionHeading title={section.title} subtitle={section.subtitle} align="center" rule />
           <Testimonials testimonials={testimonials} />
         </SectionShell>
       );
     }
 
     case 'newsletter':
+      // The band is a heading and a form. Without the heading it is a coloured
+      // strip with an unexplained email field in it.
+      if (!section.title) return null;
+
       return (
         <SectionShell rhythm={rhythm}>
           <NewsletterBand
-            title={section.title ?? 'Subscribe to our newsletter'}
+            title={section.title}
             subtitle={section.subtitle}
             tone={preset.benefitsTone === 'dark' ? 'dark' : 'primary'}
+          />
+        </SectionShell>
+      );
+
+    case 'collection': {
+      const collection = readCollection(section.config.collection);
+      const ctaLabel = readString(section.config.ctaLabel);
+      const href = readString(section.config.href);
+      if (!collection || !ctaLabel || !href) return null;
+
+      const products = await getProductsByIds(collection.productIds);
+      if (products.length === 0) return null;
+
+      return (
+        <SectionShell rhythm={rhythm}>
+          <CollectionShowcase
+            collection={collection}
+            products={products}
+            href={href}
+            perView={preset.carouselPerView}
+            cardVariant={context.cardVariant}
+            locale={config.store.language}
+            ctaLabel={ctaLabel}
+          />
+        </SectionShell>
+      );
+    }
+
+    case 'social_gallery': {
+      const tiles = readGalleryTiles(section.config.tiles);
+      if (tiles.length === 0) return null;
+
+      return (
+        <SectionShell rhythm={rhythm}>
+          <SectionHeading title={section.title} subtitle={section.subtitle} align="center" rule />
+          <SocialGallery tiles={tiles} handle={readString(section.config.handle)} />
+        </SectionShell>
+      );
+    }
+
+    case 'recently_viewed':
+      // Rendered by the browser from the visitor's own history, so unlike every
+      // other block there is nothing here for the server to check first.
+      if (!section.title) return null;
+
+      return (
+        <SectionShell rhythm={rhythm}>
+          <RecentlyViewed
+            title={section.title}
+            perView={preset.carouselPerView}
+            cardVariant={context.cardVariant}
+            locale={config.store.language}
           />
         </SectionShell>
       );
@@ -264,12 +333,22 @@ async function CategorySection({
   const ids = readStringArray(section.config.categoryIds);
   const all = await getCategories();
 
+  /*
+   * Flattened before the lookup, because `getCategories` returns a *tree* and
+   * this used to search only its top level. A section pointed at subcategories —
+   * "Shop Electronics", listing the aisles under Electronics — found none of
+   * them and rendered nothing, with no error anywhere to say why. The block is
+   * meant to work at either level; that is the whole reason it takes ids rather
+   * than a depth.
+   */
+  const flatten = (nodes: typeof all): typeof all =>
+    nodes.flatMap((node) => [node, ...flatten(node.children)]);
+
+  const byId = new Map(flatten(all).map((category) => [category.id, category]));
+
   // An explicit id list is honoured in the order it was saved; without one the
-  // store's own category order is used.
-  const chosen =
-    ids.length > 0
-      ? ids.map((id) => all.find((category) => category.id === id)).filter((c) => c !== undefined)
-      : all;
+  // store's own top-level order is used.
+  const chosen = ids.length > 0 ? ids.map((id) => byId.get(id)).filter((c) => c !== undefined) : all;
 
   if (chosen.length === 0) return null;
 
@@ -377,7 +456,10 @@ async function DealSection({
   const banners = readBanners(section.config.banners);
   const deadline = readDeadline(section.config);
 
+  // The deal card is a titled panel; the mosaic's banners carry their own copy
+  // and stand up without one, so only the standalone form insists on a title.
   if (!product && banners.length === 0) return null;
+  if (banners.length === 0 && !section.title) return null;
 
   return (
     <SectionShell rhythm={context.preset.sectionRhythm}>
@@ -385,7 +467,7 @@ async function DealSection({
         <PromoMosaic
           dealProduct={product ?? null}
           deadline={deadline}
-          dealTitle={section.title ?? 'Deal of the Day'}
+          dealTitle={section.title}
           banners={banners}
           locale={context.config.store.language}
         />
@@ -393,7 +475,7 @@ async function DealSection({
         <DealOfTheDay
           product={product}
           deadline={deadline}
-          title={section.title ?? 'Deal of the Day'}
+          title={section.title}
           locale={context.config.store.language}
         />
       ) : null}

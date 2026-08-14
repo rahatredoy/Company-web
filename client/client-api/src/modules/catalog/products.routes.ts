@@ -1,7 +1,18 @@
-import { and, asc, count, desc, eq, ilike, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { brands, categories, productMedia, productVariants, products } from '../../db/schema/index';
+import {
+  attributeValues,
+  brands,
+  categories,
+  productAttributeValues,
+  productBundles,
+  productMedia,
+  productSpecifications,
+  productVariantValues,
+  productVariants,
+  products,
+} from '../../db/schema/index';
 import { audit } from '../../lib/audit';
 import { ERROR_CODES, conflict, notFound, unprocessable } from '../../lib/errors';
 import { buildMeta, noContent, ok, paginated, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
@@ -142,6 +153,74 @@ const patchSchema = z.object({
   seoDescription: z.string().trim().max(300).nullable().optional(),
 });
 
+/** The gallery, as a whole list. Twelve is a product page, not an album. */
+const mediaListSchema = z.object({
+  media: z
+    .array(
+      z.object({
+        url: z.string().trim().url('Use a full web address.').max(2000),
+        altText: z.string().trim().max(200).nullable().default(null),
+        sortOrder: z.coerce.number().int().min(0).max(100_000).optional(),
+      }),
+    )
+    .max(12)
+    .default([]),
+});
+
+const specificationListSchema = z.object({
+  specifications: z
+    .array(
+      z.object({
+        groupName: z.string().trim().max(80).nullable().default(null),
+        label: z.string().trim().min(1, 'Name the specification.').max(120),
+        value: z.string().trim().min(1, 'Give it a value.').max(400),
+        isKeySpec: z.boolean().default(false),
+        sortOrder: z.coerce.number().int().min(0).max(100_000).optional(),
+      }),
+    )
+    .max(100)
+    .default([]),
+});
+
+const attributeValueListSchema = z.object({
+  attributeValueIds: z.array(z.string().uuid('Choose values that exist.')).max(100).default([]),
+});
+
+/** Four is a bundle a shopper reads; more is a category listing. */
+const bundleSchema = z.object({
+  relatedProductIds: z.array(z.string().uuid('Choose products that exist.')).max(4).default([]),
+});
+
+/**
+ * The full variant list for one product.
+ *
+ * `selection` maps an attribute to the value this variant is — `{ Size: M,
+ * Colour: Black }` — and is what the storefront's option controls are built
+ * from. A variant with no selection is legal and is what a simple product has.
+ */
+const variantListSchema = z.object({
+  variants: z
+    .array(
+      z.object({
+        sku: z.string().trim().min(1, 'Give the variant a SKU.').max(64),
+        title: z.string().trim().max(200).nullable().default(null),
+        price: money,
+        salePrice: money.nullable().default(null),
+        costPrice: money.nullable().default(null),
+        barcode: z.string().trim().max(64).nullable().default(null),
+        weightGrams: z.coerce.number().int().min(0).max(10_000_000).nullable().default(null),
+        imageUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().default(null),
+        isDefault: z.boolean().default(false),
+        isActive: z.boolean().default(true),
+        sortOrder: z.coerce.number().int().min(0).max(100_000).optional(),
+        /** attributeValueId list; each value's attribute is resolved server-side. */
+        attributeValueIds: z.array(z.string().uuid()).max(6).default([]),
+      }),
+    )
+    .min(1, 'A product needs at least one variant.')
+    .max(100),
+});
+
 type StoreDb = ReturnType<typeof storeOf>['db'];
 
 /** A category or brand named by a request must belong to *this* store, and exist. */
@@ -276,6 +355,407 @@ export default async function productRoutes(app: FastifyInstance) {
         .orderBy(desc(productVariants.isDefault), asc(productVariants.sortOrder));
 
       return ok(reply, { ...product, variants, defaultVariant: variants[0] ?? null });
+    },
+  );
+
+  // ------------------------------------------------- product sub-resources ----
+  //
+  // Three tables the storefront has always read and nothing could write: the
+  // gallery, the specification rows behind the product tab, and the descriptive
+  // attribute values a listing filters on. Each is edited as a whole list rather
+  // than row by row — that is how the panel presents them, it makes a re-save
+  // idempotent, and it means a reorder is one request instead of N.
+
+  app.put(
+    '/products/:id/media',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('products.update')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+      const body = parseBody(mediaListSchema, request.body);
+
+      const product = (
+        await store.db
+          .select({ id: products.id, name: products.name })
+          .from(products)
+          .where(eq(products.id, id))
+          .limit(1)
+      )[0];
+      if (!product) throw notFound('That product no longer exists.');
+
+      await store.db.transaction(async (tx) => {
+        /*
+         * Only the gallery — rows with no `variant_id`.
+         *
+         * The single image on the product form is kept by `setPrimaryMedia` as a
+         * row tied to the default variant, and it is the one flagged primary.
+         * Clearing everything here would delete it on every gallery save and
+         * leave the listings, which read `product_media`, with no picture.
+         */
+        await tx
+          .delete(productMedia)
+          .where(and(eq(productMedia.productId, id), isNull(productMedia.variantId)));
+
+        if (body.media.length > 0) {
+          await tx.insert(productMedia).values(
+            body.media.map((item, index) => ({
+              productId: id,
+              variantId: null,
+              type: 'image' as const,
+              url: item.url,
+              altText: item.altText ?? product.name,
+              isPrimary: false,
+              sortOrder: item.sortOrder ?? index * 10,
+            })),
+          );
+        }
+      });
+
+      await audit(store.db, request, {
+        action: 'product.media',
+        module: 'catalog',
+        entity: 'product',
+        entityId: id,
+        entityLabel: product.name,
+        newValues: { galleryImages: body.media.length },
+      });
+
+      return ok(reply, { productId: id, count: body.media.length });
+    },
+  );
+
+  app.put(
+    '/products/:id/specifications',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('products.update')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+      const body = parseBody(specificationListSchema, request.body);
+
+      const product = (
+        await store.db
+          .select({ id: products.id, name: products.name })
+          .from(products)
+          .where(eq(products.id, id))
+          .limit(1)
+      )[0];
+      if (!product) throw notFound('That product no longer exists.');
+
+      await store.db.transaction(async (tx) => {
+        await tx.delete(productSpecifications).where(eq(productSpecifications.productId, id));
+
+        if (body.specifications.length > 0) {
+          await tx.insert(productSpecifications).values(
+            body.specifications.map((row, index) => ({
+              productId: id,
+              groupName: row.groupName,
+              label: row.label,
+              value: row.value,
+              isKeySpec: row.isKeySpec,
+              sortOrder: row.sortOrder ?? index * 10,
+            })),
+          );
+        }
+      });
+
+      await audit(store.db, request, {
+        action: 'product.specifications',
+        module: 'catalog',
+        entity: 'product',
+        entityId: id,
+        entityLabel: product.name,
+        newValues: { rows: body.specifications.length },
+      });
+
+      return ok(reply, { productId: id, count: body.specifications.length });
+    },
+  );
+
+  app.put(
+    '/products/:id/attributes',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('products.update')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+      const body = parseBody(attributeValueListSchema, request.body);
+
+      const product = (
+        await store.db
+          .select({ id: products.id, name: products.name })
+          .from(products)
+          .where(eq(products.id, id))
+          .limit(1)
+      )[0];
+      if (!product) throw notFound('That product no longer exists.');
+
+      /*
+       * Every value is resolved to its own attribute here rather than trusted
+       * from the body: the pair is a composite key, and a caller that sent a
+       * mismatched `attributeId` would file a colour under Size and make the
+       * facet counts disagree with the products they list.
+       */
+      const rows =
+        body.attributeValueIds.length > 0
+          ? await store.db
+              .select({ id: attributeValues.id, attributeId: attributeValues.attributeId })
+              .from(attributeValues)
+              .where(inArray(attributeValues.id, body.attributeValueIds))
+          : [];
+
+      if (rows.length !== body.attributeValueIds.length) {
+        throw unprocessable('One of those attribute values does not exist.', ERROR_CODES.VALIDATION_FAILED, {
+          attributeValueIds: ['Choose values that exist.'],
+        });
+      }
+
+      await store.db.transaction(async (tx) => {
+        await tx.delete(productAttributeValues).where(eq(productAttributeValues.productId, id));
+
+        if (rows.length > 0) {
+          await tx.insert(productAttributeValues).values(
+            rows.map((row) => ({
+              productId: id,
+              attributeId: row.attributeId,
+              attributeValueId: row.id,
+            })),
+          );
+        }
+      });
+
+      await audit(store.db, request, {
+        action: 'product.attributes',
+        module: 'catalog',
+        entity: 'product',
+        entityId: id,
+        entityLabel: product.name,
+        newValues: { values: rows.length },
+      });
+
+      return ok(reply, { productId: id, count: rows.length });
+    },
+  );
+
+  /**
+   * The "frequently bought together" pairing.
+   *
+   * Curated rather than mined from order history: with a handful of orders the
+   * mined version recommends whatever the last customer happened to buy, and
+   * the storefront prices the bundle from these rows, so an owner needs to be
+   * able to say what belongs in it.
+   */
+  app.put(
+    '/products/:id/bundle',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('products.update')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+      const body = parseBody(bundleSchema, request.body);
+
+      const product = (
+        await store.db
+          .select({ id: products.id, name: products.name })
+          .from(products)
+          .where(eq(products.id, id))
+          .limit(1)
+      )[0];
+      if (!product) throw notFound('That product no longer exists.');
+
+      if (body.relatedProductIds.includes(id)) {
+        throw unprocessable('A product cannot be bundled with itself.', ERROR_CODES.VALIDATION_FAILED, {
+          relatedProductIds: ['Choose other products.'],
+        });
+      }
+
+      const found = body.relatedProductIds.length
+        ? await store.db
+            .select({ id: products.id })
+            .from(products)
+            .where(inArray(products.id, body.relatedProductIds))
+        : [];
+      if (found.length !== body.relatedProductIds.length) {
+        throw unprocessable('One of those products does not exist.', ERROR_CODES.VALIDATION_FAILED, {
+          relatedProductIds: ['Choose products that exist.'],
+        });
+      }
+
+      await store.db.transaction(async (tx) => {
+        await tx.delete(productBundles).where(eq(productBundles.productId, id));
+        if (body.relatedProductIds.length > 0) {
+          await tx.insert(productBundles).values(
+            body.relatedProductIds.map((relatedProductId, index) => ({
+              productId: id,
+              relatedProductId,
+              sortOrder: index * 10,
+            })),
+          );
+        }
+      });
+
+      await audit(store.db, request, {
+        action: 'product.bundle',
+        module: 'catalog',
+        entity: 'product',
+        entityId: id,
+        entityLabel: product.name,
+        newValues: { items: body.relatedProductIds.length },
+      });
+
+      return ok(reply, { productId: id, count: body.relatedProductIds.length });
+    },
+  );
+
+  /**
+   * Replaces a product's variants.
+   *
+   * Matched to what is already there **by SKU**, not wiped and re-inserted.
+   * Everything hangs off a variant id by cascade — stock levels, the ledger,
+   * baskets, wishlists — so re-inserting a variant that had simply been renamed
+   * would silently empty its warehouse. A SKU is the one identifier that
+   * survives an edit, which is why the unique index is on it.
+   *
+   * A variant that disappears from the list *is* deleted, and its stock goes
+   * with it. Order history does not: `order_items.variant_id` is ON DELETE SET
+   * NULL and the line keeps its own name and price snapshot.
+   */
+  app.put(
+    '/products/:id/variants',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('products.update')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+      const body = parseBody(variantListSchema, request.body);
+
+      const product = (
+        await store.db
+          .select({ id: products.id, name: products.name })
+          .from(products)
+          .where(eq(products.id, id))
+          .limit(1)
+      )[0];
+      if (!product) throw notFound('That product no longer exists.');
+
+      const skus = body.variants.map((variant) => variant.sku);
+      if (new Set(skus).size !== skus.length) {
+        throw unprocessable('Two variants share a SKU.', ERROR_CODES.SKU_TAKEN, {
+          variants: ['Every variant needs its own SKU.'],
+        });
+      }
+
+      const existing = await store.db
+        .select({ id: productVariants.id, sku: productVariants.sku })
+        .from(productVariants)
+        .where(eq(productVariants.productId, id));
+      const bySku = new Map(existing.map((row) => [row.sku, row.id]));
+
+      // A SKU already used by a *different* product is a mis-scan, not an edit.
+      for (const variant of body.variants) {
+        if (!bySku.has(variant.sku)) await assertSkuFree(store.db, variant.sku);
+      }
+
+      const valueIds = [...new Set(body.variants.flatMap((variant) => variant.attributeValueIds))];
+      const valueRows = valueIds.length
+        ? await store.db
+            .select({ id: attributeValues.id, attributeId: attributeValues.attributeId })
+            .from(attributeValues)
+            .where(inArray(attributeValues.id, valueIds))
+        : [];
+      if (valueRows.length !== valueIds.length) {
+        throw unprocessable('One of those option values does not exist.', ERROR_CODES.VALIDATION_FAILED, {
+          attributeValueIds: ['Choose values that exist.'],
+        });
+      }
+      const attributeOf = new Map(valueRows.map((row) => [row.id, row.attributeId]));
+
+      // Exactly one default, so the product page always has a variant to open on.
+      const defaultIndex = Math.max(
+        body.variants.findIndex((variant) => variant.isDefault),
+        0,
+      );
+
+      await store.db.transaction(async (tx) => {
+        const keep = new Set<string>();
+
+        for (const [index, variant] of body.variants.entries()) {
+          const values = {
+            productId: id,
+            sku: variant.sku,
+            title: variant.title,
+            price: variant.price,
+            salePrice: variant.salePrice,
+            costPrice: variant.costPrice,
+            barcode: variant.barcode,
+            weightGrams: variant.weightGrams,
+            imageUrl: variant.imageUrl,
+            isDefault: index === defaultIndex,
+            isActive: variant.isActive,
+            sortOrder: variant.sortOrder ?? index * 10,
+            updatedAt: new Date(),
+          };
+
+          const current = bySku.get(variant.sku);
+          const variantId = current
+            ? (await tx.update(productVariants).set(values).where(eq(productVariants.id, current)).returning({ id: productVariants.id }))[0]!.id
+            : (await tx.insert(productVariants).values(values).returning({ id: productVariants.id }))[0]!.id;
+
+          keep.add(variantId);
+
+          await tx.delete(productVariantValues).where(eq(productVariantValues.variantId, variantId));
+          if (variant.attributeValueIds.length > 0) {
+            await tx.insert(productVariantValues).values(
+              variant.attributeValueIds.map((attributeValueId) => ({
+                variantId,
+                attributeId: attributeOf.get(attributeValueId)!,
+                attributeValueId,
+              })),
+            );
+          }
+        }
+
+        const dropped = existing.filter((row) => !keep.has(row.id)).map((row) => row.id);
+        if (dropped.length > 0) {
+          await tx.delete(productVariants).where(inArray(productVariants.id, dropped));
+        }
+
+        /*
+         * `price_from` is what every listing, card and sort reads, so it has to
+         * follow the variants rather than be set once at creation. Cheapest
+         * active variant wins — that is what "from £x" means.
+         */
+        const active = body.variants.filter((variant) => variant.isActive);
+        const cheapest = (active.length > 0 ? active : body.variants)
+          .map((variant) => ({
+            price: Number(variant.price),
+            salePrice: variant.salePrice === null ? null : Number(variant.salePrice),
+          }))
+          .sort((a, b) => (a.salePrice ?? a.price) - (b.salePrice ?? b.price))[0]!;
+
+        await tx
+          .update(products)
+          .set({
+            type: body.variants.length > 1 ? 'variable' : 'simple',
+            priceFrom: cheapest.price.toFixed(2),
+            salePriceFrom: cheapest.salePrice === null ? null : cheapest.salePrice.toFixed(2),
+            updatedAt: new Date(),
+          })
+          .where(eq(products.id, id));
+      });
+
+      await audit(store.db, request, {
+        action: 'product.variants',
+        module: 'catalog',
+        entity: 'product',
+        entityId: id,
+        entityLabel: product.name,
+        newValues: { variants: body.variants.length },
+      });
+
+      const saved = await store.db
+        .select()
+        .from(productVariants)
+        .where(eq(productVariants.productId, id))
+        .orderBy(desc(productVariants.isDefault), asc(productVariants.sortOrder));
+
+      return ok(reply, { productId: id, variants: saved });
     },
   );
 

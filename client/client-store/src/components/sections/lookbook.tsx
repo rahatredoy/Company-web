@@ -17,15 +17,16 @@ import { cn } from '@/lib/utils';
 export function Lookbook({
   title,
   subtitle,
-  ctaLabel = 'View Lookbook',
-  ctaHref = '/shop',
+  ctaLabel,
+  ctaHref,
   tiles,
   className,
 }: {
   title: string;
   subtitle?: string | null;
-  ctaLabel?: string;
-  ctaHref?: string;
+  /** Both or neither: a labelled button needs somewhere to go. */
+  ctaLabel: string | null;
+  ctaHref: string | null;
   tiles: LookbookTile[];
   className?: string;
 }) {
@@ -37,13 +38,15 @@ export function Lookbook({
         <h2 className="text-2xl font-semibold leading-tight sm:text-3xl">{title}</h2>
         {subtitle ? <p className="mt-2 text-sm text-muted">{subtitle}</p> : null}
 
-        <Link
-          href={ctaHref}
-          className="mt-6 inline-flex w-fit items-center gap-2 rounded-(--radius-button) border border-border-strong bg-surface px-5 py-2.5 text-sm font-medium transition-colors hover:border-primary hover:text-primary"
-        >
-          {ctaLabel}
-          <ArrowRight className="size-4" aria-hidden />
-        </Link>
+        {ctaLabel && ctaHref ? (
+          <Link
+            href={ctaHref}
+            className="mt-6 inline-flex w-fit items-center gap-2 rounded-(--radius-button) border border-border-strong bg-surface px-5 py-2.5 text-sm font-medium transition-colors hover:border-primary hover:text-primary"
+          >
+            {ctaLabel}
+            <ArrowRight className="size-4" aria-hidden />
+          </Link>
+        ) : null}
       </div>
 
       <ul className="no-scrollbar -mx-4 flex snap-x gap-4 overflow-x-auto px-4 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-4">

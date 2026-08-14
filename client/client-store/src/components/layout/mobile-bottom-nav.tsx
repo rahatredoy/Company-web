@@ -2,7 +2,18 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Grid2x2, Heart, Home, ShoppingBag, User } from 'lucide-react';
+import {
+  Grid2x2,
+  Heart,
+  Home,
+  Search,
+  ShoppingBag,
+  ShoppingCart,
+  Tag,
+  User,
+  type LucideIcon,
+} from 'lucide-react';
+import type { MobileNavItem } from '@/types';
 import { cn } from '@/lib/utils';
 
 /**
@@ -13,24 +24,45 @@ import { cn } from '@/lib/utils';
  * this bar and none of them got one. It is mounted from the root layout so all
  * six behave consistently and no template has to remember.
  *
- * Five destinations, chosen because they are the ones a thumb reaches for.
- * Deliberately not a duplicate of the header nav: the drawer already holds the
- * full menu.
+ * Destinations come from store configuration, capped at five by the API: more
+ * than five targets in a thumb-width row makes each one too small to hit.
+ * Deliberately not a duplicate of the header nav — the drawer already holds the
+ * full menu — and a store that has configured none gets no bar rather than a
+ * guess at what its shoppers want.
+ *
+ * Icons are keys into this closed set, not URLs. This bar is fixed over every
+ * page on the site, which makes it the worst possible place to render a remote
+ * image from admin-authored data.
  *
  * `pb-[env(safe-area-inset-bottom)]` keeps the row clear of the home indicator;
  * without it the bottom third of every icon sits under it on a modern phone.
  */
 
-const ITEMS = [
-  { href: '/', label: 'Home', icon: Home, exact: true },
-  { href: '/categories', label: 'Categories', icon: Grid2x2, exact: false },
-  { href: '/shop', label: 'Shop', icon: ShoppingBag, exact: false },
-  { href: '/wishlist', label: 'Wishlist', icon: Heart, exact: false },
-  { href: '/account', label: 'Account', icon: User, exact: false },
-];
+const ICONS: Record<string, LucideIcon> = {
+  home: Home,
+  categories: Grid2x2,
+  shop: ShoppingBag,
+  wishlist: Heart,
+  account: User,
+  cart: ShoppingCart,
+  search: Search,
+  offers: Tag,
+};
 
-export function MobileBottomNav() {
+/** Grid columns as literal classes — Tailwind cannot see `grid-cols-${n}`. */
+const COLUMNS: Record<number, string> = {
+  1: 'grid-cols-1',
+  2: 'grid-cols-2',
+  3: 'grid-cols-3',
+  4: 'grid-cols-4',
+  5: 'grid-cols-5',
+};
+
+export function MobileBottomNav({ items }: { items: MobileNavItem[] }) {
   const pathname = usePathname();
+  const shown = items.filter((item) => ICONS[item.icon]).slice(0, 5);
+
+  if (shown.length === 0) return null;
 
   return (
     <nav
@@ -40,9 +72,11 @@ export function MobileBottomNav() {
         'pb-[env(safe-area-inset-bottom)]',
       )}
     >
-      <ul className="grid grid-cols-5">
-        {ITEMS.map((item) => {
-          const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);
+      <ul className={cn('grid', COLUMNS[shown.length])}>
+        {shown.map((item) => {
+          // `/` would otherwise prefix-match every page on the site.
+          const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+          const Icon = ICONS[item.icon]!;
 
           return (
             <li key={item.href}>
@@ -54,7 +88,7 @@ export function MobileBottomNav() {
                   active ? 'text-primary' : 'text-muted',
                 )}
               >
-                <item.icon className="size-5" aria-hidden />
+                <Icon className="size-5" aria-hidden />
                 {item.label}
               </Link>
             </li>

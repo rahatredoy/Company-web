@@ -22,13 +22,33 @@ import { cn } from '@/lib/utils';
  * delivery, which is a promise the checkout would then break.
  */
 
-const ICONS: Record<string, LucideIcon> = {
+/*
+ * Keyed by what the data actually says, not by one canonical spelling.
+ *
+ * Two vocabularies reach this map: the storefront's own lucide names, and the
+ * shorter keys the provisioning seed writes (`refresh`, `shield`, `support`).
+ * An unmatched key is not an error — it falls back to a shield — which is
+ * precisely why the mismatch went unseen: three of the four seeded benefits
+ * rendered the same generic icon on every newly provisioned store.
+ */
+export const BENEFIT_ICONS: Record<string, LucideIcon> = {
   truck: Truck,
+  shipping: Truck,
+  delivery: Truck,
   package: Package,
   'rotate-ccw': RotateCcw,
+  refresh: RotateCcw,
+  returns: RotateCcw,
   'shield-check': ShieldCheck,
+  shield: ShieldCheck,
+  secure: ShieldCheck,
+  lock: ShieldCheck,
   headphones: Headphones,
+  support: Headphones,
+  headset: Headphones,
   wallet: Wallet,
+  'credit-card': Wallet,
+  payment: Wallet,
   tag: Tag,
   gift: Gift,
   'badge-check': BadgeCheck,
@@ -60,7 +80,7 @@ export function BenefitsStrip({
       )}
     >
       {items.slice(0, 4).map((item, index) => {
-        const Icon = ICONS[item.icon] ?? ShieldCheck;
+        const Icon = BENEFIT_ICONS[item.icon] ?? ShieldCheck;
 
         return (
           <li

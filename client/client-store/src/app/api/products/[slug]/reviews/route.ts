@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isMockCommerce } from '@/config';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
 
 /**
@@ -50,11 +49,6 @@ export async function POST(
   const parsed = schema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json({ error: 'Please check your review and try again.' }, { status: 400 });
-  }
-
-  if (isMockCommerce) {
-    const { mockSubmitReview } = await import('@/lib/api/mock/product');
-    return NextResponse.json({ data: await mockSubmitReview() }, { status: 202 });
   }
 
   const { apiFetch } = await import('@/lib/api/client');

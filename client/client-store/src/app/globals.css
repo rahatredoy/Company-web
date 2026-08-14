@@ -21,20 +21,21 @@
   --primary: #2563eb;
   --primary-hover: #1d4ed8;
   --primary-foreground: #ffffff;
-  --primary-soft: #eff6ff;
+  --primary-soft: #eaf0fd;
   --secondary: #1e40af;
   --secondary-foreground: #ffffff;
   --accent: #60a5fa;
-  --accent-soft: #dbeafe;
-  --background: #f8fafc;
-  --surface: #ffffff;
-  --surface-alt: #f1f5f9;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
+  --accent-soft: #cddbf9;
+  --background: #eff3fb;
+  --surface: #f9fbfe;
+  --surface-alt: #e4eaf6;
+  --text-primary: #121c30;
+  --text-secondary: #404d68;
+  --text-muted: #5c6984;
+  --border: #d5ddee;
+  --border-strong: #bac5de;
   --ring: #2563eb;
+  --shadow-rgb: 18 28 48;
   --success: #16a34a;
   --warning: #f59e0b;
   --error: #dc2626;
@@ -47,8 +48,13 @@
   --radius-input: 0.5rem;
   --radius-pill: 9999px;
 
-  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -16px rgb(15 23 42 / 0.16);
-  --shadow-raised: 0 1px 2px rgb(15 23 42 / 0.06), 0 20px 40px -24px rgb(15 23 42 / 0.22);
+  /*
+    Elevation is structure; the colour it is cast in is not. A warm olive page
+    lit by a cold slate shadow is what gives a tinted palette away, so the depth
+    below is fixed and only the hue comes from the theme.
+  */
+  --shadow-card: 0 1px 2px rgb(var(--shadow-rgb) / 0.05), 0 8px 24px -16px rgb(var(--shadow-rgb) / 0.18);
+  --shadow-raised: 0 1px 2px rgb(var(--shadow-rgb) / 0.07), 0 20px 40px -24px rgb(var(--shadow-rgb) / 0.24);
   --shadow-header: 0 1px 0 0 var(--border);
 
   --header-height: 4rem;

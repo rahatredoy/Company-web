@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isMockCommerce } from '@/config';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
 
 /**
@@ -75,12 +74,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       { error: 'Some details need your attention.', details },
       { status: 422 },
     );
-  }
-
-  if (isMockCommerce) {
-    const { mockPlaceOrder } = await import('@/lib/api/mock/orders');
-    const order = await mockPlaceOrder(parsed.data);
-    return NextResponse.json({ data: order }, { status: 201 });
   }
 
   const { apiFetch, ApiError, flattenDetails } = await import('@/lib/api/client');

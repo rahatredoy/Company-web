@@ -169,10 +169,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             declare it wants a bottom bar and then forget to render one — which
             is exactly what the `mobileBottomNav` flag did until now.
           */}
-          {template.mobileBottomNav ? (
+          {template.mobileBottomNav && config.mobileNav.length > 0 ? (
             <>
               <MobileBottomNavSpacer />
-              <MobileBottomNav />
+              <MobileBottomNav items={config.mobileNav} />
             </>
           ) : null}
         </StoreGate>

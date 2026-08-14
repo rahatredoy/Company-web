@@ -3,6 +3,12 @@ import { getPublishedStoreConfig } from '@/lib/api/store';
 import { getBrands, getCategories } from '@/lib/api/catalog';
 import { getProductList } from '@/lib/api/products';
 
+/** The storefront listing endpoint's own maximum; asking for more is a 422. */
+const LISTING_PAGE_MAX = 60;
+
+/** Above this a sitemap index is the right answer, not a longer document. */
+const SITEMAP_PRODUCT_CAP = 1000;
+
 /**
  * The sitemap.
  *
@@ -19,18 +25,39 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const origin = config.store.canonicalOrigin.replace(/\/$/, '');
   const url = (path: string) => `${origin}${path}`;
 
-  const [categories, brands, products] = await Promise.all([
+  const [categories, brands, firstPage] = await Promise.all([
     getCategories(),
     getBrands(),
-    // A cap, deliberately. A catalogue of a hundred thousand products needs a
-    // paginated sitemap index, not one document — and quietly truncating
-    // without saying so is how that requirement stays unnoticed.
-    getProductList({ page: 1, pageSize: 1000, sort: 'newest' }),
+    getProductList({ page: 1, pageSize: LISTING_PAGE_MAX, sort: 'newest' }),
   ]);
 
-  if (products.meta.total > products.items.length) {
+  /*
+   * Paged, because the listing endpoint refuses more than 60 at a time.
+   *
+   * This asked for 1000 in one request, which the API rejects as a validation
+   * error — so the fetch threw and **the whole sitemap 500'd**. Every store has
+   * been serving no sitemap at all rather than a truncated one, which is the
+   * failure mode a cap is supposed to prevent.
+   */
+  const wanted = Math.min(firstPage.meta.total, SITEMAP_PRODUCT_CAP);
+  const pageCount = Math.ceil(wanted / LISTING_PAGE_MAX);
+
+  const laterPages = await Promise.all(
+    Array.from({ length: Math.max(pageCount - 1, 0) }, (_, index) =>
+      getProductList({ page: index + 2, pageSize: LISTING_PAGE_MAX, sort: 'newest' }),
+    ),
+  );
+
+  const productItems = [firstPage, ...laterPages]
+    .flatMap((page) => page.items)
+    .slice(0, SITEMAP_PRODUCT_CAP);
+
+  // A cap, deliberately. A catalogue of a hundred thousand products needs a
+  // paginated sitemap index, not one document — and quietly truncating without
+  // saying so is how that requirement stays unnoticed.
+  if (firstPage.meta.total > productItems.length) {
     console.warn(
-      `[storefront] sitemap lists ${products.items.length} of ${products.meta.total} products; ` +
+      `[storefront] sitemap lists ${productItems.length} of ${firstPage.meta.total} products; ` +
         'a sitemap index is needed above this size.',
     );
   }
@@ -73,7 +100,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: 'weekly' as const,
       priority: 0.5,
     })),
-    ...products.items.map((product) => ({
+    ...productItems.map((product) => ({
       url: url(`/product/${product.slug}`),
       changeFrequency: 'weekly' as const,
       priority: 0.8,

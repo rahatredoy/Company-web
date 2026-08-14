@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { isMockData } from '@/config';
 import type { SearchSuggestion } from '@/types';
 
 /**
@@ -19,16 +18,6 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (term.length < 2) return NextResponse.json({ data: [] });
 
   try {
-    if (isMockData) {
-      const { mockSearchSuggestions } = await import('@/lib/api/mock/product');
-      const data = await mockSearchSuggestions(term.slice(0, 80));
-      return NextResponse.json(
-        { data },
-        // Brief, shared, and safe: suggestions are identical for every visitor.
-        { headers: { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=120' } },
-      );
-    }
-
     const { apiFetch } = await import('@/lib/api/client');
     const { storeCall } = await import('@/lib/tenant');
 

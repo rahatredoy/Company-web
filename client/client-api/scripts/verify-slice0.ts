@@ -225,10 +225,23 @@ async function main(): Promise<void> {
     check('super admin holds every permission', login.body?.data?.admin?.permissions?.length === 36, {
       count: login.body?.data?.admin?.permissions?.length,
     });
+    /*
+     * The claim is about *where* the plan comes from, not which plan it is.
+     *
+     * Hardcoding `business` pinned this to the `abc-fashion` fixture and made
+     * `--slug` — which the header of this file offers — fail on any other store
+     * for a reason that has nothing to do with tenancy. What actually proves the
+     * point is that a plan arrived at all and that the entitlements were resolved
+     * from the same record: the tenant database has no plan column to serve
+     * either from.
+     */
+    const store = login.body?.data?.store;
     check(
       'plan code comes from the control plane, not the template column',
-      login.body?.data?.store?.planCode === 'business',
-      login.body?.data?.store,
+      typeof store?.planCode === 'string' &&
+        store.planCode.length > 0 &&
+        store.planCode === store?.entitlements?.planCode,
+      store,
     );
 
     const bad = await call('/auth/login', {

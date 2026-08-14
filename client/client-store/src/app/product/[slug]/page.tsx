@@ -108,10 +108,8 @@ export default async function ProductPage({ params }: PageProps) {
         <section id="reviews" className="mt-14 scroll-mt-24">
           <h2 className="text-xl font-semibold sm:text-2xl">Customer reviews</h2>
 
-          <div className="mt-6 grid gap-8 lg:grid-cols-[18rem_minmax(0,1fr)] lg:gap-12">
-            <ReviewSummaryPanel summary={reviews.summary} productSlug={slug} />
-            <ReviewList reviews={reviews.items} locale={locale.language} />
-          </div>
+          <ReviewSummaryPanel summary={reviews.summary} productSlug={slug} className="mt-4" />
+          <ReviewList reviews={reviews.items} locale={locale.language} className="mt-2" />
         </section>
       ) : null}
 

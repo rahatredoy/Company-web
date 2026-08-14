@@ -1,5 +1,4 @@
 import 'server-only';
-import { isMockCommerce } from '@/config';
 import type { PaymentMethodOption, ShippingMethodOption, StoreConfig } from '@/types';
 import { storeCall } from '@/lib/tenant';
 import { apiFetch } from './client';
@@ -19,10 +18,6 @@ export interface DeliveryTarget {
 }
 
 export async function getShippingMethods(target: DeliveryTarget): Promise<ShippingMethodOption[]> {
-  if (isMockCommerce) {
-    const { mockShippingMethods } = await import('./mock/checkout');
-    return mockShippingMethods(target);
-  }
 
   return apiFetch<ShippingMethodOption[]>('/api/v1/storefront/checkout/shipping-methods', {
     ...(await storeCall()),

@@ -1,5 +1,5 @@
 import 'server-only';
-import { isMockData, PAGE_SIZE } from '@/config';
+import { PAGE_SIZE } from '@/config';
 import type { ProductListResult, SortValue } from '@/types';
 import { storeCall } from '@/lib/tenant';
 import { apiFetch } from './client';
@@ -32,15 +32,6 @@ export interface ProductQuery {
  * query shape — and the server validates every value, including `sort`.
  */
 export async function getProductList(query: ProductQuery): Promise<ProductListResult> {
-  if (isMockData) {
-    const { mockProductList } = await import('./mock/products');
-    const { convertProducts } = await import('./mock/currency');
-    const { readCurrencyPreference } = await import('@/lib/locale/preference');
-
-    const result = await mockProductList(query);
-    return { ...result, items: convertProducts(result.items, await readCurrencyPreference()) };
-  }
-
   const { attributes, brand, subcategories, ...rest } = query;
   const { readCurrencyPreference } = await import('@/lib/locale/preference');
 

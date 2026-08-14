@@ -179,6 +179,88 @@ export function normaliseTemplateKey(value: string | null | undefined): Storefro
     : DEFAULT_TEMPLATE;
 }
 
+/**
+ * The homepage blocks a store may arrange, mirroring the `homepage_section_type`
+ * enum exactly.
+ *
+ * Validated here rather than left to Postgres: an unknown value would otherwise
+ * surface as a 500 from the driver on insert, when it is really a 422 about one
+ * field. The storefront skips any type it does not recognise, so this list is
+ * also the ceiling on what a compromised admin session can put on a shopfront.
+ */
+export const HOMEPAGE_SECTION_TYPES = [
+  'hero',
+  'category_grid',
+  'category_circle',
+  'product_grid',
+  'product_carousel',
+  'banner',
+  'deal',
+  'promo_trio',
+  'flash_sale',
+  'benefits',
+  'lookbook',
+  'testimonial',
+  'brands',
+  'newsletter',
+  'text',
+  'collection',
+  'social_gallery',
+  'recently_viewed',
+] as const;
+
+export type HomepageSectionType = (typeof HOMEPAGE_SECTION_TYPES)[number];
+
+/**
+ * Closed vocabularies for the icons a store may pick.
+ *
+ * Each of these could have been a URL field, and each is a key instead for one
+ * reason: an icon that renders in the header or footer of *every* page is the
+ * best place on the shopfront to hang a remote image, and a store admin session
+ * should not be a way to do that. The storefront owns the glyphs; this list is
+ * only what the API will accept as a name for one.
+ */
+export const SOCIAL_PLATFORMS = [
+  'facebook',
+  'instagram',
+  'x',
+  'youtube',
+  'tiktok',
+  'linkedin',
+  'pinterest',
+  'whatsapp',
+] as const;
+
+export const MOBILE_NAV_ICONS = [
+  'home',
+  'categories',
+  'shop',
+  'wishlist',
+  'account',
+  'cart',
+  'search',
+  'offers',
+] as const;
+
+export const CATEGORY_ICON_KEYS = [
+  'electronics',
+  'fashion',
+  'home',
+  'beauty',
+  'sports',
+  'toys',
+  'tools',
+  'automotive',
+  'books',
+  'health',
+  'pets',
+  'garden',
+  'grocery',
+  'music',
+  'baby',
+  'office',
+] as const;
+
 export const LOGIN_LOCK_THRESHOLD = 10;
 export const LOGIN_LOCK_MINUTES = 15;
 export const LOGIN_BACKOFF_MS = [0, 0, 250, 750, 1_500, 3_000, 5_000];

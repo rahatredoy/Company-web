@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isMockCommerce } from '@/config';
 
 /**
  * Order cancellation.
@@ -32,20 +31,6 @@ export async function POST(
   const parsed = schema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json({ error: 'Please choose a reason.' }, { status: 400 });
-  }
-
-  if (isMockCommerce) {
-    const { mockCancelOrder } = await import('@/lib/api/mock/orders');
-    const cancelled = await mockCancelOrder(orderNumber);
-
-    if (!cancelled) {
-      return NextResponse.json(
-        { error: 'This order can no longer be cancelled. Contact us and we will help.' },
-        { status: 409 },
-      );
-    }
-
-    return new NextResponse(null, { status: 204 });
   }
 
   const { apiFetch, ApiError } = await import('@/lib/api/client');

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isMockCommerce } from '@/config';
 import { CUSTOMER_SESSION_COOKIE, CUSTOMER_SESSION_MAX_AGE } from '@/lib/api/account';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
 
@@ -73,9 +72,8 @@ export async function POST(
      * sign-out would keep working until it expired, which is the one moment a
      * customer is most likely to be on a shared machine.
      */
-    if (!isMockCommerce) {
-      await forwardToApi('/api/v1/storefront/auth/logout', {}, 204).catch(() => null);
-    }
+
+    await forwardToApi('/api/v1/storefront/auth/logout', {}, 204).catch(() => null);
 
     const response = new NextResponse(null, { status: 204 });
     response.cookies.set(CUSTOMER_SESSION_COOKIE, '', { ...COOKIE_OPTIONS, maxAge: 0 });
@@ -105,9 +103,8 @@ export async function POST(
       return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
     }
 
-    if (!isMockCommerce) {
-      await forwardToApi('/api/v1/storefront/auth/forgot-password', parsed.data, 204).catch(() => null);
-    }
+    await forwardToApi('/api/v1/storefront/auth/forgot-password', parsed.data, 204).catch(() => null);
+
     return new NextResponse(null, { status: 204 });
   }
 
@@ -123,8 +120,6 @@ export async function POST(
       }
       return NextResponse.json({ error: 'Please check your details.', details }, { status: 422 });
     }
-
-    if (isMockCommerce) return new NextResponse(null, { status: 204 });
 
     return forwardToApi('/api/v1/storefront/auth/reset-password', parsed.data, 204);
   }
@@ -146,48 +141,12 @@ export async function POST(
       return NextResponse.json({ error: 'Some details need your attention.', details }, { status: 422 });
     }
 
-    if (isMockCommerce) {
-      const { mockRegister } = await import('@/lib/api/mock/account');
-      const result = await mockRegister(parsed.data);
-
-      if ('error' in result) {
-        return NextResponse.json(
-          { error: 'That email address cannot be used.', details: { email: 'Try signing in instead.' } },
-          { status: 409 },
-        );
-      }
-
-      const response = NextResponse.json({ data: { customer: result.customer } }, { status: 201 });
-      response.cookies.set(CUSTOMER_SESSION_COOKIE, result.token, {
-        ...COOKIE_OPTIONS,
-        maxAge: CUSTOMER_SESSION_MAX_AGE,
-      });
-      return response;
-    }
-
     return forwardToApi('/api/v1/storefront/auth/register', parsed.data, 201);
   }
 
   const parsed = loginSchema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json({ error: 'Enter your email address and password.' }, { status: 400 });
-  }
-
-  if (isMockCommerce) {
-    const { mockLogin } = await import('@/lib/api/mock/account');
-    const result = await mockLogin(parsed.data.email, parsed.data.password);
-
-    if (!result) {
-      // One message for both failure modes, on purpose.
-      return NextResponse.json({ error: 'Those details do not match an account.' }, { status: 401 });
-    }
-
-    const response = NextResponse.json({ data: { customer: result.customer } });
-    response.cookies.set(CUSTOMER_SESSION_COOKIE, result.token, {
-      ...COOKIE_OPTIONS,
-      maxAge: CUSTOMER_SESSION_MAX_AGE,
-    });
-    return response;
   }
 
   return forwardToApi('/api/v1/storefront/auth/login', parsed.data, 200);

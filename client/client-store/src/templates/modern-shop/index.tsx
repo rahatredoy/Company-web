@@ -1,5 +1,3 @@
-import Link from 'next/link';
-import { Sparkles } from 'lucide-react';
 import type { StorefrontTemplate, TemplateChromeProps, TemplateHomepageProps, TemplatePreset } from '../registry';
 import { StoreLogo } from '../chrome';
 import { AnnouncementBar } from '@/components/layout/announcement-bar';
@@ -80,7 +78,7 @@ function Header({ config, locale }: TemplateChromeProps) {
         <div className="ml-auto flex items-center gap-2">
           <SearchBox variant="inline" className="hidden w-64 xl:block" />
           <SearchBox variant="icon" className="hidden lg:block xl:hidden" />
-          <HeaderActions />
+          <HeaderActions locale={config.store.language} />
         </div>
       </div>
 
@@ -109,7 +107,9 @@ function Homepage({ config, sections }: TemplateHomepageProps) {
       {hero ? (
         <div className="container-store pt-4 sm:pt-6">
           <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
-            <CategorySidebar config={config} headerTone="primary" />
+            {/* Eight departments and a way through to the rest — the rail is a
+                shortcut, not the category index. */}
+            <CategorySidebar config={config} headerTone="primary" maxItems={8} />
             <div className="min-w-0 [&>section]:!pt-0">
               <HomepageSections
                 sections={[hero]}
@@ -125,18 +125,6 @@ function Homepage({ config, sections }: TemplateHomepageProps) {
         context={{ config, cardVariant: 'standard', gridClassName: GRID, preset }}
       />
 
-      {/* A quiet closing note; the trust strip has already done the selling. */}
-      <div className="container-store pt-14">
-        <p className="flex items-center justify-center gap-2 text-sm text-subtle">
-          <Sparkles className="size-4" aria-hidden />
-          <span>
-            New here?{' '}
-            <Link href="/about" className="font-medium text-primary hover:underline">
-              Read our story
-            </Link>
-          </span>
-        </p>
-      </div>
     </>
   );
 }

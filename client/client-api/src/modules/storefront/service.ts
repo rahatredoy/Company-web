@@ -57,13 +57,39 @@ export async function loadStoreCurrency(store: {
   currency: string;
   db: TenantDb;
 }): Promise<string> {
-  return cached(tenantKey(store.tenantRef, 'storefront', 'currency'), CACHE_TTL.storefrontConfig, async () => {
-    const [row] = await store.db.select({ currency: storeSettings.currency }).from(storeSettings).limit(1);
-    // The control plane's value is the fallback: it is what provisioning wrote
-    // into `store_settings` in the first place.
-    return row?.currency ?? store.currency;
-  });
+  /*
+   * Held in this process for a few seconds as well as in Redis.
+   *
+   * Every catalogue read needs the currency before it can do anything else — it
+   * is part of the cache key, so it cannot be fetched alongside the listing it
+   * keys — which made it a serial round trip to a Redis that is not local, on
+   * the front of every product page in the platform. It is also the most
+   * immutable value the store has: `settings` refuses to change it once an order
+   * has been taken, because prices carry no currency of their own and switching
+   * the code would re-label every past total. Seconds of staleness on a field
+   * that is frozen for the life of a trading store is not a real risk, and it
+   * takes a network hop off the critical path of every request.
+   */
+  const memo = currencyMemo.get(store.tenantRef);
+  if (memo && memo.expiresAt > Date.now()) return memo.currency;
+
+  const currency = await cached(
+    tenantKey(store.tenantRef, 'storefront', 'currency'),
+    CACHE_TTL.storefrontConfig,
+    async () => {
+      const [row] = await store.db.select({ currency: storeSettings.currency }).from(storeSettings).limit(1);
+      // The control plane's value is the fallback: it is what provisioning wrote
+      // into `store_settings` in the first place.
+      return row?.currency ?? store.currency;
+    },
+  );
+
+  currencyMemo.set(store.tenantRef, { currency, expiresAt: Date.now() + CURRENCY_MEMO_MS });
+  return currency;
 }
+
+const currencyMemo = new Map<string, { currency: string; expiresAt: number }>();
+const CURRENCY_MEMO_MS = 5_000;
 
 // ------------------------------------------------------------------ money ----
 
@@ -109,18 +135,35 @@ export interface CategoryNode {
   slug: string;
 }
 
-/** Every active category, as a flat list. Small enough to walk in memory. */
-export async function loadCategoryTree(db: TenantDb): Promise<CategoryNode[]> {
-  return db
-    .select({
-      id: categories.id,
-      parentId: categories.parentId,
-      name: categories.name,
-      slug: categories.slug,
-    })
-    .from(categories)
-    .where(eq(categories.isActive, true))
-    .orderBy(asc(categories.sortOrder), asc(categories.name));
+/**
+ * Every active category, as a flat list. Small enough to walk in memory.
+ *
+ * Cached, because this is not one read per page — it is the read behind
+ * `?category=` on every listing *and* the breadcrumb on every product page, so
+ * on a busy store it is one of the most repeated queries in the API and its
+ * answer changes only when the owner edits the menu. An admin write drops the
+ * key immediately (`invalidateStorefrontOnWrite`), so the TTL is a ceiling
+ * rather than the latency of a change.
+ */
+export async function loadCategoryTree(store: {
+  tenantRef: string;
+  db: TenantDb;
+}): Promise<CategoryNode[]> {
+  return cached(
+    tenantKey(store.tenantRef, 'storefront', 'category-tree'),
+    CACHE_TTL.categoryTree,
+    () =>
+      store.db
+        .select({
+          id: categories.id,
+          parentId: categories.parentId,
+          name: categories.name,
+          slug: categories.slug,
+        })
+        .from(categories)
+        .where(eq(categories.isActive, true))
+        .orderBy(asc(categories.sortOrder), asc(categories.name)),
+  );
 }
 
 /**
@@ -278,7 +321,7 @@ export function listingConditions(filters: ListingFilters, exclude?: string): SQ
     conditions.push(gte(products.ratingAverage, String(filters.rating)));
   }
 
-  if (filters.inStock) conditions.push(inStockSql);
+  if (exclude !== 'inStock' && filters.inStock) conditions.push(inStockSql);
 
   if (filters.sale) {
     conditions.push(
@@ -474,8 +517,11 @@ export async function decorateSummaries(
  * group with fewer than two options is dropped: a filter that cannot change the
  * result is a control that does nothing.
  */
+/** The rating thresholds offered as facets, highest first. */
+const RATING_STEPS = [4, 3, 2] as const;
+
 export async function buildFacets(db: TenantDb, filters: ListingFilters): Promise<FilterGroup[]> {
-  const [brandRows, priceRow, attributeRows] = await Promise.all([
+  const [brandRows, priceRow, ratingRow, stockRow, attributeRows] = await Promise.all([
     db
       .select({
         value: brands.slug,
@@ -495,6 +541,35 @@ export async function buildFacets(db: TenantDb, filters: ListingFilters): Promis
       })
       .from(products)
       .where(and(...listingConditions(filters, 'price'))),
+
+    /*
+     * One row of running totals rather than a query per threshold: "3 and up"
+     * includes everything "4 and up" does, so the counts are cumulative and a
+     * single pass answers all of them.
+     */
+    db
+      .select({
+        four: sql<number>`count(*) filter (where ${products.ratingAverage} >= 4)::int`,
+        three: sql<number>`count(*) filter (where ${products.ratingAverage} >= 3)::int`,
+        two: sql<number>`count(*) filter (where ${products.ratingAverage} >= 2)::int`,
+        /*
+         * Counted with the rating filter lifted, like the options themselves.
+         * Comparing against a total that still had the filter applied made every
+         * threshold equal the total the moment one was ticked, so the group
+         * deleted itself and left no way to untick it from the sidebar.
+         */
+        total: sql<number>`count(*)::int`,
+      })
+      .from(products)
+      .where(and(...listingConditions(filters, 'rating'))),
+
+    db
+      .select({
+        inStock: sql<number>`count(*) filter (where ${inStockSql})::int`,
+        total: sql<number>`count(*)::int`,
+      })
+      .from(products)
+      .where(and(...listingConditions(filters, 'inStock'))),
 
     db
       .select({
@@ -545,6 +620,49 @@ export async function buildFacets(db: TenantDb, filters: ListingFilters): Promis
   const max = Math.ceil(Number(priceRow[0]?.max ?? 0));
   if (max > min) {
     groups.push({ key: 'price', label: 'Price', type: 'range', options: [], min, max });
+  }
+
+  /*
+   * Rating and availability were filterable long before they were offerable: the
+   * query has honoured `?rating=` and `?inStock=` from the start, `exclude`
+   * counts them, and the storefront already draws stars for a `rating` group —
+   * but nothing ever published the groups, so no shopper could reach either
+   * filter. These two blocks are the missing half.
+   */
+  const ratingTotal = ratingRow[0]?.total ?? 0;
+  const ratingCounts: Record<number, number> = {
+    4: ratingRow[0]?.four ?? 0,
+    3: ratingRow[0]?.three ?? 0,
+    2: ratingRow[0]?.two ?? 0,
+  };
+  /*
+   * A threshold every product already meets is dropped, by the same rule the
+   * brand and attribute groups follow: on a catalogue where nothing scores below
+   * three, "3 & up" and "2 & up" both read as the whole shop and only "4 & up"
+   * is a choice.
+   */
+  const ratingOptions = RATING_STEPS.filter(
+    (step) => (ratingCounts[step] ?? 0) > 0 && (ratingCounts[step] ?? 0) < ratingTotal,
+  ).map((step) => ({
+    value: String(step),
+    label: `${step} & up`,
+    count: ratingCounts[step] ?? 0,
+  }));
+  if (ratingOptions.length > 0) {
+    groups.push({ key: 'rating', label: 'Rating', type: 'rating', options: ratingOptions });
+  }
+
+  const inStockCount = stockRow[0]?.inStock ?? 0;
+  // Offered only when it would actually hide something — on a fully stocked shop
+  // "In stock (31 of 31)" is a control that cannot change the result. Both sides
+  // are counted with the availability filter lifted, for the reason above.
+  if (inStockCount > 0 && inStockCount < (stockRow[0]?.total ?? 0)) {
+    groups.push({
+      key: 'inStock',
+      label: 'Availability',
+      type: 'checkbox',
+      options: [{ value: 'true', label: 'In stock', count: inStockCount }],
+    });
   }
 
   const byAttribute = new Map<string, FilterGroup>();

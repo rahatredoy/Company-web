@@ -25,6 +25,22 @@ export function createQueueConnection(): Redis {
   });
 }
 
+/**
+ * A connection that will be put into subscriber mode.
+ *
+ * ioredis refuses ordinary commands on a subscribed client, so a listener cannot
+ * share `redis` above — it would break every `get` in the process. Retries are
+ * unlimited on purpose: a subscriber that gives up stops hearing invalidations
+ * and the caches it guards would go quietly stale.
+ */
+export function createSubscriber(): Redis {
+  return new Redis(config.redis.url, {
+    ...baseOptions,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  });
+}
+
 export async function pingRedis(): Promise<boolean> {
   try {
     const reply = await redis.ping();

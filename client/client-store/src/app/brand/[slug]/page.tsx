@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import { notFound } from 'next/navigation';
-import { isMockData } from '@/config';
 import type { Brand } from '@/types';
 import { getStoreConfig } from '@/lib/api/store';
 import { getProductList, parseProductQuery } from '@/lib/api/products';
@@ -11,11 +10,6 @@ import { apiFetch, isStoreNotFound } from '@/lib/api/client';
 import { cookieHeader, storeCall } from '@/lib/tenant';
 
 async function getBrand(slug: string): Promise<Brand | null> {
-  if (isMockData) {
-    const { mockBrandBySlug } = await import('@/lib/api/mock/products');
-    return mockBrandBySlug(slug);
-  }
-
   try {
     return await apiFetch<Brand>(`/api/v1/storefront/brands/${encodeURIComponent(slug)}`, {
       ...(await storeCall()),

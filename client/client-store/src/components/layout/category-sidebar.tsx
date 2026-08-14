@@ -1,10 +1,25 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import {
+  Baby,
+  Book,
+  Car,
   ChevronRight,
+  Dumbbell,
+  Flower2,
+  Gamepad2,
   Grid2x2,
+  HeartPulse,
+  Laptop,
   Menu,
+  Music,
+  PawPrint,
+  Printer,
   Shirt,
+  ShoppingBasket,
+  Sofa,
+  Sparkles,
+  Wrench,
   type LucideIcon,
 } from 'lucide-react';
 import type { CategoryMenuEntry, StoreConfig } from '@/types';
@@ -23,14 +38,37 @@ import { cn } from '@/lib/utils';
  */
 
 /**
- * Icons are chosen from a closed set by the slug, not loaded from a URL in the
- * data. A category icon field that accepted arbitrary URLs would let admin
- * content pull remote images into the header of every page.
+ * Icons are chosen from a closed set by key, not loaded from a URL in the data.
+ * A category icon field that accepted arbitrary URLs would let admin content
+ * pull remote images into the header of every page.
+ *
+ * The store picks the key per category (`categoryIcons` in the header config).
+ * This map was empty for a while and `iconFor` fell through to `Shirt`, so a
+ * store selling car parts had a t-shirt beside Automotive — the icon was worse
+ * than no icon, because it asserted something false about the category.
+ * Unmapped now means no glyph at all.
  */
-const SLUG_ICONS: Record<string, LucideIcon> = {};
+const ICONS: Record<string, LucideIcon> = {
+  electronics: Laptop,
+  fashion: Shirt,
+  home: Sofa,
+  beauty: Sparkles,
+  sports: Dumbbell,
+  toys: Gamepad2,
+  tools: Wrench,
+  automotive: Car,
+  books: Book,
+  health: HeartPulse,
+  pets: PawPrint,
+  garden: Flower2,
+  grocery: ShoppingBasket,
+  music: Music,
+  baby: Baby,
+  office: Printer,
+};
 
-function iconFor(entry: CategoryMenuEntry): LucideIcon {
-  return SLUG_ICONS[entry.slug] ?? Shirt;
+function iconFor(entry: CategoryMenuEntry): LucideIcon | null {
+  return entry.iconKey ? (ICONS[entry.iconKey] ?? null) : null;
 }
 
 export function CategorySidebar({
@@ -85,9 +123,9 @@ export function CategorySidebar({
                   <span className="relative size-4 shrink-0">
                     <Image src={entry.iconUrl} alt="" aria-hidden fill sizes="16px" className="object-contain" />
                   </span>
-                ) : (
+                ) : Icon ? (
                   <Icon className="size-4 shrink-0 text-subtle group-hover:text-primary" aria-hidden />
-                )}
+                ) : null}
 
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
 

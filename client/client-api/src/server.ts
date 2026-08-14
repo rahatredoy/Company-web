@@ -2,11 +2,16 @@ import { buildApp } from './app';
 import { config } from './config/index';
 import { checkConnectionBudget } from './db/connection-budget';
 import { tenantDb } from './db/tenant-manager';
+import { subscribeToInvalidations } from './lib/company-client';
 import { logger } from './lib/logger';
 import { closeRedis } from './lib/redis';
 
 async function main(): Promise<void> {
   const app = await buildApp();
+
+  // Before listening: the in-process tenant cache must not start answering
+  // requests with nothing listening for the control plane's invalidations.
+  subscribeToInvalidations();
 
   await app.listen({ port: config.api.port, host: config.api.host });
   logger.info({ port: config.api.port, env: config.env }, 'client-api listening');

@@ -1,4 +1,6 @@
 import type {
+  CollectionBlock,
+  GalleryTile,
   HeroSlide,
   HomepageSection,
   LookbookTile,
@@ -156,6 +158,12 @@ export interface BenefitItem {
 /**
  * Trust claims. Only what the store actually configured — promising free
  * shipping a store does not offer is worse than showing nothing.
+ *
+ * The supporting line is read from `description` **or** `subtitle`: the
+ * provisioning seed in `client-api` writes `subtitle`, every other section type
+ * here calls the same field `description`, and a benefit whose second line
+ * silently vanished is the sort of mismatch nobody notices until the strip
+ * looks bare on every new store.
  */
 export function readBenefits(value: unknown): BenefitItem[] {
   if (!Array.isArray(value)) return [];
@@ -168,7 +176,7 @@ export function readBenefits(value: unknown): BenefitItem[] {
         ? {
             icon: readString(item.icon) ?? 'shield-check',
             title,
-            description: readString(item.description),
+            description: readString(item.description) ?? readString(item.subtitle),
           }
         : null;
     })
@@ -231,7 +239,9 @@ export function readTestimonials(value: unknown): Testimonial[] {
       return {
         id: readString(item.id) ?? `testimonial-${index}`,
         quote: readString(item.quote) ?? '',
-        authorName: readString(item.authorName) ?? 'Verified customer',
+        // No stand-in name. "Verified customer" used to fill this, which put a
+        // trust claim on the one entry that had nothing to back it up.
+        authorName: readString(item.authorName),
         authorTitle: readString(item.authorTitle),
         avatarUrl: readString(item.avatarUrl),
         rating: rating !== null && rating >= 0 && rating <= 5 ? rating : null,
@@ -241,22 +251,96 @@ export function readTestimonials(value: unknown): Testimonial[] {
 }
 
 /**
- * A countdown deadline.
+ * A countdown deadline: an absolute ISO timestamp, or nothing.
  *
- * Accepts an absolute ISO timestamp, or `endsInHours` as an offset from now.
- * The offset form is what fixtures and demo content use; a real campaign should
- * always carry an absolute time, because a deadline that resets on every page
- * load is a lie told to create urgency.
+ * There was a second accepted form, `endsInHours`, measured from the moment of
+ * the render — which meant the timer never reached zero and the offer it
+ * counted down to never ended. It is gone rather than merely discouraged: a
+ * countdown is a promise about the clock, and a section carrying a relative
+ * offset cannot keep it. `flash_sale` reads its deadline from the campaign row
+ * server-side, so real campaigns have an absolute time to give.
  */
-export function readDeadline(config: Raw, now: number = Date.now()): number | null {
+export function readDeadline(config: Raw): number | null {
   const absolute = readString(config.endsAt);
-  if (absolute) {
-    const parsed = Date.parse(absolute);
-    if (Number.isFinite(parsed)) return parsed;
+  if (!absolute) return null;
+
+  const parsed = Date.parse(absolute);
+  if (!Number.isFinite(parsed)) return null;
+
+  // A deadline that has already passed is not a countdown.
+  return parsed > Date.now() ? parsed : null;
+}
+
+/**
+ * A collection block, resolved server-side by `home.routes.ts`.
+ *
+ * Returns null unless the collection actually came back with products — the
+ * section renders nothing rather than an empty frame around a name.
+ */
+export function readCollection(value: unknown): CollectionBlock | null {
+  const raw = asRecord(value);
+  const name = readString(raw.name);
+  const productIds = readStringArray(raw.productIds);
+  if (!name || productIds.length === 0) return null;
+
+  return {
+    name,
+    description: readString(raw.description),
+    imageUrl: readString(raw.imageUrl),
+    productIds,
+  };
+}
+
+/**
+ * Social gallery squares.
+ *
+ * `linkUrl` is the one place a section may point off-site: a gallery of the
+ * shop's own posts is only useful if the posts are reachable. Restricted to
+ * http(s) so an admin-authored `javascript:` value cannot become an href, and
+ * the component marks every one of them `rel="noreferrer noopener"`.
+ */
+export function readGalleryTiles(value: unknown): GalleryTile[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry, index): GalleryTile => {
+      const tile = asRecord(entry);
+      const linkUrl = readString(tile.linkUrl);
+      return {
+        id: readString(tile.id) ?? `gallery-${index}`,
+        imageUrl: readString(tile.imageUrl) ?? '',
+        linkUrl: linkUrl && /^https?:\/\//i.test(linkUrl) ? linkUrl : null,
+        caption: readString(tile.caption),
+      };
+    })
+    .filter((tile) => tile.imageUrl.length > 0);
+}
+
+/**
+ * Every product id the sections on a page will ask for.
+ *
+ * Read once, before any section renders, so the whole page can be resolved in a
+ * single call instead of one per rail — see `primeProductSummaries` in
+ * `lib/api/catalog.ts`. Deliberately reads the same four places the renderer
+ * does, and nothing else: an id this misses is still fetched by the section
+ * that named it, so being wrong here costs a round trip, never a missing block.
+ */
+export function productIdsIn(sections: HomepageSection[]): string[] {
+  const ids: string[] = [];
+
+  for (const section of sections) {
+    const config = section.config ?? {};
+
+    // `product_grid`, `product_carousel`, `flash_sale` — directly or per tab.
+    for (const tab of readTabs(section)) ids.push(...tab.productIds);
+
+    // `deal`, which features exactly one.
+    const single = readString(config.productId);
+    if (single) ids.push(single);
+
+    // `collection`, whose products hang off the resolved collection.
+    ids.push(...readCollection(config.collection)?.productIds ?? []);
   }
 
-  const hours = typeof config.endsInHours === 'number' ? config.endsInHours : null;
-  if (hours !== null && hours > 0 && hours < 24 * 365) return now + hours * 3_600_000;
-
-  return null;
+  return [...new Set(ids)];
 }

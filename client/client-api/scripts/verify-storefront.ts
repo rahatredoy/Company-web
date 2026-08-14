@@ -220,7 +220,18 @@ async function main(): Promise<void> {
     const slug = create.body?.data?.slug as string;
     created.products.push(productId);
 
-    const hidden = await shop('/products');
+    /*
+     * `sort=newest` rather than the default, so this asks about the moderation
+     * boundary and nothing else.
+     *
+     * The default sort is `relevance` — featured first, sales breaking the tie —
+     * over a 24-row page. A store with a real catalogue puts a brand-new product
+     * with no sales on page two, so the "it appeared" check failed for want of
+     * pagination and the "it is absent" check passed without ever having been
+     * able to see it. Newest-first puts this product at position one in both
+     * cases, which is the only way either assertion means what it says.
+     */
+    const hidden = await shop('/products?sort=newest');
     check(
       'a draft is absent from the public listing',
       !(hidden.body?.data?.items ?? []).some((item: any) => item.id === productId),
@@ -237,7 +248,7 @@ async function main(): Promise<void> {
      * write drops this store's storefront cache on the way out (`invalidateStorefrontOnWrite`),
      * so the very next read sees it.
      */
-    const listed = await shop('/products');
+    const listed = await shop('/products?sort=newest');
     check(
       'it appears on the website immediately after publishing',
       (listed.body?.data?.items ?? []).some((item: any) => item.id === productId),
@@ -263,7 +274,9 @@ async function main(): Promise<void> {
 
     const deactivate = await admin(`/products/${productId}`, { method: 'PATCH', body: { status: 'inactive' } });
     check('unpublishing works', deactivate.status === 200, deactivate.status);
-    const gone = await shop('/products');
+    // Newest-first for the same reason as above: on the default sort this row
+    // would be off the end of page one whether it was published or not.
+    const gone = await shop('/products?sort=newest');
     check(
       'and takes it off the website again',
       !(gone.body?.data?.items ?? []).some((item: any) => item.id === productId),

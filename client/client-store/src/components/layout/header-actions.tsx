@@ -1,10 +1,12 @@
 'use client';
 
+import * as React from 'react';
 import Link from 'next/link';
 import { Heart, ShoppingCart, User } from 'lucide-react';
 import { useCart } from '@/lib/commerce/cart';
 import { useWishlist } from '@/lib/commerce/collections';
 import { useHydrated } from '@/lib/hooks/use-hydrated';
+import { CartDrawer, opensElsewhere } from '@/components/cart/cart-drawer';
 import { cn } from '@/lib/utils';
 
 /**
@@ -19,10 +21,11 @@ import { cn } from '@/lib/utils';
  * server cannot read, so rendering them on the first pass would guarantee a
  * mismatch — and showing a fabricated zero would be worse than showing nothing.
  */
-export function HeaderActions({ className }: { className?: string }) {
+export function HeaderActions({ className, locale = 'en' }: { className?: string; locale?: string }) {
   const { cart } = useCart();
   const wishlist = useWishlist();
   const hydrated = useHydrated();
+  const [cartOpen, setCartOpen] = React.useState(false);
 
   const cartCount = hydrated ? cart.itemCount : 0;
   const wishlistCount = hydrated ? wishlist.count : 0;
@@ -47,19 +50,29 @@ export function HeaderActions({ className }: { className?: string }) {
       </Link>
 
       {/*
-        A plain link to the cart page — the same as account and wishlist beside
-        it. It briefly opened a slide-over instead; a panel that arrives from
-        the edge behaves unlike every other destination in the header, and the
-        cart page already shows more than the panel could.
+        Still a link, and that is the point. An earlier slide-over replaced the
+        link outright, which made the cart the one header control that could not
+        be opened in a new tab and did nothing without JavaScript. Here the
+        `href` remains the real behaviour — modified and middle clicks fall
+        through to `/cart`, and so does a browser with scripting off — while a
+        plain left-click opens the panel instead of leaving the page.
       */}
       <Link
         href="/cart"
         aria-label={cartCount ? `Cart, ${cartCount} items` : 'Cart'}
+        aria-haspopup="dialog"
+        onClick={(event) => {
+          if (opensElsewhere(event)) return;
+          event.preventDefault();
+          setCartOpen(true);
+        }}
         className="relative grid size-11 place-items-center rounded-(--radius-button) text-foreground transition-colors hover:bg-surface-alt"
       >
         <ShoppingCart className="size-5" aria-hidden />
         {cartCount ? <Badge count={cartCount} /> : null}
       </Link>
+
+      <CartDrawer open={cartOpen} onOpenChange={setCartOpen} locale={locale} />
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isMockCommerce } from '@/config';
 
 const addressSchema = z.object({
   label: z.string().trim().max(40).nullable().optional(),
@@ -54,13 +53,6 @@ async function forward(
   }
 }
 
-function unavailable(): NextResponse {
-  return NextResponse.json(
-    { error: 'Saved addresses are not available in this preview.' },
-    { status: 503 },
-  );
-}
-
 async function parse(request: Request) {
   let payload: unknown;
   try {
@@ -86,7 +78,6 @@ async function parse(request: Request) {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  if (isMockCommerce) return unavailable();
 
   const parsed = await parse(request);
   if (!parsed.ok) return parsed.response;
@@ -95,7 +86,6 @@ export async function POST(request: Request): Promise<NextResponse> {
 }
 
 export async function PUT(request: Request): Promise<NextResponse> {
-  if (isMockCommerce) return unavailable();
 
   const id = new URL(request.url).searchParams.get('id') ?? '';
   if (!idSchema.safeParse(id).success) {
@@ -109,7 +99,6 @@ export async function PUT(request: Request): Promise<NextResponse> {
 }
 
 export async function DELETE(request: Request): Promise<NextResponse> {
-  if (isMockCommerce) return unavailable();
 
   const id = new URL(request.url).searchParams.get('id') ?? '';
   if (!idSchema.safeParse(id).success) {

@@ -63,7 +63,7 @@ function Header({ config, locale }: TemplateChromeProps) {
             Compare
           </Link>
           <SearchBox variant="icon" className="lg:hidden" />
-          <HeaderActions />
+          <HeaderActions locale={config.store.language} />
         </div>
       </div>
 

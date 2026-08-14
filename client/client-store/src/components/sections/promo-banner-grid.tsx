@@ -73,21 +73,19 @@ export function PromoBannerCard({
   className?: string;
 }) {
   const tinted = isTinted(banner);
-  const href = banner.linkUrl ?? '/shop';
   const onDark = banner.tone === 'dark' || banner.tone === 'primary';
 
-  return (
-    <Link
-      href={href}
-      className={cn(
-        'group relative flex overflow-hidden rounded-(--radius-card)',
-        ratio === 'wide' && 'aspect-16/9',
-        ratio === 'panel' && 'aspect-16/10 sm:aspect-2/1',
-        ratio === 'tall' && 'aspect-4/5',
-        tinted ? TONES[banner.tone] : 'bg-surface-alt',
-        className,
-      )}
-    >
+  const shell = cn(
+    'group relative flex overflow-hidden rounded-(--radius-card)',
+    ratio === 'wide' && 'aspect-16/9',
+    ratio === 'panel' && 'aspect-16/10 sm:aspect-2/1',
+    ratio === 'tall' && 'aspect-4/5',
+    tinted ? TONES[banner.tone] : 'bg-surface-alt',
+    className,
+  );
+
+  const body = (
+    <>
       {banner.imageUrl ? (
         <>
           <Image
@@ -149,13 +147,30 @@ export function PromoBannerCard({
           </span>
         ) : null}
 
-        {banner.buttonLabel ? (
+        {/* A call to action needs somewhere to call to. */}
+        {banner.buttonLabel && banner.linkUrl ? (
           <span className="mt-3 inline-flex w-fit items-center gap-1 text-sm font-semibold underline-offset-4 group-hover:underline">
             {banner.buttonLabel}
             <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
           </span>
         ) : null}
       </span>
+    </>
+  );
+
+  /*
+   * A banner with no destination is not a link.
+   *
+   * It used to fall back to `/shop`, which meant a store that had left the URL
+   * blank shipped a banner that looked clickable, was clickable, and took the
+   * customer somewhere it had never named. An announcement with nothing behind
+   * it should sit there being an announcement.
+   */
+  return banner.linkUrl ? (
+    <Link href={banner.linkUrl} className={shell}>
+      {body}
     </Link>
+  ) : (
+    <div className={shell}>{body}</div>
   );
 }

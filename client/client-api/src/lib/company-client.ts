@@ -1,7 +1,7 @@
 import { config } from '../config/index';
 import { AppError, ERROR_CODES, notFound } from './errors';
 import { logger } from './logger';
-import { redis } from './redis';
+import { createSubscriber, redis } from './redis';
 
 export interface TenantEntitlements {
   planCode: string;
@@ -69,6 +69,99 @@ export function tenantCacheKey(slug: string): string {
 }
 const NEGATIVE_TTL_SECONDS = 15;
 
+/**
+ * The same record again, in this process.
+ *
+ * Every single request resolves its store through here before anything else
+ * happens, and the Redis holding it is shared between both platforms rather than
+ * local to either — so on a deployment where that is a hop away, this one lookup
+ * was a network round trip on the critical path of every page view in the
+ * business. Nothing else in the request is as repeated or as small.
+ *
+ * Held for seconds, not minutes, and dropped the instant the control plane says
+ * so: `company-api/src/lib/tenant-cache.ts` publishes every key it deletes on
+ * `INVALIDATION_CHANNEL` and `subscribeToInvalidations` below clears them here.
+ * So a suspension, an expiry or a domain change still lands at once — the TTL is
+ * only the backstop for a dropped message, which is why it is short enough that
+ * the worst case is a few seconds rather than the minute Redis alone would hold.
+ *
+ * Deliberately unbounded in count but bounded in time: one entry is a small
+ * object, a process serves at most the stores routed to it, and every entry
+ * expires within seconds of last use.
+ */
+interface MemoEntry {
+  record: TenantRecord | null;
+  expiresAt: number;
+}
+
+const memo = new Map<string, MemoEntry>();
+
+/**
+ * Long enough to collapse the burst of requests one page view produces — a
+ * storefront page is a dozen calls in a few hundred milliseconds, and they all
+ * resolve the same store — and short enough that a missed invalidation message
+ * is a blip rather than an outage.
+ */
+const MEMO_TTL_MS = 3_000;
+
+/** Mirrored in `company-api/src/lib/tenant-cache.ts`; change both together. */
+const INVALIDATION_CHANNEL = 'tenant:v2:invalidate';
+
+function memoGet(key: string): MemoEntry | undefined {
+  const hit = memo.get(key);
+  if (!hit) return undefined;
+  if (hit.expiresAt <= Date.now()) {
+    memo.delete(key);
+    return undefined;
+  }
+  return hit;
+}
+
+function memoSet(key: string, record: TenantRecord | null): void {
+  // A miss is held for the same short window as a hit. It has to be: an unknown
+  // hostname pointed at our IP is exactly the traffic that would otherwise reach
+  // Redis on every request.
+  memo.set(key, { record, expiresAt: Date.now() + MEMO_TTL_MS });
+}
+
+/**
+ * Listens for the control plane's invalidations.
+ *
+ * A subscribed ioredis connection cannot issue ordinary commands, so this takes
+ * its own client rather than borrowing the shared one. Called once at start-up;
+ * a failure to subscribe is logged and not fatal, because the TTL above still
+ * bounds how stale anything can get.
+ */
+export function subscribeToInvalidations(): void {
+  const subscriber = createSubscriber();
+
+  subscriber.on('error', (error: Error) =>
+    logger.warn({ err: error.message }, 'tenant invalidation subscriber error'),
+  );
+
+  subscriber.subscribe(INVALIDATION_CHANNEL).catch((error: Error) => {
+    logger.warn({ err: error.message }, 'could not subscribe to tenant invalidations');
+  });
+
+  subscriber.on('message', (_channel: string, message: string) => {
+    try {
+      const keys = JSON.parse(message) as unknown;
+      if (!Array.isArray(keys)) return;
+      for (const key of keys) if (typeof key === 'string') memo.delete(key);
+      logger.debug({ keys: keys.length }, 'tenant memo invalidated');
+    } catch {
+      // A message this process cannot parse is not a reason to stop listening;
+      // clear everything rather than guess, and let the reads repopulate.
+      memo.clear();
+    }
+  });
+}
+
+/** Drops this process's copy — for the verification scripts, which poison it. */
+export function clearTenantMemo(): void {
+  memo.clear();
+}
+
 async function callCompany<T>(path: string, init?: RequestInit): Promise<T | null> {
   const url = `${config.company.apiUrl}${path}`;
 
@@ -120,9 +213,14 @@ async function callCompany<T>(path: string, init?: RequestInit): Promise<T | nul
 export async function fetchTenantBySlug(slug: string): Promise<TenantRecord | null> {
   const key = `${CACHE_PREFIX}${slug}`;
 
+  const local = memoGet(key);
+  if (local) return local.record;
+
   const cached = await redis.get(key).catch(() => null);
   if (cached) {
-    return cached === 'null' ? null : (JSON.parse(cached) as TenantRecord);
+    const record = cached === 'null' ? null : (JSON.parse(cached) as TenantRecord);
+    memoSet(key, record);
+    return record;
   }
 
   const record = await callCompany<TenantRecord>(`/api/v1/internal/tenants/by-slug/${encodeURIComponent(slug)}`);
@@ -135,6 +233,7 @@ export async function fetchTenantBySlug(slug: string): Promise<TenantRecord | nu
     )
     .catch(() => undefined);
 
+  memoSet(key, record);
   return record;
 }
 
@@ -179,8 +278,15 @@ export async function fetchTenantByDomain(host: string): Promise<TenantRecord | 
 
   const key = `${CACHE_PREFIX}domain:${hostname}`;
 
+  const local = memoGet(key);
+  if (local) return local.record;
+
   const cached = await redis.get(key).catch(() => null);
-  if (cached) return cached === 'null' ? null : (JSON.parse(cached) as TenantRecord);
+  if (cached) {
+    const hit = cached === 'null' ? null : (JSON.parse(cached) as TenantRecord);
+    memoSet(key, hit);
+    return hit;
+  }
 
   const record = await callCompany<TenantRecord>(
     `/api/v1/internal/tenants/by-domain/${encodeURIComponent(hostname)}`,
@@ -232,6 +338,10 @@ export function hostsForSurface(tenant: TenantRecord, surface: 'admin' | 'storef
 export async function invalidateTenant(slug: string, domains: string[] = []): Promise<void> {
   const keys = [`${CACHE_PREFIX}${slug}`, ...domains.map((d) => `${CACHE_PREFIX}domain:${d.toLowerCase()}`)];
   await redis.del(...keys).catch(() => undefined);
+
+  // Reaches every process, this one included — the subscriber below clears the
+  // in-process copy, which a Redis delete on its own would leave behind.
+  await redis.publish(INVALIDATION_CHANNEL, JSON.stringify(keys)).catch(() => undefined);
 }
 
 export async function reportUsage(

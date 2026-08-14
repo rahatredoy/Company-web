@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { StoreConfig } from '@/types';
+import type { FooterColumn, StoreConfig } from '@/types';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { cn } from '@/lib/utils';
 import { PaymentBadges } from './payment-badges';
@@ -22,61 +22,32 @@ import { StoreLogo } from '@/templates/chrome';
  * came for.
  */
 
-export interface FooterColumn {
-  id: string;
-  title: string;
-  links: { label: string; href: string }[];
-}
-
-const SERVICE_LINKS = [
-  { label: 'Contact Us', href: '/contact' },
-  { label: 'FAQs', href: '/faq' },
-  { label: 'Shipping & Delivery', href: '/page/shipping-policy' },
-  { label: 'Returns & Refunds', href: '/page/return-policy' },
-  { label: 'Track Your Order', href: '/track-order' },
-];
-
-const ACCOUNT_LINKS = [
-  { label: 'My Orders', href: '/account/orders' },
-  { label: 'Wishlist', href: '/wishlist' },
-  { label: 'Account Details', href: '/account/profile' },
-  { label: 'Addresses', href: '/account/addresses' },
-  { label: 'Returns', href: '/account/returns' },
-];
-
-const HELP_LINKS = [
-  { label: 'Payment Methods', href: '/faq' },
-  { label: 'Compare Products', href: '/compare' },
-  { label: 'New Arrivals', href: '/new-arrivals' },
-  { label: 'Best Sellers', href: '/best-sellers' },
-  { label: 'Sale', href: '/sale' },
-];
-
+/**
+ * The link columns, entirely from store configuration.
+ *
+ * Three fixed arrays used to live here — Customer Service, My Account, Help
+ * Center — rendered identically for every store on the platform. They were
+ * wrong in the way invented links are always wrong: `Shipping & Delivery`
+ * pointed at `/page/shipping-policy` and `Returns & Refunds` at
+ * `/page/return-policy`, but the slug the seed actually publishes is
+ * `returns-policy`, so every store on the platform shipped a 404 in its footer.
+ * Nobody noticed, because nobody had authored those links and so nobody owned
+ * them.
+ *
+ * Now a column exists only if the store wrote it. The `company` column is the
+ * exception and is still derived, because policy pages are a legal requirement
+ * rather than an editorial choice — it lists whatever the store has actually
+ * published, which cannot go stale.
+ */
 export function buildFooterColumns(config: StoreConfig): FooterColumn[] {
-  const shopLinks =
-    config.navigation.footer.length > 0
-      ? config.navigation.footer.map((item) => ({ label: item.label, href: item.href }))
-      : [
-          { label: 'All Products', href: '/shop' },
-          { label: 'New Arrivals', href: '/new-arrivals' },
-          { label: 'Best Sellers', href: '/best-sellers' },
-          { label: 'On Sale', href: '/sale' },
-        ];
+  const policyLinks = config.policyPages.map((page) => ({
+    label: page.title,
+    href: `/page/${page.slug}`,
+  }));
 
   return [
-    { id: 'shop', title: 'Shop', links: shopLinks },
-    { id: 'service', title: 'Customer Service', links: SERVICE_LINKS },
-    { id: 'account', title: 'My Account', links: ACCOUNT_LINKS },
-    {
-      id: 'company',
-      title: 'Company',
-      links: [
-        { label: 'About Us', href: '/about' },
-        // Policy pages are whatever the store has published, not a fixed list.
-        ...config.policyPages.map((page) => ({ label: page.title, href: `/page/${page.slug}` })),
-      ],
-    },
-    { id: 'help', title: 'Help Center', links: HELP_LINKS },
+    ...config.footerColumns,
+    ...(policyLinks.length > 0 ? [{ id: 'company', title: 'Company', links: policyLinks }] : []),
   ];
 }
 
@@ -125,7 +96,7 @@ export function SiteFooter({
               {config.contact.address ? <li>{config.contact.address}</li> : null}
             </ul>
 
-            <SocialLinks className="mt-5" tone={dark ? 'inherit' : 'muted'} />
+            <SocialLinks links={config.social} className="mt-5" tone={dark ? 'inherit' : 'muted'} />
           </div>
 
           {/* Link columns — a grid on desktop, an accordion on a phone. */}

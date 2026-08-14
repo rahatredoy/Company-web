@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isMockCommerce } from '@/config';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
 
 const schema = z.object({
@@ -39,14 +38,6 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const parsed = schema.safeParse(payload);
   if (!parsed.success) return NextResponse.json({ error: 'Enter a code.' }, { status: 400 });
-
-  if (isMockCommerce) {
-    // No fixtures for this: a made-up discount is the exact failure the endpoint
-    // exists to prevent, so the mock branch simply refuses every code.
-    return NextResponse.json({
-      data: { valid: false, reason: 'unknown', message: 'That code is not valid.' },
-    });
-  }
 
   const { apiFetch, ApiError } = await import('@/lib/api/client');
   const { storeCall, cookieHeader } = await import('@/lib/tenant');

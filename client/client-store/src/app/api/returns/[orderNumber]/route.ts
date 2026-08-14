@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { isMockCommerce } from '@/config';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
 
 /**
@@ -46,17 +45,6 @@ export async function POST(
   const parsed = schema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json({ error: 'Please check your request and try again.' }, { status: 422 });
-  }
-
-  if (isMockCommerce) {
-    const { mockOrder } = await import('@/lib/api/mock/orders');
-    const order = await mockOrder(orderNumber);
-
-    if (!order || !order.canRequestReturn) {
-      return NextResponse.json({ error: 'This order cannot be returned.' }, { status: 409 });
-    }
-
-    return NextResponse.json({ data: { returnNumber: `RET-${Date.now() % 100000}` } }, { status: 201 });
   }
 
   const { apiFetch, ApiError } = await import('@/lib/api/client');

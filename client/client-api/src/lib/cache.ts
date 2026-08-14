@@ -106,4 +106,22 @@ export const CACHE_TTL = {
   productList: 60,
   productDetail: 60,
   page: 300,
+  /**
+   * The filter panel outlives the page it was drawn beside.
+   *
+   * Facets are five aggregate queries over the whole matching set — the most
+   * expensive thing a listing does — and they do not depend on which page is
+   * being viewed or how it is sorted, so one entry serves every page of a
+   * filter combination. Held longer than the listing itself because an option
+   * count that trails the catalogue by two minutes is a number beside a
+   * checkbox, not a price.
+   */
+  facets: 120,
+  /** Type-ahead: fires per keystroke, and the popular terms repeat endlessly. */
+  searchSuggest: 120,
+  /**
+   * The category tree, as the listing reads it — resolving `?category=` into a
+   * subtree of ids. Read on every category page and every product page.
+   */
+  categoryTree: 300,
 } as const;

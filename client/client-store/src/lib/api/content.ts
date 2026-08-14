@@ -1,6 +1,5 @@
 import 'server-only';
 import { cache } from 'react';
-import { isMockData } from '@/config';
 import type { CmsPage, Faq } from '@/types';
 import { cookieHeader, storeCall } from '@/lib/tenant';
 import { apiFetch } from './client';
@@ -22,11 +21,6 @@ export interface ContactInput {
 }
 
 export const getCmsPage = cache(async (slug: string): Promise<CmsPage | null> => {
-  if (isMockData) {
-    const { mockCmsPage } = await import('./mock/content');
-    return mockCmsPage(slug);
-  }
-
   return apiFetch<CmsPage | null>(`/api/v1/storefront/pages/${encodeURIComponent(slug)}`, {
     ...(await storeCall()),
     revalidate: 300,
@@ -37,11 +31,6 @@ export const getCmsPage = cache(async (slug: string): Promise<CmsPage | null> =>
 });
 
 export const getFaqs = cache(async (): Promise<Faq[]> => {
-  if (isMockData) {
-    const { mockFaqs } = await import('./mock/content');
-    return mockFaqs();
-  }
-
   return apiFetch<Faq[]>('/api/v1/storefront/faqs', {
     ...(await storeCall()),
     revalidate: 300,
@@ -58,11 +47,6 @@ export const getFaqs = cache(async (): Promise<Faq[]> => {
  * anyone with a word list.
  */
 export async function subscribeNewsletter(email: string): Promise<void> {
-  if (isMockData) {
-    const { mockSubscribeNewsletter } = await import('./mock/content');
-    return mockSubscribeNewsletter(email);
-  }
-
   await apiFetch<unknown>('/api/v1/storefront/newsletter', {
     method: 'POST',
     body: { email },
@@ -72,11 +56,6 @@ export async function subscribeNewsletter(email: string): Promise<void> {
 }
 
 export async function submitContactMessage(input: ContactInput): Promise<void> {
-  if (isMockData) {
-    const { mockSubmitContactMessage } = await import('./mock/content');
-    return mockSubmitContactMessage(input);
-  }
-
   await apiFetch<unknown>('/api/v1/storefront/contact', {
     method: 'POST',
     body: input,

@@ -5,7 +5,11 @@ import { faqs, homepageSections, pages, storefrontSettings } from '../../db/sche
 import { audit } from '../../lib/audit';
 import { invalidateStorefrontOnWrite } from '../../lib/cache';
 import {
+  CATEGORY_ICON_KEYS,
   COLOR_THEMES,
+  HOMEPAGE_SECTION_TYPES,
+  MOBILE_NAV_ICONS,
+  SOCIAL_PLATFORMS,
   STOREFRONT_TEMPLATES,
   normaliseTemplateKey,
   normaliseThemeKey,
@@ -37,6 +41,63 @@ const designSchema = z.object({
     })
     .default({ enabled: false, messages: [] }),
   tagline: z.string().trim().max(200).nullable().default(null),
+
+  /*
+   * Everything below is `.optional()` while everything above is required, and
+   * the difference is deliberate: this is a full-replace endpoint, so a field
+   * the caller omits is a field set back to its default. The admin panel's
+   * design form owns the keys above and round-trips them; it knows nothing about
+   * the footer columns or social profiles, so defaulting those to `[]` would let
+   * a template change silently empty the footer of every page. Omitted here
+   * means "leave what is stored alone".
+   */
+  social: z
+    .array(
+      z.object({
+        platform: z.enum(SOCIAL_PLATFORMS),
+        url: z.string().trim().url('Use a full web address.').max(2000),
+      }),
+    )
+    .max(8)
+    .optional(),
+  footerColumns: z
+    .array(
+      z.object({
+        id: z.string().trim().max(40).optional(),
+        title: z.string().trim().min(1).max(60),
+        links: z
+          .array(
+            z.object({
+              label: z.string().trim().min(1).max(60),
+              href: z.string().trim().min(1).max(2000),
+            }),
+          )
+          .max(12),
+      }),
+    )
+    .max(6)
+    .optional(),
+  utility: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(40),
+        href: z.string().trim().min(1).max(2000),
+      }),
+    )
+    .max(6)
+    .optional(),
+  mobileNav: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(20),
+        href: z.string().trim().min(1).max(2000),
+        icon: z.enum(MOBILE_NAV_ICONS),
+      }),
+    )
+    .max(5)
+    .optional(),
+  /** Category slug → glyph key, for the sidebar and mobile drawer. */
+  categoryIcons: z.record(z.string().trim().max(160), z.enum(CATEGORY_ICON_KEYS)).optional(),
 });
 
 const pageSchema = z.object({
@@ -60,12 +121,26 @@ const faqSchema = z.object({
 });
 
 const sectionSchema = z.object({
-  type: z.string().trim().min(1).max(40),
   title: z.string().trim().max(200).nullable().default(null),
   subtitle: z.string().trim().max(300).nullable().default(null),
   config: z.record(z.string(), z.unknown()).default({}),
   isEnabled: z.boolean().default(true),
   sortOrder: z.coerce.number().int().min(0).max(100_000).default(0),
+});
+
+/**
+ * Creating a section additionally fixes its `type`, which updating cannot change.
+ *
+ * A section's type decides which renderer runs and which `config` keys mean
+ * anything, so re-typing one in place would leave a hero's slides sitting in a
+ * brands block. Changing the type is delete-and-create.
+ *
+ * The enum is checked here rather than left to Postgres: an unknown value would
+ * otherwise arrive as a driver error and be reported as a 500, when it is really
+ * one bad field.
+ */
+const createSectionSchema = sectionSchema.extend({
+  type: z.enum(HOMEPAGE_SECTION_TYPES),
 });
 
 /**
@@ -102,8 +177,16 @@ export default async function websiteRoutes(app: FastifyInstance) {
           messages: Array.isArray(header.announcement?.messages) ? header.announcement.messages : [],
         },
         tagline: typeof footer.tagline === 'string' ? footer.tagline : null,
+        social: Array.isArray(footer.social) ? footer.social : [],
+        footerColumns: Array.isArray(footer.columns) ? footer.columns : [],
+        utility: Array.isArray(header.utility) ? header.utility : [],
+        mobileNav: Array.isArray(header.mobileNav) ? header.mobileNav : [],
+        categoryIcons: header.categoryIcons ?? {},
         templates: STOREFRONT_TEMPLATES,
         themes: COLOR_THEMES,
+        socialPlatforms: SOCIAL_PLATFORMS,
+        mobileNavIcons: MOBILE_NAV_ICONS,
+        categoryIconKeys: CATEGORY_ICON_KEYS,
       });
     },
   );
@@ -115,7 +198,20 @@ export default async function websiteRoutes(app: FastifyInstance) {
       const store = storeOf(request);
       const body = parseBody(designSchema, request.body);
 
-      const [existing] = await store.db.select({ id: storefrontSettings.id }).from(storefrontSettings).limit(1);
+      const [existing] = await store.db
+        .select({
+          id: storefrontSettings.id,
+          headerConfiguration: storefrontSettings.headerConfiguration,
+          footerConfiguration: storefrontSettings.footerConfiguration,
+        })
+        .from(storefrontSettings)
+        .limit(1);
+
+      // Omitted keys keep what is stored; see the note on `designSchema`.
+      const storedHeader = (existing?.headerConfiguration ?? {}) as Record<string, unknown>;
+      const storedFooter = (existing?.footerConfiguration ?? {}) as Record<string, unknown>;
+      const keep = <T>(sent: T | undefined, stored: unknown, empty: T): T =>
+        sent !== undefined ? sent : ((stored ?? empty) as T);
 
       const values = {
         templateKey: body.templateKey,
@@ -130,8 +226,19 @@ export default async function websiteRoutes(app: FastifyInstance) {
               ...message,
             })),
           },
+          utility: keep(body.utility, storedHeader.utility, []),
+          mobileNav: keep(body.mobileNav, storedHeader.mobileNav, []),
+          categoryIcons: keep(body.categoryIcons, storedHeader.categoryIcons, {}),
         },
-        footerConfiguration: { tagline: body.tagline },
+        footerConfiguration: {
+          tagline: body.tagline,
+          social: keep(body.social, storedFooter.social, []),
+          columns: keep(
+            body.footerColumns?.map((column, index) => ({ id: column.id ?? `column-${index}`, ...column })),
+            storedFooter.columns,
+            [],
+          ),
+        },
         publishedAt: new Date(),
         updatedAt: new Date(),
       };
@@ -404,6 +511,55 @@ export default async function websiteRoutes(app: FastifyInstance) {
         .from(homepageSections)
         .orderBy(asc(homepageSections.sortOrder));
       return ok(reply, rows);
+    },
+  );
+
+  app.post(
+    '/website/homepage',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('website.manage')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const body = parseBody(createSectionSchema, request.body);
+
+      const [created] = await store.db.insert(homepageSections).values(body).returning();
+
+      await audit(store.db, request, {
+        action: 'homepage.section.create',
+        module: 'website',
+        entity: 'homepage_section',
+        entityId: created!.id,
+        entityLabel: created!.title ?? created!.type,
+        newValues: { type: created!.type, sortOrder: created!.sortOrder },
+      });
+
+      return ok(reply, created, 201);
+    },
+  );
+
+  app.delete(
+    '/website/homepage/:id',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('website.manage')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+
+      const [removed] = await store.db
+        .delete(homepageSections)
+        .where(eq(homepageSections.id, id))
+        .returning({ id: homepageSections.id, type: homepageSections.type });
+
+      if (!removed) throw notFound('That section does not exist.');
+
+      await audit(store.db, request, {
+        action: 'homepage.section.delete',
+        module: 'website',
+        entity: 'homepage_section',
+        entityId: removed.id,
+        entityLabel: removed.type,
+        oldValues: { type: removed.type },
+      });
+
+      return noContent(reply);
     },
   );
 

@@ -140,12 +140,24 @@ export default fp(async function security(app: FastifyInstance) {
     );
   });
 
-  // Coarse global limiter; the sensitive per-route limits live with their handlers.
+  /*
+   * Coarse global limiter; the sensitive per-route limits live with their
+   * handlers.
+   *
+   * Backed by Redis so the budget is shared across every process, which means
+   * one network round trip per request — the single fixed cost on the path of
+   * everything this API serves. `/health` is exempted for exactly that reason:
+   * a load balancer probes it every few seconds per instance forever, it reads
+   * nothing and reveals nothing, and making a liveness check depend on a remote
+   * Redis inverts the dependency — a Redis blip would fail the probe and take
+   * healthy instances out of rotation.
+   */
   await app.register(rateLimit, {
     global: true,
     max: 600,
     timeWindow: '1 minute',
     redis,
+    allowList: (request: FastifyRequest) => request.url.startsWith('/health'),
     keyGenerator: (request: FastifyRequest) => {
       const forwarded = request.headers['x-forwarded-for'];
       const ip = typeof forwarded === 'string' ? forwarded.split(',')[0]!.trim() : request.ip;

@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { X } from 'lucide-react';
-import { isMockData } from '@/config';
 import type { Category } from '@/types';
 import { getStoreConfig } from '@/lib/api/store';
 import { getProductList, parseProductQuery } from '@/lib/api/products';
@@ -13,10 +12,6 @@ import { cookieHeader, storeCall } from '@/lib/tenant';
 import { cn } from '@/lib/utils';
 
 async function getCategory(slug: string): Promise<Category | null> {
-  if (isMockData) {
-    const { mockCategoryBySlug } = await import('@/lib/api/mock/products');
-    return mockCategoryBySlug(slug);
-  }
 
   try {
     return await apiFetch<Category>(`/api/v1/storefront/categories/${encodeURIComponent(slug)}`, {
@@ -64,7 +59,22 @@ export default async function CategoryPage({
   const category = await getCategory(slug);
   if (!category) notFound();
 
-  const query = parseProductQuery(search, { category: slug });
+  /*
+   * One subcategory at a time.
+   *
+   * The chips answer "which aisle", and an aisle is a place you are in rather
+   * than a set you accumulate — two at once reads as a filter that failed to
+   * clear. Clamped here as well as in the links, so a shared or hand-edited URL
+   * carrying several cannot produce a listing the chip row is unable to
+   * represent. The `sub` parameter itself stays a list: the sidebar filters are
+   * genuinely multi-select and travel the same way.
+   */
+  const parsed = parseProductQuery(search, { category: slug });
+  const query =
+    parsed.subcategories && parsed.subcategories.length > 1
+      ? { ...parsed, subcategories: parsed.subcategories.slice(0, 1) }
+      : parsed;
+
   const [config, result] = await Promise.all([getStoreConfig(), getProductList(query)]);
   const template = await getTemplate(config.design.templateKey);
 
@@ -86,19 +96,31 @@ export default async function CategoryPage({
       else if (value !== undefined) next.set(key, value);
     }
 
-    const after = selectedSubs.includes(childSlug)
-      ? selectedSubs.filter((entry) => entry !== childSlug)
-      : [...selectedSubs, childSlug];
+    // Single-select: picking one replaces whatever was chosen, and picking the
+    // current one clears it. Appending instead of replacing is what allowed four
+    // aisles to be lit at once.
+    const after = selectedSubs.includes(childSlug) ? [] : [childSlug];
     after.forEach((entry) => next.append('sub', entry));
 
     const queryString = next.toString();
     return queryString ? `/category/${category.slug}?${queryString}` : `/category/${category.slug}`;
   };
 
-  const trail: { name: string; href?: string }[] = [
-    ...category.breadcrumb.map((crumb) => ({ name: crumb.name, href: `/category/${crumb.slug}` })),
-    { name: category.name },
-  ];
+  /*
+   * `category.breadcrumb` already ends with this category.
+   *
+   * Appending the name again rendered "Home / Electronics / Electronics", and
+   * "Home / Electronics / Smartphones / Smartphones" once subcategories existed —
+   * React also warned about two children with the same key, and the
+   * `BreadcrumbList` handed to crawlers carried the duplicate too. The last
+   * entry is the page you are on, so it gets no link.
+   */
+  const trail: { name: string; href?: string }[] = category.breadcrumb.length
+    ? category.breadcrumb.map((crumb, index) => ({
+        name: crumb.name,
+        ...(index < category.breadcrumb.length - 1 ? { href: `/category/${crumb.slug}` } : {}),
+      }))
+    : [{ name: category.name }];
 
   /** Only factual data goes into structured data — no invented ratings. */
   const breadcrumbJsonLd = {

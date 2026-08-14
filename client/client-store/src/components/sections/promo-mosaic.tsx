@@ -23,7 +23,7 @@ export function PromoMosaic({
 }: {
   dealProduct: ProductSummary | null;
   deadline: number | null;
-  dealTitle?: string | null;
+  dealTitle: string | null;
   banners: PromoBanner[];
   locale: string;
   className?: string;

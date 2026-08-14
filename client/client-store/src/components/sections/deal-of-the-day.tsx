@@ -21,7 +21,7 @@ import { Countdown } from './countdown';
 export function DealOfTheDay({
   product,
   deadline,
-  title = 'Deal of the Day',
+  title,
   locale,
   layout = 'split',
   className,
@@ -29,7 +29,8 @@ export function DealOfTheDay({
   product: ProductSummary;
   /** Epoch milliseconds, or null to show the card without a clock. */
   deadline: number | null;
-  title?: string | null;
+  /** The store's own wording for the block; null renders the card untitled. */
+  title: string | null;
   locale: string;
   /** `split` is the wide marketplace card; `stacked` fits a narrow column. */
   layout?: 'split' | 'stacked';
@@ -44,7 +45,7 @@ export function DealOfTheDay({
       )}
     >
       <div className={cn('order-2 flex-1 p-5 sm:order-1 sm:p-6', layout === 'stacked' && 'order-2')}>
-        <p className="text-lg font-semibold leading-tight sm:text-xl">{title}</p>
+        {title ? <p className="text-lg font-semibold leading-tight sm:text-xl">{title}</p> : null}
 
         {deadline ? <Countdown deadline={deadline} className="mt-4" size="md" /> : null}
 

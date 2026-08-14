@@ -73,9 +73,16 @@ export default async function storefrontOrderRoutes(app: FastifyInstance) {
           paymentStatus: orders.paymentStatus,
           total: orders.grandTotal,
           currency: orders.currency,
+          /*
+           * `${orders}.id` rather than `${orders.id}`: with no join on the outer
+           * select, a bare column renders unqualified as `"id"`, which Postgres
+           * then resolves against `order_items` — so this counted
+           * `oi.order_id = oi.id` and every order in the customer's list showed
+           * no items at all.
+           */
           itemCount: sql<number>`(
             select coalesce(sum(oi.quantity), 0)::int
-            from ${orderItems} oi where oi.order_id = ${orders.id}
+            from ${orderItems} oi where oi.order_id = ${orders}.id
           )`,
         })
         .from(orders)

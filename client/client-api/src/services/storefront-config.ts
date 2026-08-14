@@ -48,6 +48,36 @@ export interface ContactConfig {
   whatsappEnabled: boolean;
 }
 
+/**
+ * One social profile in the footer.
+ *
+ * `platform` picks the glyph from a closed set the storefront owns, rather than
+ * the store supplying an icon URL — an icon field taking arbitrary URLs would
+ * let admin content pull a remote image into the footer of every page.
+ */
+export interface SocialLink {
+  platform: string;
+  url: string;
+}
+
+export interface FooterColumn {
+  id: string;
+  title: string;
+  links: { label: string; href: string }[];
+}
+
+export interface UtilityLink {
+  label: string;
+  href: string;
+}
+
+/** One destination in the mobile bottom bar; `icon` is a closed-set key. */
+export interface MobileNavItem {
+  label: string;
+  href: string;
+  icon: string;
+}
+
 export interface NavigationNode {
   id: string;
   label: string;
@@ -83,13 +113,32 @@ export interface StorefrontConfig {
     colorThemeKey: ColorTheme;
   };
   announcement: AnnouncementConfig;
+  /** Desktop strip above the header. Empty means the store has not set one up. */
+  utility: UtilityLink[];
   contact: ContactConfig;
   navigation: {
     header: NavigationNode[];
     footer: NavigationNode[];
   };
+  /**
+   * Footer link columns, exactly as the store arranged them. Empty means the
+   * footer draws its brand block and nothing else — an invented column of links
+   * is worse than no column, because half of them would 404.
+   */
+  footerColumns: FooterColumn[];
+  social: SocialLink[];
+  /** Mobile bottom bar. Empty hides the bar rather than guessing destinations. */
+  mobileNav: MobileNavItem[];
   /** Top-level categories for the mega-menu and mobile drawer. */
-  categoryMenu: { id: string; name: string; slug: string; iconUrl: string | null; children: { id: string; name: string; slug: string }[] }[];
+  categoryMenu: {
+    id: string;
+    name: string;
+    slug: string;
+    iconUrl: string | null;
+    /** Closed-set glyph key, chosen by the store; never a URL. */
+    iconKey: string | null;
+    children: { id: string; name: string; slug: string }[];
+  }[];
   policyPages: { slug: string; title: string; systemKey: string | null }[];
   payment: { providers: { provider: string; label: string; description: string | null }[] };
   seo: { title: string | null; description: string | null; socialImageUrl: string | null };
@@ -154,6 +203,102 @@ function localeList(stored: unknown, fallback: string): string[] {
 function readTagline(raw: unknown): string | null {
   const value = (raw ?? {}) as Record<string, unknown>;
   return typeof value.tagline === 'string' && value.tagline.trim() ? value.tagline.trim() : null;
+}
+
+/**
+ * A link target the storefront may render.
+ *
+ * The same rule `hrefFor` applies to stored nav targets: a path or an http(s)
+ * URL, nothing else. Without it a `javascript:` value saved by a compromised
+ * admin session becomes an href in the footer of every page.
+ */
+function readHref(value: unknown): string | null {
+  const href = trimmedOrNull(value);
+  if (!href) return null;
+  if (href.startsWith('/')) return href;
+  return /^https?:\/\//i.test(href) ? href : null;
+}
+
+function readLinkList(raw: unknown): { label: string; href: string }[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw.flatMap((entry) => {
+    const item = (entry ?? {}) as Record<string, unknown>;
+    const label = trimmedOrNull(item.label);
+    const href = readHref(item.href);
+    return label && href ? [{ label, href }] : [];
+  });
+}
+
+/**
+ * Footer columns from `footer_configuration.columns`.
+ *
+ * A column with no surviving links is dropped rather than rendered as a bare
+ * heading — the same rule the rest of the storefront follows, where absent data
+ * means absent section.
+ */
+function readFooterColumns(raw: unknown): FooterColumn[] {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(value.columns)) return [];
+
+  return value.columns.flatMap((entry, index) => {
+    const column = (entry ?? {}) as Record<string, unknown>;
+    const title = trimmedOrNull(column.title);
+    const links = readLinkList(column.links);
+    if (!title || links.length === 0) return [];
+
+    return [{ id: trimmedOrNull(column.id) ?? `column-${index}`, title, links }];
+  });
+}
+
+/** Social profiles from `footer_configuration.social`. */
+function readSocial(raw: unknown): SocialLink[] {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(value.social)) return [];
+
+  return value.social.flatMap((entry) => {
+    const item = (entry ?? {}) as Record<string, unknown>;
+    const platform = trimmedOrNull(item.platform)?.toLowerCase();
+    const url = readHref(item.url);
+    return platform && url ? [{ platform, url }] : [];
+  });
+}
+
+function readUtility(raw: unknown): UtilityLink[] {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  return readLinkList(value.utility);
+}
+
+function readMobileNav(raw: unknown): MobileNavItem[] {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(value.mobileNav)) return [];
+
+  return value.mobileNav.flatMap((entry) => {
+    const item = (entry ?? {}) as Record<string, unknown>;
+    const label = trimmedOrNull(item.label);
+    const href = readHref(item.href);
+    const icon = trimmedOrNull(item.icon);
+    return label && href && icon ? [{ label, href, icon }] : [];
+  });
+}
+
+/**
+ * Per-category glyph keys from `header_configuration.categoryIcons`.
+ *
+ * Keyed by category slug so the mapping survives a category being renamed, and
+ * carried as a key rather than a URL for the reason given on `SocialLink`.
+ */
+function readCategoryIcons(raw: unknown): Map<string, string> {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const icons = (value.categoryIcons ?? {}) as Record<string, unknown>;
+  if (typeof icons !== 'object' || icons === null || Array.isArray(icons)) return new Map();
+
+  return new Map(
+    Object.entries(icons).flatMap(([slug, key]) => {
+      const iconKey = trimmedOrNull(key);
+      return iconKey ? [[slug, iconKey] as [string, string]] : [];
+    }),
+  );
 }
 
 /** Turns a stored nav target into a path the storefront can link to directly. */
@@ -252,6 +397,7 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
     const preferences = settingsRow?.preferences ?? {};
     const currency = settingsRow?.currency ?? store.currency;
     const language = settingsRow?.language ?? store.language;
+    const categoryIcons = readCategoryIcons(designRow?.headerConfiguration);
 
     return {
       store: {
@@ -274,6 +420,7 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
         colorThemeKey: designRow ? normaliseThemeKey(designRow.colorThemeKey) : DEFAULT_THEME,
       },
       announcement: readAnnouncement(designRow?.headerConfiguration),
+      utility: readUtility(designRow?.headerConfiguration),
       contact: {
         businessName: settingsRow?.businessName ?? null,
         email: settingsRow?.businessEmail ?? null,
@@ -283,6 +430,9 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
         whatsappEnabled: preferences.whatsappEnabled === true,
       },
       navigation: { header: buildTree('header'), footer: buildTree('footer') },
+      footerColumns: readFooterColumns(designRow?.footerConfiguration),
+      social: readSocial(designRow?.footerConfiguration),
+      mobileNav: readMobileNav(designRow?.headerConfiguration),
       categoryMenu: categoryRows
         .filter((c) => !c.parentId)
         .map((parent) => ({
@@ -290,6 +440,7 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
           name: parent.name,
           slug: parent.slug,
           iconUrl: parent.iconUrl,
+          iconKey: categoryIcons.get(parent.slug) ?? null,
           children: categoryRows
             .filter((child) => child.parentId === parent.id)
             .map((child) => ({ id: child.id, name: child.name, slug: child.slug })),

@@ -25,6 +25,26 @@ import { redis } from './redis';
  */
 const CACHE_PREFIX = 'tenant:v2:';
 
+/**
+ * Announces the same invalidation to every `client-api` process.
+ *
+ * Deleting the Redis key is enough on its own *if* the client platform reads
+ * Redis on every request — which it did, and which cost it a network round trip
+ * per request to a shared Redis that is not local to it. It now holds the record
+ * in process for a few seconds as well, so the delete alone would leave that
+ * copy answering until it aged out.
+ *
+ * A publish costs the same one call the delete does and reaches every process at
+ * once, so the guarantee this file exists for — a suspension or a domain change
+ * lands immediately, not at the end of a TTL — survives the extra layer. If the
+ * message is missed the in-process TTL is the backstop, exactly as the Redis TTL
+ * backs up the delete.
+ *
+ * The channel name is mirrored in `client-api/src/lib/company-client.ts`. Like
+ * the key prefix above, it is copied on purpose and the two must change together.
+ */
+const INVALIDATION_CHANNEL = 'tenant:v2:invalidate';
+
 function keysFor(slug: string, hostnames: string[]): string[] {
   return [
     `${CACHE_PREFIX}${slug}`,
@@ -40,7 +60,10 @@ function keysFor(slug: string, hostnames: string[]): string[] {
 async function drop(keys: string[]): Promise<void> {
   if (keys.length === 0) return;
   try {
+    // Delete first, publish second. A listener that reacts to the message by
+    // re-reading must not find the stale value still sitting in Redis.
     await redis.del(...keys);
+    await redis.publish(INVALIDATION_CHANNEL, JSON.stringify(keys));
     logger.debug({ keys: keys.length }, 'tenant cache invalidated');
   } catch (error) {
     logger.warn({ err: (error as Error).message }, 'tenant cache invalidation failed');

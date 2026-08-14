@@ -65,7 +65,7 @@ function Header({ config }: TemplateChromeProps) {
 
         <div className="ml-auto flex items-center gap-1">
           <SearchBox variant="icon" className="hidden lg:block" />
-          <HeaderActions />
+          <HeaderActions locale={config.store.language} />
         </div>
       </div>
     </header>

@@ -195,6 +195,9 @@ export const homepageSectionType = pgEnum('homepage_section_type', [
   'brands',
   'newsletter',
   'text',
+  'collection',
+  'social_gallery',
+  'recently_viewed',
 ]);
 
 export const bannerPosition = pgEnum('banner_position', [

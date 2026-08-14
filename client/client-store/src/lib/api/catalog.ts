@@ -1,6 +1,5 @@
 import 'server-only';
 import { cache } from 'react';
-import { isMockData } from '@/config';
 import type { Brand, Category, HomepageSection, ProductSummary } from '@/types';
 import { storeCall } from '@/lib/tenant';
 import { apiFetch } from './client';
@@ -27,52 +26,97 @@ async function publicOptions(tags: string[], revalidate = 120) {
 }
 
 export const getHomepageSections = cache(async (): Promise<HomepageSection[]> => {
-  if (isMockData) {
-    const { mockHomepageSections } = await import('./mock/store');
-    return mockHomepageSections();
-  }
   return apiFetch<HomepageSection[]>('/api/v1/storefront/home', await publicOptions(['homepage']));
 });
 
 export const getCategories = cache(async (): Promise<Category[]> => {
-  if (isMockData) {
-    const { mockCategories } = await import('./mock/store');
-    return mockCategories();
-  }
   return apiFetch<Category[]>('/api/v1/storefront/categories', await publicOptions(['categories'], 300));
 });
 
 export const getBrands = cache(async (): Promise<Brand[]> => {
-  if (isMockData) {
-    const { mockBrands } = await import('./mock/store');
-    return mockBrands();
-  }
   return apiFetch<Brand[]>('/api/v1/storefront/brands', await publicOptions(['brands'], 300));
 });
+
+/**
+ * Products already resolved during **this** render, by id.
+ *
+ * `cache` makes the map request-scoped, which is the whole point: it must not
+ * outlive the render, because a summary carries a price and a stock badge and
+ * two different visitors may be quoted different currencies. React drops it when
+ * the request ends, so there is nothing here to leak into the next one.
+ */
+const resolvedSummaries = cache(() => new Map<string, ProductSummary>());
+
+/**
+ * The API caps `?ids=` at sixty per call, so a homepage naming more than that is
+ * split. Sixty is the API's own limit and this must not exceed it — a longer
+ * list is silently truncated on the far side, which would drop products off the
+ * end of a rail with no error anywhere.
+ */
+const ID_BATCH = 60;
 
 /**
  * Resolves the products a homepage section names.
  *
  * Sections store ids rather than embedded copies, so a price or stock change is
  * reflected on the homepage without anyone re-saving the section.
+ *
+ * **Batched across the whole render.** Each section used to fetch its own rail,
+ * so a homepage with a hero rail, three grids, a tabbed block of four and a deal
+ * was nine round trips to resolve one page — nine requests, each of which made
+ * the API decorate its own rows with images, stock and specs. They ask for
+ * different products, but they ask the same *question*, and the answer to sixty
+ * of them costs barely more than the answer to eight.
+ *
+ * `primeProductSummaries` collects every id on the page and fills the map in one
+ * call; each section then finds its products already there. A section that names
+ * an id nobody primed still works — it fetches, exactly as before — so a new
+ * section type cannot break by forgetting to register itself.
  */
 export async function getProductsByIds(ids: string[]): Promise<ProductSummary[]> {
   if (ids.length === 0) return [];
 
-  if (isMockData) {
-    const { mockProductsByIds } = await import('./mock/store');
-    const { convertProducts } = await import('./mock/currency');
-    const { readCurrencyPreference } = await import('@/lib/locale/preference');
-    // Live, the API converts and returns prices already in the visitor's
-    // currency; the fixture layer has to do it here to make the selector real.
-    return convertProducts(await mockProductsByIds(ids), await readCurrencyPreference());
+  const store = resolvedSummaries();
+  const missing = [...new Set(ids.filter((id) => !store.has(id)))];
+  if (missing.length > 0) await loadSummaries(missing, store);
+
+  // In the order the section named them: the owner's arrangement is the point.
+  return ids.map((id) => store.get(id)).filter((item): item is ProductSummary => item !== undefined);
+}
+
+/**
+ * Fetches every product the page will need, before any section renders.
+ *
+ * Called once from the homepage. Sections stay unchanged — they still ask for
+ * their own ids — but by the time they do, the answer is already in hand.
+ */
+export async function primeProductSummaries(ids: string[]): Promise<void> {
+  const store = resolvedSummaries();
+  const missing = [...new Set(ids.filter((id) => id && !store.has(id)))];
+  if (missing.length > 0) await loadSummaries(missing, store);
+}
+
+async function loadSummaries(ids: string[], store: Map<string, ProductSummary>): Promise<void> {
+  const { readCurrencyPreference } = await import('@/lib/locale/preference');
+  const [options, currency] = await Promise.all([
+    publicOptions(['products'], 60),
+    readCurrencyPreference(),
+  ]);
+
+  const batches: string[][] = [];
+  for (let index = 0; index < ids.length; index += ID_BATCH) {
+    batches.push(ids.slice(index, index + ID_BATCH));
   }
 
-  const { readCurrencyPreference } = await import('@/lib/locale/preference');
+  const results = await Promise.all(
+    batches.map((batch) =>
+      apiFetch<ProductSummary[]>('/api/v1/storefront/products', {
+        ...options,
+        // Part of the cache key, deliberately — see the note in `products.ts`.
+        query: { ids: batch, currency },
+      }),
+    ),
+  );
 
-  return apiFetch<ProductSummary[]>('/api/v1/storefront/products', {
-    ...(await publicOptions(['products'], 60)),
-    // Part of the cache key, deliberately — see the note in `products.ts`.
-    query: { ids, currency: await readCurrencyPreference() },
-  });
+  for (const item of results.flat()) store.set(item.id, item);
 }
