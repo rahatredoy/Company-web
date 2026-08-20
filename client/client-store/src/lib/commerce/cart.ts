@@ -32,6 +32,15 @@ export interface AddToCartInput {
   quantity: number;
   /** Bound from the product's own limit, so a line cannot exceed it. */
   maxQuantity?: number | null;
+  /**
+   * Which size, for a product sold by weight or volume.
+   *
+   * `unitPrice` above is then the price of one of *these* — one 500gm bag —
+   * rather than the shelf rate, because that is what the quantity below
+   * multiplies and what the basket has to total.
+   */
+  measureLabel?: string | null;
+  measure?: number | null;
 }
 
 interface StoredCart {
@@ -70,7 +79,17 @@ const store = createPersistedStore<StoredCart>({
   parse: parseCart,
 });
 
-const lineId = (productId: string, variantId: string) => `${productId}::${variantId}`;
+/**
+ * What makes two basket lines the same line.
+ *
+ * The size is part of it. A product sold by weight has one variant and one
+ * price, so keying on the variant alone would have merged 500gm and 1kg of the
+ * same thing into a single line — one of the two sizes silently becoming the
+ * other, at the other's price. Null for an ordinary product, which keeps every
+ * existing line's id exactly what it was.
+ */
+const lineId = (productId: string, variantId: string, measure?: number | null) =>
+  measure ? `${productId}::${variantId}::${measure}` : `${productId}::${variantId}`;
 
 function computeTotals(cart: StoredCart): CartTotals {
   const subtotal = sum(cart.lines.map((line) => line.lineTotal));
@@ -122,7 +141,7 @@ export function useCart() {
   const cart = React.useMemo(() => toCart(stored), [stored]);
 
   const add = React.useCallback((input: AddToCartInput) => {
-    const id = lineId(input.productId, input.variantId);
+    const id = lineId(input.productId, input.variantId, input.measure);
     const unit = input.unitSalePrice ?? input.unitPrice;
 
     store.set((current) => {
@@ -150,6 +169,8 @@ export function useCart() {
               imageUrl: input.imageUrl,
               unitPrice: input.unitPrice,
               unitSalePrice: input.unitSalePrice,
+              measureLabel: input.measureLabel ?? null,
+              measure: input.measure ?? null,
               quantity: Math.min(ceiling, input.quantity),
               lineTotal: multiply(unit, Math.min(ceiling, input.quantity)),
               inStock: true,
@@ -231,8 +252,8 @@ export function useCart() {
   }, []);
 
   const has = React.useCallback(
-    (productId: string, variantId: string) =>
-      stored.lines.some((line) => line.id === lineId(productId, variantId)),
+    (productId: string, variantId: string, measure?: number | null) =>
+      stored.lines.some((line) => line.id === lineId(productId, variantId, measure)),
     [stored.lines],
   );
 

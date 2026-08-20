@@ -1,19 +1,11 @@
 import type { Metadata } from 'next';
-import { PageHeader } from '@/components/admin/page-header';
-import { Pagination } from '@/components/admin/pagination';
-import { TableFilters } from '@/components/admin/table-filters';
-import { TaxonomyManager, type TaxonomyRow } from '@/components/admin/taxonomy-manager';
-import { serverGet, serverGetPaginated } from '@/lib/server-api';
+import { CategoryManager, type CategoryFilterState } from '@/components/admin/category-manager';
+import { currentStoreSlug, serverGet, serverGetAll } from '@/lib/server-api';
+import { storefrontUrl } from '@/lib/env';
 import { can, type CategoryRow, type SessionResponse } from '@/lib/types';
 
 export const metadata: Metadata = { title: 'Categories' };
 export const dynamic = 'force-dynamic';
-
-const STATUS_FILTERS = [
-  { value: 'all', label: 'All' },
-  { value: 'active', label: 'Active' },
-  { value: 'inactive', label: 'Hidden' },
-];
 
 export default async function CategoriesPage({
   searchParams,
@@ -25,49 +17,49 @@ export default async function CategoriesPage({
     const value = params[key];
     return Array.isArray(value) ? value[0] : value;
   };
+  const oneOf = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
+    const value = single(key);
+    return allowed.includes(value as T) ? (value as T) : fallback;
+  };
 
-  const [session, page] = await Promise.all([
+  const [session, slug, rows] = await Promise.all([
     serverGet<SessionResponse>('/api/v1/admin/auth/session'),
-    serverGetPaginated<CategoryRow>('/api/v1/admin/categories', {
-      page: single('page') ?? 1,
-      search: single('search'),
-      status: single('status'),
-    }),
+    currentStoreSlug(),
+    /*
+     * The whole category set, not a batch of it.
+     *
+     * The screen renders a tree, and a tree cannot be batched by the database
+     * without cutting a family in half — the second batch would hold children
+     * whose parent was in the first. So every category is read here and the
+     * tree, the filters and the counts are all derived on the client from that
+     * one set; the table then virtualises the rows the tree flattens to, so a
+     * large one still only puts a screenful in the DOM.
+     */
+    serverGetAll<CategoryRow>('/api/v1/admin/categories'),
   ]);
 
-  // The list is filtered and paginated, so a parent shown in the table may not
-  // be in it. The names are resolved from a separate unfiltered read, or a child
-  // would appear to have no parent whenever the filter excluded one.
-  const all = await serverGetPaginated<CategoryRow>('/api/v1/admin/categories', { pageSize: 100 });
-  const nameById = new Map(all.data.map((category) => [category.id, category.name]));
+  const initial: CategoryFilterState = {
+    search: single('search') ?? '',
+    status: oneOf('status', ['all', 'active', 'inactive'] as const, 'all'),
+    visibility: oneOf('visibility', ['all', 'shown', 'hidden'] as const, 'all'),
+    parent: single('parent') ?? 'all',
+  };
 
-  const rows: TaxonomyRow[] = page.data.map((category) => ({
-    id: category.id,
-    name: category.name,
-    slug: category.slug,
-    isActive: category.isActive,
-    productCount: category.productCount,
-    parentId: category.parentId,
-    parentName: category.parentId ? (nameById.get(category.parentId) ?? null) : null,
-  }));
+  /*
+   * "This month" is settled on the server so the count in the stat card is the
+   * same on both renders. Deriving it in the browser would let a page rendered
+   * just before midnight hydrate into a different number.
+   */
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Categories"
-        description="How your products are grouped on the storefront. A category can sit inside another."
-      />
-
-      <TableFilters searchPlaceholder="Search categories…" statusOptions={STATUS_FILTERS} />
-
-      <TaxonomyManager
-        kind="category"
-        rows={rows}
-        parents={all.data.map((category) => ({ id: category.id, name: category.name }))}
-        canManage={session.authenticated && can(session.admin, 'categories.manage')}
-      />
-
-      <Pagination {...page.meta} />
-    </div>
+    <CategoryManager
+      rows={rows}
+      canManage={session.authenticated && can(session.admin, 'categories.manage')}
+      storefrontBase={slug ? storefrontUrl(slug) : null}
+      monthStart={monthStart}
+      initial={initial}
+    />
   );
 }

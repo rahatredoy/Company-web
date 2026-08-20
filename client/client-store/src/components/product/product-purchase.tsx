@@ -8,12 +8,18 @@ import type { ProductDetail } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { QuantityStepper } from '@/components/ui/quantity-stepper';
+import {
+  defaultOption,
+  minimumNote,
+  priceForMeasure,
+  startingQuantity,
+} from '@/lib/commerce/measure';
 import { PriceDisplay } from '@/components/commerce/price-display';
 import { RatingStars } from '@/components/commerce/rating-stars';
 import { WishlistButton } from '@/components/commerce/wishlist-button';
 import { useCart } from '@/lib/commerce/cart';
 import { useRecentlyViewed } from '@/lib/commerce/collections';
-import { cn } from '@/lib/utils';
+import { cn, formatMoney } from '@/lib/utils';
 import { ProductGallery } from './product-gallery';
 import { VariantSelector, findVariant, initialSelection } from './variant-selector';
 import { StockStatus } from './stock-status';
@@ -44,8 +50,24 @@ export function ProductPurchase({
   const [selection, setSelection] = React.useState(() =>
     initialSelection(product.variants, product.defaultVariantId),
   );
-  const [quantity, setQuantity] = React.useState(product.minOrderQuantity || 1);
   const [justAdded, setJustAdded] = React.useState(false);
+
+  /*
+   * The size, for a product sold by weight or volume — the same choice the card
+   * offers, kept here so arriving from a card and arriving from a search land on
+   * the same default.
+   */
+  const measure = product.measure;
+  const [size, setSize] = React.useState(() => (measure ? defaultOption(measure).measure : 0));
+  const option = measure
+    ? (measure.options.find((entry) => entry.measure === size) ?? defaultOption(measure))
+    : null;
+
+  const [quantity, setQuantity] = React.useState(
+    measure
+      ? startingQuantity(defaultOption(measure).measure, measure.minMeasure)
+      : product.minOrderQuantity || 1,
+  );
 
   const variant = findVariant(product.variants, selection);
   const hasVariants = product.variants.length > 0;
@@ -53,8 +75,19 @@ export function ProductPurchase({
   // Without variants the product's own stock and price apply.
   const inStock = hasVariants ? Boolean(variant?.inStock) : product.inStock;
   const lowStock = hasVariants ? Boolean(variant?.lowStock) : product.lowStock;
-  const price = variant?.price ?? product.price;
-  const salePrice = variant?.salePrice ?? product.salePrice;
+  /*
+   * For a measure product the stored price is a *rate*, so what is displayed and
+   * what is added to the basket is that rate scaled to the chosen size — the
+   * same arithmetic, in the same order, that the API charges with.
+   */
+  const rate = variant?.price ?? product.price;
+  const saleRate = variant?.salePrice ?? product.salePrice;
+  const price =
+    measure && option ? priceForMeasure(rate, option.measure, measure.pricingMeasure) : rate;
+  const salePrice =
+    measure && option && saleRate
+      ? priceForMeasure(saleRate, option.measure, measure.pricingMeasure)
+      : saleRate;
   const sku = variant?.sku ?? null;
 
   /*
@@ -90,13 +123,15 @@ export function ProductPurchase({
       variantId: variant?.id ?? product.id,
       slug: product.slug,
       name: product.name,
-      variantTitle: variant?.title ?? null,
+      variantTitle: option?.label ?? variant?.title ?? null,
       imageUrl: product.images[0]?.url ?? null,
       unitPrice: price,
       unitSalePrice: salePrice,
       currency: product.currency,
       quantity,
       maxQuantity: product.maxOrderQuantity,
+      measureLabel: option?.label ?? null,
+      measure: option?.measure ?? null,
     });
 
     return true;
@@ -156,6 +191,19 @@ export function ProductPurchase({
           ) : null}
         </div>
 
+        {/*
+          What the price above is the price *of*. The heading number changes as
+          the size does, so without this a shopper who picked 250gm sees a figure
+          that matches neither the card they came from nor the shelf rate.
+        */}
+        {measure && option ? (
+          <p className="mt-1 text-sm text-muted">
+            {option.label} &middot; {measure.pricingLabel} is{' '}
+            {formatMoney(saleRate ?? rate, product.currency, locale)}
+            {minimumNote(measure) ? ' · ' + minimumNote(measure) : ''}
+          </p>
+        ) : null}
+
         {product.shortDescription ? (
           <p className="mt-4 text-sm leading-relaxed text-muted">{product.shortDescription}</p>
         ) : null}
@@ -163,6 +211,53 @@ export function ProductPurchase({
         <div className="mt-6">
           <StockStatus inStock={inStock} lowStock={lowStock} remaining={variant?.remainingHint ?? null} />
         </div>
+
+        {/*
+          Chips rather than a dropdown here, unlike the card: the product page
+          has the width for them, and a shopper who has arrived to decide how
+          much to buy should be able to see the sizes and their prices at once
+          rather than opening a menu to compare them.
+        */}
+        {measure && measure.options.length > 1 ? (
+          <div className="mt-6">
+            <p className="text-xs font-medium uppercase tracking-wide text-subtle">Size</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {measure.options.map((entry) => {
+                const active = entry.measure === option?.measure;
+                return (
+                  <button
+                    key={entry.measure}
+                    type="button"
+                    onClick={() => {
+                      setSize(entry.measure);
+                      // The floor is on the line's *total*, so switching to a
+                      // smaller size has to raise the counter to match — landing
+                      // on a quantity the till would refuse is worse than moving
+                      // a number the shopper can still change.
+                      setQuantity(startingQuantity(entry.measure, measure.minMeasure));
+                    }}
+                    aria-pressed={active}
+                    className={cn(
+                      'rounded-(--radius-button) border px-3 py-2 text-sm transition-colors',
+                      active
+                        ? 'border-primary bg-primary/5 text-primary'
+                        : 'border-border text-foreground hover:border-primary/50',
+                    )}
+                  >
+                    <span className="font-medium">{entry.label}</span>
+                    <span className="ml-1.5 text-xs text-subtle">
+                      {formatMoney(
+                        priceForMeasure(saleRate ?? rate, entry.measure, measure.pricingMeasure),
+                        product.currency,
+                        locale,
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
 
         {hasVariants ? (
           <VariantSelector
@@ -178,7 +273,11 @@ export function ProductPurchase({
           <QuantityStepper
             value={quantity}
             onChange={setQuantity}
-            min={product.minOrderQuantity || 1}
+            min={
+              measure && option
+                ? startingQuantity(option.measure, measure.minMeasure)
+                : product.minOrderQuantity || 1
+            }
             max={product.maxOrderQuantity}
             disabled={!inStock}
           />

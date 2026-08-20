@@ -7,7 +7,7 @@ import { CACHE_TTL, cached, tenantKey } from '../../lib/cache';
 import { ok, parseQuery } from '../../lib/http';
 import { queryKey } from '../../lib/public-cache';
 import { storeOf } from '../../plugins/tenant';
-import { PUBLISHED_PRODUCT } from './service';
+import { liveSalePriceSql, PUBLISHED_PRODUCT } from './service';
 import type { SearchSuggestion } from './types';
 
 const querySchema = z.object({
@@ -74,7 +74,9 @@ async function loadSuggestions(db: TenantDb, q: string, limit: number): Promise<
         name: products.name,
         slug: products.slug,
         price: products.priceFrom,
-        salePrice: products.salePriceFrom,
+        // The live sale, so a search result cannot quote a price the
+        // product page then refuses. See `service.ts#liveSalePriceSql`.
+        salePrice: liveSalePriceSql,
         brandName: brands.name,
         imageUrl: sql<string | null>`(
           select pm.url from product_media pm

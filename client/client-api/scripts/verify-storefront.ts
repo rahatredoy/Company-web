@@ -306,7 +306,109 @@ async function main(): Promise<void> {
     check('and its landing page answers 404, not "hidden"', detail.status === 404, detail.status);
   }
 
-  console.log('\n5. The two surfaces stay apart');
+  console.log('\n5. The homepage shows the shop, not just how it is filed');
+  {
+    /*
+     * The block behind this read draws each department as a panel of its aisles,
+     * every aisle a rail of its own products — so what is asked here is whether
+     * those rails can be trusted: nothing over an empty row, nothing named that
+     * the shop will not sell, and nothing widened past what was asked for. Every
+     * bound is a bound on the work Postgres does, which is why a caller must not
+     * be able to talk its way past one.
+     */
+    const showcase = await shop('/categories/showcase?categories=3&rows=2&perRow=4');
+    check(
+      'the shop-by-category block answers',
+      showcase.status === 200 && Array.isArray(showcase.body?.data),
+      showcase.status,
+    );
+
+    const groups = (showcase.body?.data ?? []) as any[];
+    check('and names at least one department', groups.length > 0, groups.length);
+    check('never more departments than asked for', groups.length <= 3, groups.length);
+    check(
+      'never a heading over an empty row',
+      groups.every(
+        (group) =>
+          (group.rows ?? []).length > 0 &&
+          group.rows.every((row: any) => (row.productIds ?? []).length > 0),
+      ),
+    );
+    check(
+      'never more rows than asked for',
+      groups.every((group) => group.rows.length <= 2),
+      groups.map((group) => group.rows.length),
+    );
+    check(
+      'never more products in a row than asked for',
+      groups.every((group) => group.rows.every((row: any) => row.productIds.length <= 4)),
+    );
+
+    /*
+     * The important one. This read is unguarded like the rest of the catalogue,
+     * so a draft or deactivated product reaching it would be published by the
+     * homepage — and it names ids rather than rows, which is exactly the shape
+     * that hides such a leak. Resolving them through the public listing is what
+     * proves each one is a product the shop will actually serve.
+     */
+    const named = [
+      ...new Set(groups.flatMap((group) => group.rows.flatMap((row: any) => row.productIds as string[]))),
+    ].slice(0, 60);
+
+    if (named.length > 0) {
+      const resolved = await shop(`/products?ids=${named.join(',')}`);
+      check(
+        'every product it names is one the public listing will serve',
+        (resolved.body?.data ?? []).length === named.length,
+        { named: named.length, resolved: (resolved.body?.data ?? []).length },
+      );
+    }
+
+    const first = groups[0]?.categoryId as string | undefined;
+    if (first) {
+      const one = await shop(`/categories/showcase?ids=${first}`);
+      const only = (one.body?.data ?? []) as any[];
+      check(
+        'a block pointed at one department is answered with that one only',
+        only.length === 1 && only[0]?.categoryId === first,
+        only.map((group) => group.categoryId),
+      );
+    }
+
+    /*
+     * The offset is what lets a homepage carry one of these blocks per
+     * department, spread between its other sections. Two blocks at different
+     * offsets must therefore answer different departments — were the offset
+     * ignored, every panel on the page would be the same one.
+     */
+    const single = await shop('/categories/showcase?categories=1&rows=1&perRow=2');
+    const next = await shop('/categories/showcase?categories=1&rows=1&perRow=2&offset=1');
+    const at = (response: Response) => (response.body?.data ?? [])[0]?.categoryId as string | undefined;
+
+    if (at(single)) {
+      check('one department per block, and the offset moves it', at(next) !== at(single), {
+        first: at(single),
+        second: at(next),
+      });
+    }
+
+    /*
+     * A hidden category must answer *nothing*, not everything. Dropping an
+     * unknown id and carrying on would turn a block pointed at one department
+     * into every department the moment somebody deactivated it.
+     */
+    const hidden = created.categories[0];
+    if (hidden) {
+      const nothing = await shop(`/categories/showcase?ids=${hidden}`);
+      check(
+        'an inactive category answers nothing rather than the whole shop',
+        (nothing.body?.data ?? []).length === 0,
+        nothing.body?.data?.length,
+      );
+    }
+  }
+
+  console.log('\n6. The two surfaces stay apart');
   {
     const adminFromShopHost = await call(STORE_HOST, '/api/v1/admin/products', {
       origin: `http://${STORE_HOST}`,
@@ -321,7 +423,7 @@ async function main(): Promise<void> {
     check('a slug in the query string is ignored', forged.status === 200, forged.status);
   }
 
-  console.log('\n6. Isolation — the claim the architecture exists to make');
+  console.log('\n7. Isolation — the claim the architecture exists to make');
   if (!OTHER || OTHER === SLUG) {
     console.log('  SKIP  no second store given; pass --other <slug> to check cross-tenant isolation');
   } else {

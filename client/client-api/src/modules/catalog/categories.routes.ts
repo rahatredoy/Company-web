@@ -1,38 +1,125 @@
-import { and, asc, count, eq, ilike, ne, or, sql } from 'drizzle-orm';
+import { and, count, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { categories, products } from '../../db/schema/index';
 import { audit } from '../../lib/audit';
 import { ERROR_CODES, conflict, notFound } from '../../lib/errors';
-import { buildMeta, noContent, ok, paginated, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { cursorField, listed, noContent, ok, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { keyset } from '../../lib/keyset';
 import { storeOf } from '../../plugins/tenant';
 import { assertParentIsSafe, settleSlug } from './service';
 
 const listQuerySchema = z.object({
+  ...cursorField,
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
   search: z.string().trim().max(120).optional(),
   /** `all` is the panel's default; the storefront only ever wants the active ones. */
   status: z.enum(['all', 'active', 'inactive']).default('all'),
+  /** `showInMenu` — whether the category is offered in the storefront navigation. */
+  visibility: z.enum(['all', 'shown', 'hidden']).default('all'),
+  featured: z.enum(['all', 'yes', 'no']).default('all'),
   parentId: z.union([z.string().uuid(), z.literal('root')]).optional(),
 });
 
-const writeSchema = z.object({
+/**
+ * `.url()` on a nullable field would refuse an empty string, and a form that
+ * clears an image sends exactly that. Empty becomes null before validation so
+ * "remove the picture" is expressible without a separate endpoint.
+ */
+const imageUrlSchema = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+  z.string().trim().url('Use a full web address.').max(2000).nullable(),
+);
+
+/** Same reasoning as `imageUrlSchema`, for the free-text fields. */
+const optionalText = (max: number) =>
+  z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+    z.string().trim().max(max).nullable(),
+  );
+
+/**
+ * The validators, with no defaults attached.
+ *
+ * The defaults live on the create schema below and **nowhere else**, because
+ * `.partial()` does not remove them: Zod wraps the existing `ZodDefault` in a
+ * `ZodOptional`, so an absent key still comes back carrying the default. A patch
+ * built that way turns `{ isFeatured: true }` into a full row of defaults and
+ * the `UPDATE` that follows quietly empties the description, the images and the
+ * SEO fields. Splitting the shapes is what keeps a partial update partial.
+ */
+const fields = {
   name: z.string().trim().min(1, 'Give the category a name.').max(140),
-  slug: z.string().trim().max(160).optional(),
-  parentId: z.string().uuid('Choose a category that exists.').nullable().default(null),
-  description: z.string().trim().max(5000).nullable().default(null),
-  imageUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().default(null),
-  bannerUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().default(null),
-  isActive: z.boolean().default(true),
-  showInMenu: z.boolean().default(true),
-  sortOrder: z.coerce.number().int().min(0).max(100_000).default(0),
-  seoTitle: z.string().trim().max(160).nullable().default(null),
-  seoDescription: z.string().trim().max(300).nullable().default(null),
+  slug: z.string().trim().max(160),
+  parentId: z.string().uuid('Choose a category that exists.').nullable(),
+  description: optionalText(5000),
+  imageUrl: imageUrlSchema,
+  /** The small mark shown beside the name in the storefront menu. */
+  iconUrl: imageUrlSchema,
+  bannerUrl: imageUrlSchema,
+  isActive: z.boolean(),
+  showInMenu: z.boolean(),
+  isFeatured: z.boolean(),
+  sortOrder: z.coerce.number().int().min(0).max(100_000),
+  seoTitle: optionalText(160),
+  seoDescription: optionalText(300),
+} as const;
+
+/** Creating: everything the row needs, with a sensible value for what was left out. */
+const writeSchema = z.object({
+  ...fields,
+  slug: fields.slug.optional(),
+  parentId: fields.parentId.default(null),
+  description: fields.description.default(null),
+  imageUrl: fields.imageUrl.default(null),
+  iconUrl: fields.iconUrl.default(null),
+  bannerUrl: fields.bannerUrl.default(null),
+  isActive: fields.isActive.default(true),
+  showInMenu: fields.showInMenu.default(true),
+  isFeatured: fields.isFeatured.default(false),
+  sortOrder: fields.sortOrder.default(0),
+  seoTitle: fields.seoTitle.default(null),
+  seoDescription: fields.seoDescription.default(null),
 });
 
-/** Every field optional, but a supplied one must still be valid. */
-const patchSchema = writeSchema.partial();
+/**
+ * Updating: every field optional and **nothing defaulted**, so an absent key
+ * stays absent and the `UPDATE` touches only what was actually sent.
+ */
+const patchSchema = z.object(fields).partial();
+
+const reorderSchema = z.object({
+  order: z
+    .array(z.object({ id: z.string().uuid(), sortOrder: z.number().int().min(0).max(100_000) }))
+    .min(1, 'Nothing to reorder.')
+    .max(500),
+});
+
+/**
+ * Every column the panel's category screen reads. The list returns the whole
+ * row rather than a summary because the editor opens from a row that is already
+ * in memory — a second fetch per click would buy nothing on a table that is
+ * measured in dozens, and would make opening the panel wait on the network.
+ */
+const listColumns = {
+  id: categories.id,
+  parentId: categories.parentId,
+  name: categories.name,
+  slug: categories.slug,
+  description: categories.description,
+  imageUrl: categories.imageUrl,
+  iconUrl: categories.iconUrl,
+  bannerUrl: categories.bannerUrl,
+  isActive: categories.isActive,
+  showInMenu: categories.showInMenu,
+  isFeatured: categories.isFeatured,
+  sortOrder: categories.sortOrder,
+  seoTitle: categories.seoTitle,
+  seoDescription: categories.seoDescription,
+  createdAt: categories.createdAt,
+  updatedAt: categories.updatedAt,
+} as const;
 
 /**
  * Categories — the tree a storefront's navigation is built from.
@@ -58,6 +145,8 @@ export default async function categoryRoutes(app: FastifyInstance) {
             )
           : undefined,
         query.status === 'all' ? undefined : eq(categories.isActive, query.status === 'active'),
+        query.visibility === 'all' ? undefined : eq(categories.showInMenu, query.visibility === 'shown'),
+        query.featured === 'all' ? undefined : eq(categories.isFeatured, query.featured === 'yes'),
         query.parentId === 'root'
           ? sql`${categories.parentId} is null`
           : query.parentId
@@ -67,35 +156,53 @@ export default async function categoryRoutes(app: FastifyInstance) {
 
       const where = filters.length ? and(...filters) : undefined;
 
+      /*
+       * Author's order, then name, then the id. The id is what makes the order
+       * total — a freshly seeded tree shares `sort_order = 0` across every
+       * sibling, so without it a cursor would point into a set of rows the
+       * database may return in any order, and a batch boundary would drop one
+       * category and repeat another.
+       */
+      const page = keyset<{ id: string; sortOrder: number; name: string }>([
+        { expr: categories.sortOrder, order: 'asc', of: (row) => row.sortOrder },
+        { expr: categories.name, order: 'asc', of: (row) => row.name },
+        { expr: categories.id, order: 'asc', of: (row) => row.id },
+      ]);
+
+      const seek = page.after(query.cursor);
+      const scan = seek ? and(seek, ...filters) : where;
+
       // The product tally is what makes a category safe or unsafe to delete, so
       // the list shows it rather than making that a surprise at the last step.
       const rows = await store.db
         .select({
-          id: categories.id,
-          parentId: categories.parentId,
-          name: categories.name,
-          slug: categories.slug,
-          imageUrl: categories.imageUrl,
-          isActive: categories.isActive,
-          showInMenu: categories.showInMenu,
-          sortOrder: categories.sortOrder,
-          createdAt: categories.createdAt,
+          ...listColumns,
           productCount: sql<number>`(
             select count(*)::int from ${products} where ${products.categoryId} = ${categories.id}
           )`,
         })
         .from(categories)
-        .where(where)
-        .orderBy(asc(categories.sortOrder), asc(categories.name))
-        .limit(query.pageSize)
-        .offset((query.page - 1) * query.pageSize);
+        .where(scan)
+        .orderBy(...page.orderBy)
+        // One row more than fits, which separates "there is another batch" from
+        // "that was the last one" without a second query.
+        .limit(query.pageSize + 1)
+        .offset(query.cursor ? 0 : (query.page - 1) * query.pageSize);
 
-      const [totals] = await store.db
-        .select({ total: count() })
-        .from(categories)
-        .where(where);
+      const batch = page.batch(rows, query.pageSize);
 
-      return paginated(reply, rows, buildMeta(query.page, query.pageSize, totals?.total ?? 0));
+      // Counted on the first batch only: the scroll shows the figure once, and
+      // the count is the half of a list read that cannot stop at `pageSize`.
+      const totals = query.cursor
+        ? undefined
+        : (await store.db.select({ total: count() }).from(categories).where(where))[0];
+
+      return listed(reply, batch.rows, {
+        pageSize: query.pageSize,
+        nextCursor: batch.nextCursor,
+        hasMore: batch.hasMore,
+        total: totals?.total,
+      });
     },
   );
 
@@ -142,6 +249,47 @@ export default async function categoryRoutes(app: FastifyInstance) {
       });
 
       return ok(reply, created, 201);
+    },
+  );
+
+  /*
+   * Dragging a row is one write, not one write per row. The panel sends only
+   * the siblings whose position actually moved, and they are applied in a
+   * single statement so a half-applied order can never be observed — the list
+   * is ordered by `sort_order` and a partial reorder reads as rows swapping
+   * places on their own.
+   *
+   * Registered before `/categories/:id` for legibility only; find-my-way
+   * matches the static segment ahead of the parametric one regardless.
+   */
+  app.patch(
+    '/categories/reorder',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('categories.manage')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { order } = parseBody(reorderSchema, request.body);
+
+      const ids = order.map((entry) => entry.id);
+      const cases = sql.join(
+        order.map((entry) => sql`when ${categories.id} = ${entry.id}::uuid then ${entry.sortOrder}`),
+        sql` `,
+      );
+
+      await store.db
+        .update(categories)
+        .set({ sortOrder: sql`case ${cases} else ${categories.sortOrder} end`, updatedAt: new Date() })
+        .where(inArray(categories.id, ids));
+
+      await audit(store.db, request, {
+        action: 'category.reorder',
+        module: 'catalog',
+        entity: 'category',
+        entityId: ids[0]!,
+        entityLabel: `${ids.length} categor${ids.length === 1 ? 'y' : 'ies'}`,
+        newValues: { order },
+      });
+
+      return noContent(reply);
     },
   );
 

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { invalidateStorefrontOnWrite } from '../../lib/cache';
 import brandRoutes from './brands.routes';
 import categoryRoutes from './categories.routes';
+import productInsightsRoutes from './insights.routes';
 import productRoutes from './products.routes';
 
 /**
@@ -21,4 +22,5 @@ export default async function catalogRoutes(app: FastifyInstance) {
   await app.register(categoryRoutes);
   await app.register(brandRoutes);
   await app.register(productRoutes);
+  await app.register(productInsightsRoutes);
 }

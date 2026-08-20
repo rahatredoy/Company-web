@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -138,7 +139,7 @@ export function ReturnWorkflow({
       </CardContent>
 
       <Dialog open={prompt !== null} onOpenChange={(open) => !open && setPrompt(null)}>
-        <DialogContent>
+        <DialogContent size={prompt === 'rejected' ? 'sm' : 'md'}>
           <form onSubmit={onPrompt}>
             <DialogHeader>
               <DialogTitle>{prompt === 'rejected' ? 'Reject this return' : 'Record the inspection'}</DialogTitle>
@@ -149,35 +150,40 @@ export function ReturnWorkflow({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-4 py-4">
+            <DialogBody>
               {prompt === 'rejected' ? (
                 <Field label="Reason" htmlFor="rejectionReason" required>
                   <Textarea id="rejectionReason" name="rejectionReason" rows={3} maxLength={300} />
                 </Field>
               ) : (
                 <>
-                  {detail.items.map((item) => (
-                    <Field
-                      key={item.id}
-                      label={`${item.productName} — ${item.quantity} returned`}
-                      htmlFor={`restock-${item.id}`}
-                    >
-                      <Input
-                        id={`restock-${item.id}`}
-                        name={`restock-${item.id}`}
-                        type="number"
-                        min={0}
-                        max={item.quantity}
-                        defaultValue={0}
-                      />
-                    </Field>
-                  ))}
+                  {/* One count per returned line, two to a row: a return of six
+                      items stacked is six rows of dialog, and the count boxes
+                      are narrow enough that the height buys nothing. */}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {detail.items.map((item) => (
+                      <Field
+                        key={item.id}
+                        label={`${item.productName} — ${item.quantity} returned`}
+                        htmlFor={`restock-${item.id}`}
+                      >
+                        <Input
+                          id={`restock-${item.id}`}
+                          name={`restock-${item.id}`}
+                          type="number"
+                          min={0}
+                          max={item.quantity}
+                          defaultValue={0}
+                        />
+                      </Field>
+                    ))}
+                  </div>
                   <Field label="Note" htmlFor="note">
                     <Input id="note" name="note" maxLength={300} />
                   </Field>
                 </>
               )}
-            </div>
+            </DialogBody>
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setPrompt(null)}>

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { PAGE_SIZE } from '@/config';
 import { getStoreConfig, getPublishedStoreConfig } from '@/lib/api/store';
 import {
   getFrequentlyBoughtTogether,
@@ -7,6 +8,7 @@ import {
   getProductReviews,
   getRelatedProducts,
 } from '@/lib/api/product';
+import { getProductList } from '@/lib/api/products';
 import { getTemplate } from '@/templates/registry';
 import { readLocalePreference } from '@/lib/locale/preference';
 import { Breadcrumbs, BreadcrumbJsonLd, type Crumb } from '@/components/layout/breadcrumbs';
@@ -15,6 +17,8 @@ import { ProductDetailsTabs } from '@/components/product/product-details-tabs';
 import { FrequentlyBoughtTogether } from '@/components/product/frequently-bought-together';
 import { ReviewList, ReviewSummaryPanel } from '@/components/product/reviews';
 import { ProductRail } from '@/components/commerce/product-rail';
+import { SectionHeading } from '@/components/sections/section-shell';
+import { CatalogFeed } from '@/components/sections/catalog-feed';
 
 /**
  * Product detail.
@@ -58,19 +62,73 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   };
 }
 
+/** How many products the aisle rail carries before "view all" is the answer. */
+const AISLE_RAIL_SIZE = 12;
+
 export default async function ProductPage({ params }: PageProps) {
   const { slug } = await params;
 
   const [product, config] = await Promise.all([getProductDetail(slug), getStoreConfig()]);
   if (!product) notFound();
 
-  const [locale, template, related, bundle, reviews] = await Promise.all([
+  /*
+   * The aisle this product is in, and the department that aisle belongs to.
+   *
+   * `breadcrumb` is categories only — it ends with the product's own category
+   * and the page appends the product's name to it separately — so the entry
+   * before the last is the parent. A product filed directly under a top-level
+   * category has no aisle above it, and gets the department grid alone rather
+   * than a rail and a grid drawn from the same set under two headings.
+   */
+  const aisle = product.category;
+  const department = product.breadcrumb.length > 1 ? (product.breadcrumb.at(-2) ?? null) : null;
+  const browse = department ?? aisle;
+
+  const [locale, template, related, bundle, reviews, aisleBatch, browseBatch] = await Promise.all([
     readLocalePreference(config),
     getTemplate(config.design.templateKey),
     getRelatedProducts(product.id, 12),
     getFrequentlyBoughtTogether(product.id),
     getProductReviews(slug),
+    // One over the rail's width, because the product being read is filtered out
+    // of its own aisle below and would otherwise cost the rail a card.
+    department && aisle
+      ? getProductList({
+          category: aisle.slug,
+          page: 1,
+          pageSize: AISLE_RAIL_SIZE + 1,
+          sort: 'best_selling',
+        })
+      : null,
+    browse
+      ? getProductList({ category: browse.slug, page: 1, pageSize: PAGE_SIZE.home, sort: 'newest' })
+      : null,
   ]);
+
+  /*
+   * Nothing below is allowed to show the same card twice.
+   *
+   * The three blocks narrow outwards — this aisle, then what else suits, then
+   * the whole department — and each one is drawn from a set that contains the
+   * one above it, so without this the department grid would open on the twelve
+   * products the visitor had just scrolled past. Everything already on screen
+   * is therefore carried down as an exclusion; the grid pages its listing
+   * unchanged and hides them, which is what keeps its "load more" honest.
+   */
+  const aisleProducts = (aisleBatch?.items ?? [])
+    .filter((item) => item.id !== product.id)
+    .slice(0, AISLE_RAIL_SIZE);
+
+  const aisleIds = new Set(aisleProducts.map((item) => item.id));
+  const relatedProducts = related.filter(
+    (item) => item.id !== product.id && !aisleIds.has(item.id),
+  );
+
+  const browseExclude = [product.id, ...aisleIds, ...relatedProducts.map((item) => item.id)];
+  const browseHidden = new Set(browseExclude);
+  // Rendered on what survives rather than on the batch: a heading over a grid
+  // whose whole first page was already shown above is a promise of nothing.
+  const browseVisible = (browseBatch?.items ?? []).filter((item) => !browseHidden.has(item.id));
 
   const crumbs: Crumb[] = [
     ...product.breadcrumb.map((entry) => ({ label: entry.name, href: `/category/${entry.slug}` })),
@@ -113,19 +171,73 @@ export default async function ProductPage({ params }: PageProps) {
         </section>
       ) : null}
 
+      {/* The aisle first, because it is the shelf this product was taken off:
+          a shopper comparing phones wants the other phones before they want
+          anything the catalogue thinks is adjacent to them. */}
+      {aisle && aisleProducts.length > 0 ? (
+        <ProductRail
+          title={`More in ${aisle.name}`}
+          products={aisleProducts}
+          perView={template.preset.carouselPerView}
+          cardVariant={template.cardVariant}
+          locale={locale.language}
+          action={{ label: 'View all', href: `/category/${aisle.slug}` }}
+          className="mt-16"
+        />
+      ) : null}
+
+      {/* Same category first, then same brand — so once the aisle above has
+          taken its share this is what is left, which is the cross-aisle half
+          it was always the only source of. It hides itself when that is
+          nothing, rather than repeating the rail under a vaguer heading. */}
       <ProductRail
         title="You may also like"
-        products={related}
+        products={relatedProducts}
         perView={template.preset.carouselPerView}
         cardVariant={template.cardVariant}
         locale={locale.language}
         action={
-          product.category
+          aisleProducts.length === 0 && product.category
             ? { label: `All ${product.category.name}`, href: `/category/${product.category.slug}` }
             : undefined
         }
         className="mt-16"
       />
+
+      {/*
+        The rest of the department, a page at a time.
+        
+        A grid rather than a third rail: the two rails above are previews of a
+        shelf, and this is the shelf — a shopper who has read to the bottom of a
+        product page without buying it is browsing, and the answer to browsing is
+        breadth on screen at once rather than another row to drag sideways. It
+        pages the ordinary listing through the same Server Action the homepage
+        feed uses, so the block costs this page one extra read and the rest only
+        when it is asked for.
+      */}
+      {browse && browseBatch && browseVisible.length > 0 ? (
+        <section className="mt-16" aria-label={`More from ${browse.name}`}>
+          <SectionHeading
+            title={`More from ${browse.name}`}
+            size="sm"
+            action={{ label: 'Shop all', href: `/category/${browse.slug}` }}
+          />
+          {/* Keyed on the batch for the reason the homepage feed is: when the
+              first page has moved on, the pages appended below it belong to a
+              list that no longer exists, and remounting is the whole reset. */}
+          <CatalogFeed
+            key={`${browse.slug}:${browseBatch.meta.total}:${browseBatch.items[0]?.id ?? ''}`}
+            initial={browseBatch.items}
+            total={browseBatch.meta.total}
+            sort="newest"
+            category={browse.slug}
+            exclude={browseExclude}
+            cardVariant={template.cardVariant}
+            gridClassName={template.gridClassName}
+            locale={locale.language}
+          />
+        </section>
+      ) : null}
     </div>
   );
 }

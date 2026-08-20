@@ -14,6 +14,18 @@ export function KpiCard({
   invertTrend = false,
   showSpark = true,
   compareLabel = 'vs last 30 days',
+  /**
+   * `stacked` puts the trend under the figure; `inline` sets it beside, which is
+   * what keeps four cards to one row-height when the dashboard shows them next
+   * to a chart. Presentation only — same data either way.
+   */
+  align = 'stacked',
+  /**
+   * Shown in place of the comparison line. For a figure that has no previous
+   * period to compare against — a live stock count — this is where the second
+   * fact that *is* worth knowing goes, rather than "no comparison data".
+   */
+  hint,
 }: {
   label: string;
   value: string;
@@ -23,6 +35,8 @@ export function KpiCard({
   invertTrend?: boolean;
   showSpark?: boolean;
   compareLabel?: string;
+  align?: 'stacked' | 'inline';
+  hint?: React.ReactNode;
 }) {
   const change = metric?.changePct ?? null;
   const rising = (change ?? 0) >= 0;
@@ -36,6 +50,32 @@ export function KpiCard({
     danger: { badge: 'bg-destructive-soft text-destructive', line: 'var(--chart-5)' },
   } as const;
 
+  const spark =
+    showSpark && metric?.spark?.length ? (
+      <Sparkline
+        data={metric.spark}
+        color={tints[tint].line}
+        height={align === 'inline' ? 40 : 44}
+        className={align === 'inline' ? 'w-28 shrink-0 sm:w-32' : '-mx-1 w-[calc(100%+0.5rem)]'}
+      />
+    ) : null;
+
+  const trend =
+    change === null ? (
+      <p className="text-xs text-muted-foreground">{hint ?? 'No comparison data'}</p>
+    ) : (
+      <p
+        className={cn(
+          'flex flex-wrap items-center gap-1 text-xs font-medium',
+          good ? 'text-success' : 'text-destructive',
+        )}
+      >
+        {rising ? <ArrowUp className="size-3" aria-hidden /> : <ArrowDown className="size-3" aria-hidden />}
+        {Math.abs(change).toFixed(1)}%
+        <span className="font-normal text-muted-foreground">{compareLabel}</span>
+      </p>
+    );
+
   return (
     <Card className="overflow-hidden">
       <CardContent className="space-y-3 p-5">
@@ -46,21 +86,21 @@ export function KpiCard({
           <p className="text-sm text-muted-foreground">{label}</p>
         </div>
 
-        <p className="text-2xl font-bold tracking-tight tabular-nums">{value}</p>
-
-        {change === null ? (
-          <p className="text-xs text-muted-foreground">No comparison data</p>
+        {align === 'inline' ? (
+          <>
+            <div className="flex items-end justify-between gap-3">
+              <p className="text-2xl font-bold tracking-tight tabular-nums">{value}</p>
+              {spark}
+            </div>
+            {trend}
+          </>
         ) : (
-          <p className={cn('flex items-center gap-1 text-xs font-medium', good ? 'text-success' : 'text-destructive')}>
-            {rising ? <ArrowUp className="size-3" aria-hidden /> : <ArrowDown className="size-3" aria-hidden />}
-            {Math.abs(change).toFixed(1)}%
-            <span className="font-normal text-muted-foreground">{compareLabel}</span>
-          </p>
+          <>
+            <p className="text-2xl font-bold tracking-tight tabular-nums">{value}</p>
+            {trend}
+            {spark}
+          </>
         )}
-
-        {showSpark && metric?.spark?.length ? (
-          <Sparkline data={metric.spark} color={tints[tint].line} className="-mx-1 w-[calc(100%+0.5rem)]" />
-        ) : null}
       </CardContent>
     </Card>
   );

@@ -12,6 +12,26 @@
  * them and none of them survive into a response.
  */
 
+/**
+ * A product sold by weight or volume, or null for one sold one at a time.
+ *
+ * Sent whole rather than as five loose fields so the storefront has one thing to
+ * branch on: null means "render the plain card", and anything else carries
+ * everything the picker needs — the rate's label, the sizes, and the floor the
+ * shop will not weigh out less than.
+ */
+export interface MeasureSale {
+  /** The base unit every number here is counted in: `g`, `ml` or `pc`. */
+  unit: 'g' | 'ml' | 'pc';
+  /** How much of it the price buys. 1000 = the price is per kilo. */
+  pricingMeasure: number;
+  /** Printed after the price: "Per 1kg", "Per 100g", "Per Piece". */
+  pricingLabel: string;
+  /** Floor on a line's total, in base units — the "(Min. 350gm)" on the card. */
+  minMeasure: number | null;
+  options: { label: string; measure: number }[];
+}
+
 export interface ProductImage {
   url: string;
   altText: string | null;
@@ -39,6 +59,20 @@ export interface ProductSummary {
   isBestSeller: boolean;
   keySpec: string | null;
   hasVariants: boolean;
+  /**
+   * What a one-click Add puts in the basket.
+   *
+   * A basket line is a variant — that is what holds the price and the stock a
+   * checkout reserves — and a `simple` product owns exactly one, so a card can
+   * add without asking the server anything. For a `variable` product this is
+   * only the variant its page opens on; the card opens a picker instead.
+   */
+  defaultVariantId: string | null;
+  /** The quantity a one-click Add starts at, so a "sold in threes" product does. */
+  minOrderQuantity: number;
+  maxOrderQuantity: number | null;
+  /** Non-null when the card shows a measure picker instead of a plain Add. */
+  measure: MeasureSale | null;
 }
 
 export interface VariantOption {
@@ -82,6 +116,7 @@ export interface ProductDetail extends Omit<ProductSummary, 'primaryImage' | 'se
   isReturnable: boolean;
   minOrderQuantity: number;
   maxOrderQuantity: number | null;
+  measure: MeasureSale | null;
   seo: { title: string | null; description: string | null };
 }
 
@@ -96,6 +131,26 @@ export interface CategoryView {
   children: CategoryView[];
   breadcrumb: { name: string; slug: string }[];
   seo: { title: string | null; description: string | null };
+}
+
+/**
+ * One row of the homepage's category showcase: an aisle, and the products in it.
+ *
+ * Ids rather than product summaries, deliberately. The storefront already
+ * resolves every homepage product through the `?ids=` branch of the listing —
+ * one call, one cache entry, shared with the rest of the page — so returning
+ * decorated rows here would fetch the same products a second time and put a
+ * price into an entry that is held longer than a price may be.
+ */
+export interface CategoryShowcaseRow {
+  categoryId: string;
+  productIds: string[];
+}
+
+/** One department of the showcase, with the aisles that have something in them. */
+export interface CategoryShowcaseGroup {
+  categoryId: string;
+  rows: CategoryShowcaseRow[];
 }
 
 export interface BrandView {

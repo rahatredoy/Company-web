@@ -1,14 +1,16 @@
-import { and, asc, count, eq, ilike, ne, or, sql } from 'drizzle-orm';
+import { and, count, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { brands, products } from '../../db/schema/index';
 import { audit } from '../../lib/audit';
 import { notFound } from '../../lib/errors';
-import { buildMeta, noContent, ok, paginated, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { cursorField, listed, noContent, ok, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { keyset } from '../../lib/keyset';
 import { storeOf } from '../../plugins/tenant';
 import { settleSlug } from './service';
 
 const listQuerySchema = z.object({
+  ...cursorField,
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
   search: z.string().trim().max(120).optional(),
@@ -29,6 +31,35 @@ const writeSchema = z.object({
 });
 
 const patchSchema = writeSchema.partial();
+
+const reorderSchema = z.object({
+  order: z
+    .array(z.object({ id: z.string().uuid(), sortOrder: z.number().int().min(0).max(100_000) }))
+    .min(1, 'Nothing to reorder.')
+    .max(500),
+});
+
+/**
+ * Every column the panel's brand screen reads. The list returns the whole row
+ * rather than a summary because the editor opens from a row already in memory —
+ * a second fetch per click would buy nothing on a table measured in dozens, and
+ * would make opening the panel wait on the network.
+ */
+const listColumns = {
+  id: brands.id,
+  name: brands.name,
+  slug: brands.slug,
+  description: brands.description,
+  logoUrl: brands.logoUrl,
+  websiteUrl: brands.websiteUrl,
+  isActive: brands.isActive,
+  isFeatured: brands.isFeatured,
+  sortOrder: brands.sortOrder,
+  seoTitle: brands.seoTitle,
+  seoDescription: brands.seoDescription,
+  createdAt: brands.createdAt,
+  updatedAt: brands.updatedAt,
+} as const;
 
 /**
  * Brands — flat, unlike categories, so there is no tree to keep honest here.
@@ -52,30 +83,89 @@ export default async function brandRoutes(app: FastifyInstance) {
 
       const where = filters.length ? and(...filters) : undefined;
 
+      /*
+       * Author's order, then name, then the id. The id is what makes the order
+       * total — brands are seeded sharing `sort_order = 0`, so without it a
+       * cursor would point into a set of rows the database may return in any
+       * order, and a batch boundary would drop one brand and repeat another.
+       */
+      const page = keyset<{ id: string; sortOrder: number; name: string }>([
+        { expr: brands.sortOrder, order: 'asc', of: (row) => row.sortOrder },
+        { expr: brands.name, order: 'asc', of: (row) => row.name },
+        { expr: brands.id, order: 'asc', of: (row) => row.id },
+      ]);
+
+      const seek = page.after(query.cursor);
+      const scan = seek ? and(seek, ...filters) : where;
+
       const rows = await store.db
         .select({
-          id: brands.id,
-          name: brands.name,
-          slug: brands.slug,
-          logoUrl: brands.logoUrl,
-          websiteUrl: brands.websiteUrl,
-          isActive: brands.isActive,
-          isFeatured: brands.isFeatured,
-          sortOrder: brands.sortOrder,
-          createdAt: brands.createdAt,
+          ...listColumns,
           productCount: sql<number>`(
             select count(*)::int from ${products} where ${products.brandId} = ${brands.id}
           )`,
         })
         .from(brands)
-        .where(where)
-        .orderBy(asc(brands.sortOrder), asc(brands.name))
-        .limit(query.pageSize)
-        .offset((query.page - 1) * query.pageSize);
+        .where(scan)
+        .orderBy(...page.orderBy)
+        // One row more than fits, which separates "there is another batch" from
+        // "that was the last one" without a second query.
+        .limit(query.pageSize + 1)
+        .offset(query.cursor ? 0 : (query.page - 1) * query.pageSize);
 
-      const [totals] = await store.db.select({ total: count() }).from(brands).where(where);
+      const batch = page.batch(rows, query.pageSize);
 
-      return paginated(reply, rows, buildMeta(query.page, query.pageSize, totals?.total ?? 0));
+      // Counted on the first batch only: the scroll shows the figure once, and
+      // the count is the half of a list read that cannot stop at `pageSize`.
+      const totals = query.cursor
+        ? undefined
+        : (await store.db.select({ total: count() }).from(brands).where(where))[0];
+
+      return listed(reply, batch.rows, {
+        pageSize: query.pageSize,
+        nextCursor: batch.nextCursor,
+        hasMore: batch.hasMore,
+        total: totals?.total,
+      });
+    },
+  );
+
+  /**
+   * The whole list's order in one statement, as a `CASE` — one `UPDATE` per row
+   * would leave the list briefly in an order nobody asked for, and the storefront
+   * reads `sort_order`, so a half-applied reorder is visible to shoppers.
+   *
+   * Registered before `/brands/:id` for legibility only; find-my-way matches the
+   * static segment ahead of the parametric one regardless.
+   */
+  app.patch(
+    '/brands/reorder',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('brands.manage')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { order } = parseBody(reorderSchema, request.body);
+
+      const ids = order.map((entry) => entry.id);
+      const cases = sql.join(
+        order.map((entry) => sql`when ${brands.id} = ${entry.id}::uuid then ${entry.sortOrder}`),
+        sql` `,
+      );
+
+      await store.db
+        .update(brands)
+        .set({ sortOrder: sql`case ${cases} else ${brands.sortOrder} end`, updatedAt: new Date() })
+        .where(inArray(brands.id, ids));
+
+      await audit(store.db, request, {
+        action: 'brand.reorder',
+        module: 'catalog',
+        entity: 'brand',
+        entityId: ids[0]!,
+        entityLabel: `${ids.length} brand${ids.length === 1 ? '' : 's'}`,
+        newValues: { order },
+      });
+
+      return noContent(reply);
     },
   );
 

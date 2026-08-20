@@ -12,11 +12,25 @@ import {
 import { ERROR_CODES, unprocessable } from '../../lib/errors';
 import { moneyToNumber, toMoney } from '../../lib/utils';
 import { effectiveSale } from './service';
+import {
+  MeasureError,
+  priceForMeasure,
+  resolveMeasureConfig,
+  resolveRequestedMeasure,
+  type MeasureOption,
+} from '../../lib/measure';
 
 export interface RequestedLine {
   productId: string;
   variantId: string;
   quantity: number;
+  /**
+   * Which measure this line buys, in base units, for a product sold by weight
+   * or volume. Absent on an ordinary line, and checked against the product's own
+   * option list below rather than trusted — it arrives from `localStorage`, the
+   * same place the quantity does.
+   */
+  measure?: number | null;
 }
 
 export interface PricedLine {
@@ -27,6 +41,19 @@ export interface PricedLine {
   sku: string;
   imageUrl: string | null;
   quantity: number;
+  /** The measure snapshot for the order line, or null for a plain product. */
+  measureLabel: string | null;
+  measure: number | null;
+  /**
+   * What this line takes off the shelf, in whatever the variant's stock is
+   * counted in — base units for a measure product, whole items otherwise.
+   *
+   * Carried separately from `quantity` because the two are only the same number
+   * for an ordinary product: 2 x 500gm is a quantity of two and a kilo of stock,
+   * and reserving two grams of pumpkin would be an oversell of five hundred to
+   * one.
+   */
+  stockUnits: number;
   /** List price, kept so a receipt can show what was struck through. */
   unitPrice: string;
   /** What is actually charged, when a live sale beats the list price. */
@@ -43,7 +70,11 @@ export interface PricedLine {
  * price, sale window, availability — is read fresh here and nothing from the
  * request survives except which variant and how many.
  */
-export async function priceLines(db: TenantExecutor, requested: RequestedLine[]): Promise<PricedLine[]> {
+export async function priceLines(
+  db: TenantExecutor,
+  requested: RequestedLine[],
+  measureDefaults: MeasureOption[] = [],
+): Promise<PricedLine[]> {
   const variantIds = [...new Set(requested.map((line) => line.variantId))];
 
   const rows = await db
@@ -60,6 +91,12 @@ export async function priceLines(db: TenantExecutor, requested: RequestedLine[])
       saleEndsAt: productVariants.saleEndsAt,
       status: products.status,
       variantActive: productVariants.isActive,
+      sellBy: products.sellBy,
+      measureUnit: products.measureUnit,
+      pricingMeasure: products.pricingMeasure,
+      pricingLabel: products.pricingLabel,
+      minMeasure: products.minMeasure,
+      measureOptions: products.measureOptions,
     })
     .from(productVariants)
     .innerJoin(products, eq(products.id, productVariants.productId))
@@ -107,18 +144,58 @@ export async function priceLines(db: TenantExecutor, requested: RequestedLine[])
     }
 
     const sale = effectiveSale(variant.salePrice, variant.saleStartsAt, variant.saleEndsAt);
-    const charged = sale ?? variant.price;
+
+    /*
+     * A measure product's stored price is a *rate* — what `pricing_measure` base
+     * units cost — so the line's unit price is that rate scaled to the measure
+     * chosen, and the scaling happens here rather than in the browser for the
+     * same reason nothing else about money does. An unrecognised measure or one
+     * under the shop's minimum is refused rather than adjusted: silently selling
+     * a different amount from the one that was picked is the one outcome a till
+     * must never have.
+     */
+    const config = resolveMeasureConfig(
+      {
+        sellBy: variant.sellBy,
+        measureUnit: variant.measureUnit,
+        pricingMeasure: variant.pricingMeasure,
+        pricingLabel: variant.pricingLabel,
+        minMeasure: variant.minMeasure,
+        measureOptions: variant.measureOptions,
+      },
+      measureDefaults,
+    );
+
+    let chosen: { measure: number; label: string; totalMeasure: number } | null = null;
+    try {
+      chosen = resolveRequestedMeasure(config, { measure: line.measure, quantity: line.quantity });
+    } catch (error) {
+      if (error instanceof MeasureError) {
+        throw unprocessable(error.message, ERROR_CODES.VALIDATION_FAILED, { lines: [error.message] });
+      }
+      throw error;
+    }
+
+    const unitPrice = chosen
+      ? priceForMeasure(variant.price, chosen.measure, config!.pricingMeasure)
+      : variant.price;
+    const unitSalePrice =
+      chosen && sale !== null ? priceForMeasure(sale, chosen.measure, config!.pricingMeasure) : sale;
+    const charged = unitSalePrice ?? unitPrice;
 
     priced.push({
       productId: variant.productId,
       variantId: variant.variantId,
       productName: variant.productName,
-      variantTitle: variant.variantTitle,
+      variantTitle: chosen ? chosen.label : variant.variantTitle,
       sku: variant.sku,
       imageUrl: variant.variantImage ?? primaryImage.get(variant.productId) ?? null,
       quantity: line.quantity,
-      unitPrice: variant.price,
-      unitSalePrice: sale,
+      measureLabel: chosen?.label ?? null,
+      measure: chosen?.measure ?? null,
+      stockUnits: chosen?.totalMeasure ?? line.quantity,
+      unitPrice,
+      unitSalePrice,
       lineTotal: toMoney(moneyToNumber(charged) * line.quantity),
     });
   }
@@ -313,14 +390,35 @@ export async function applyCoupon(
  * returns false first so the caller can answer `INSUFFICIENT_STOCK` rather than
  * surfacing a constraint violation.
  *
- * A variant with no stock rows at all is untracked, and untracked means "sell
- * it" — the same rule the listing and the badge use.
+ * Stock is untracked in two different ways and both mean "sell it" — the same
+ * rule the listing and the badge use. `products.track_inventory` off is the
+ * owner saying stock must never refuse a sale; no `inventory_levels` rows at all
+ * is a shop that has never opened the inventory screens, where reading the
+ * absence as zero would take the whole catalogue off sale.
  */
 export async function reserveStock(
   tx: TenantExecutor,
   variantId: string,
   quantity: number,
 ): Promise<{ reserved: boolean; tracked: boolean; availableAfter: number; warehouseId: string | null }> {
+  /*
+   * Asked first, and separately, because it is a refusal to *count* rather than a
+   * count: folding it into the conditional UPDATE below would still move the
+   * units, and an untracked product's level is a record of what is on the shelf,
+   * not a permission to sell from it.
+   */
+  const tracking = await tx.execute<{ track_inventory: boolean }>(sql`
+    select p.track_inventory
+      from product_variants v
+      join products p on p.id = v.product_id
+     where v.id = ${variantId}::uuid
+     limit 1
+  `);
+
+  if (tracking.rows?.[0]?.track_inventory === false) {
+    return { reserved: true, tracked: false, availableAfter: 0, warehouseId: null };
+  }
+
   const result = await tx.execute<{ id: string; warehouse_id: string; available: number; reserved: number }>(sql`
     update inventory_levels
        set available = available - ${quantity},

@@ -53,6 +53,16 @@ export const storeSettings = pgTable(
       currencies?: string[];
       whatsappNumber?: string;
       whatsappEnabled?: boolean;
+      /**
+       * The default measure picker for products sold by weight or volume.
+       *
+       * Here rather than on each product because a greengrocer sells fifty
+       * vegetables the same four ways — 1kg, 500gm, 250gm, 100gm — and typing
+       * that list per product is how half the catalogue ends up with a different
+       * one. A product may still name its own list, and `products.
+       * measure_options` being null is what defers to this. See `lib/measure.ts`.
+       */
+      measureOptions?: { label: string; measure: number }[];
     }>(),
     seoTitle: varchar('seo_title', { length: 160 }),
     seoDescription: varchar('seo_description', { length: 300 }),

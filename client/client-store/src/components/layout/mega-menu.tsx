@@ -87,6 +87,14 @@ export function MegaMenu({
           const children = resolveChildren(item, catalogue);
 
           const flag = flags?.[item.href];
+          const withPromo = style === 'columns-promo' && !!promo;
+          /*
+           * A store's own menu is a handful of hand-written links; the category
+           * tree borrowed for "Categories" is the whole shopfront — twelve
+           * departments on the demo store — so the panel is sized by what it
+           * actually holds rather than by which template asked for it.
+           */
+          const wide = children.length > 6;
 
           if (style === 'none' || children.length === 0) {
             return (
@@ -117,21 +125,35 @@ export function MegaMenu({
                   <DropdownMenu.Content
                     align="start"
                     sideOffset={14}
+                    collisionPadding={16}
                     className={cn(
-                      'z-50 rounded-(--radius-card) border border-border bg-surface p-5 shadow-[var(--shadow-raised)]',
+                      'z-50 overflow-y-auto rounded-(--radius-card) border border-border bg-surface p-5 shadow-[var(--shadow-raised)]',
+                      // Radix measures the room left below the trigger; without a
+                      // cap, a menu listing every department runs off the bottom
+                      // of the screen and its last rows cannot be reached.
+                      'max-h-[min(72vh,var(--radix-dropdown-menu-content-available-height))]',
                       'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1',
-                      style === 'columns-promo' && promo ? 'w-[46rem]' : 'w-[34rem]',
+                      withPromo
+                        ? wide
+                          ? 'w-[min(62rem,calc(100vw_-_2rem))]'
+                          : 'w-[46rem]'
+                        : wide
+                          ? 'w-[min(56rem,calc(100vw_-_2rem))]'
+                          : 'w-[34rem]',
                     )}
                   >
                     <div
                       className={cn(
                         'grid gap-6',
-                        style === 'columns-promo' && promo
-                          ? 'grid-cols-[1fr_15rem]'
-                          : 'grid-cols-1',
+                        withPromo ? 'grid-cols-[1fr_15rem]' : 'grid-cols-1',
                       )}
                     >
-                      <div className="grid grid-cols-3 gap-x-5 gap-y-4">
+                      <div
+                        className={cn(
+                          'grid items-start gap-x-5 gap-y-6',
+                          wide ? 'grid-cols-4' : 'grid-cols-3',
+                        )}
+                      >
                         {children.map((group) => (
                           <div key={group.id}>
                             <DropdownMenu.Item asChild>
@@ -234,14 +256,20 @@ function NavLink({
  * borrows the store's category tree, so "Categories" opens onto something
  * useful without the owner having to rebuild the tree by hand in the menu
  * editor.
+ *
+ * **The whole tree, not a sample of it.** It used to take the first six
+ * departments, which made this menu disagree with the category rail beside it:
+ * a shopper could see "Automotive" in the sidebar and not in the menu that
+ * claims to list the categories, with no way to tell whether the shop stocks
+ * it. The panel is sized for the tree instead.
  */
 function resolveChildren(item: NavigationNode, catalogue: CategoryMenuEntry[]): NavigationNode[] {
   if (item.children.length > 0) return item.children;
 
-  const looksLikeCatalogue = /^\/(categories|shop)\/?$/.test(item.href);
+  const looksLikeCatalogue = /^\/categories\/?$/.test(item.href);
   if (!looksLikeCatalogue || catalogue.length === 0) return [];
 
-  return catalogue.slice(0, 6).map((entry) => ({
+  return catalogue.map((entry) => ({
     id: entry.id,
     label: entry.name,
     href: `/category/${entry.slug}`,

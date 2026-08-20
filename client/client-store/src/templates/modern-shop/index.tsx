@@ -42,9 +42,7 @@ const preset: TemplatePreset = {
 
 /** Nav pips, keyed by destination so a renamed or translated menu keeps them. */
 const NAV_FLAGS: Record<string, NavFlag> = {
-  '/shop?sort=newest': { label: 'New', tone: 'primary' },
   '/new-arrivals': { label: 'New', tone: 'primary' },
-  '/shop?sale=true': { label: 'Hot', tone: 'sale' },
   '/sale': { label: 'Hot', tone: 'sale' },
 };
 
@@ -107,9 +105,9 @@ function Homepage({ config, sections }: TemplateHomepageProps) {
       {hero ? (
         <div className="container-store pt-4 sm:pt-6">
           <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
-            {/* Eight departments and a way through to the rest — the rail is a
-                shortcut, not the category index. */}
-            <CategorySidebar config={config} headerTone="primary" maxItems={8} />
+            {/* Every department, in a rail the height of the hero beside it — the
+                list scrolls rather than stopping short of the catalogue. */}
+            <CategorySidebar config={config} headerTone="primary" />
             <div className="min-w-0 [&>section]:!pt-0">
               <HomepageSections
                 sections={[hero]}
@@ -136,7 +134,7 @@ function splitHero(sections: TemplateHomepageProps['sections']) {
   return [sections[index]!, ...sections.filter((_, position) => position !== index)] as const;
 }
 
-const GRID = 'grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6';
+const GRID = 'product-grid grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6';
 
 const template: StorefrontTemplate = {
   key: 'modern_shop',

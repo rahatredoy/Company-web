@@ -61,6 +61,14 @@ const PUBLIC_READS: Record<string, CachePolicy> = {
   '/api/v1/storefront/home': { browser: 30, shared: 120, stale: 600 },
 
   /*
+   * Which products head each aisle of the "shop by category" block. Ids only —
+   * no price and no stock badge, so a browser copy is safe for a minute — but it
+   * does say what is published, and the prices beside them are fetched through
+   * `/products` under its own much shorter policy.
+   */
+  '/api/v1/storefront/categories/showcase': { browser: 30, shared: 120, stale: 600 },
+
+  /*
    * Anything carrying a price or a stock badge. `browser: 0` means the visitor's
    * own cache always revalidates — which, with an ETag on the response, costs
    * one 304 and no body at all. The edge still absorbs the load.

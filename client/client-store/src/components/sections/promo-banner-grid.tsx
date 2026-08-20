@@ -1,8 +1,11 @@
+'use client';
+
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import type { PromoBanner } from '@/types';
 import { cn } from '@/lib/utils';
+import { BannerRotationDots, useBannerRotation } from './banner-rotation';
 
 /**
  * Campaign banners: one wide, two side by side, or a row of three.
@@ -14,6 +17,10 @@ import { cn } from '@/lib/utils';
  *
  * Destinations are validated to be internal by the config parser, so a banner
  * cannot become an outbound redirect on the store's own homepage.
+ *
+ * More banners than columns is not a mistake and is no longer truncated: the
+ * row shows one full set at a time and swaps it every ten seconds. See
+ * `useBannerRotation`.
  */
 
 const TONES: Record<PromoBanner['tone'], string> = {
@@ -29,6 +36,34 @@ const TONES: Record<PromoBanner['tone'], string> = {
 /** Tinted cards keep their own text colour; photographic ones go white on a scrim. */
 const isTinted = (banner: PromoBanner) => banner.tone !== 'none' && !banner.imageUrl;
 
+/**
+ * Whether a banner has anything to say over its artwork.
+ *
+ * A campaign banner is usually a picture with the offer already set into it —
+ * the artwork *is* the message. Laying a scrim and an empty text column over one
+ * of those darkens a third of it to protect words that are not there, which is
+ * how a perfectly good advert arrives looking like a rendering fault.
+ */
+const hasCopy = (banner: PromoBanner) =>
+  Boolean(banner.eyebrow || banner.title || banner.subtitle || banner.couponCode || banner.buttonLabel);
+
+export type BannerRatio = 'wide' | 'panel' | 'tall' | 'strip';
+
+/**
+ * What fraction of the viewport one card actually occupies.
+ *
+ * Told to the browser rather than guessed at. A full-width strip handed the
+ * three-up hint downloads a third of the pixels it needs and renders soft; a
+ * three-up card handed the full-width hint downloads three times what it can
+ * show. Both are invisible in development, where the image is cached already and
+ * the screen is wide.
+ */
+const SIZES: Record<1 | 2 | 3, string> = {
+  1: '100vw',
+  2: '(min-width: 640px) 50vw, 100vw',
+  3: '(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw',
+};
+
 export function PromoBannerGrid({
   banners,
   columns,
@@ -38,48 +73,73 @@ export function PromoBannerGrid({
   banners: PromoBanner[];
   /** Defaults to one column per banner, capped at three. */
   columns?: 1 | 2 | 3;
-  ratio?: 'wide' | 'panel' | 'tall';
+  ratio?: BannerRatio;
   className?: string;
 }) {
+  const cols = columns ?? (Math.min(Math.max(banners.length, 1), 3) as 1 | 2 | 3);
+  const { visible, page, pages, select, pauseProps, frameClassName } = useBannerRotation(
+    banners,
+    cols,
+  );
+
+  // After the hook, not before it: an early return above a hook is the one way
+  // to break the rules of hooks that a store with no banners would trigger.
   if (banners.length === 0) return null;
 
-  const cols = columns ?? (Math.min(banners.length, 3) as 1 | 2 | 3);
-
   return (
-    <ul
-      className={cn(
-        'grid gap-4',
-        cols === 3 && 'sm:grid-cols-2 lg:grid-cols-3',
-        cols === 2 && 'sm:grid-cols-2',
-        className,
-      )}
-    >
-      {banners.map((banner) => (
-        <li key={banner.id}>
-          <PromoBannerCard banner={banner} ratio={ratio} />
-        </li>
-      ))}
-    </ul>
+    <div className={className} {...pauseProps}>
+      <ul
+        className={cn(
+          'grid gap-4',
+          cols === 3 && 'sm:grid-cols-2 lg:grid-cols-3',
+          cols === 2 && 'sm:grid-cols-2',
+        )}
+      >
+        {visible.map((banner) => (
+          // The page is part of the key so a swapped-in banner mounts fresh and
+          // plays the fade rather than mutating the card that was already there.
+          <li key={`${page}-${banner.id}`} className={frameClassName}>
+            <PromoBannerCard banner={banner} ratio={ratio} sizes={SIZES[cols]} />
+          </li>
+        ))}
+      </ul>
+
+      <BannerRotationDots pages={pages} page={page} onSelect={select} className="mt-4" />
+    </div>
   );
 }
 
 export function PromoBannerCard({
   banner,
   ratio = 'wide',
+  sizes = SIZES[3],
   className,
 }: {
   banner: PromoBanner;
-  ratio?: 'wide' | 'panel' | 'tall';
+  ratio?: BannerRatio;
+  /** The artwork's `sizes` hint; `PromoBannerGrid` derives it per column count. */
+  sizes?: string;
   className?: string;
 }) {
   const tinted = isTinted(banner);
   const onDark = banner.tone === 'dark' || banner.tone === 'primary';
+  /*
+   * A picture with nothing written over it is shown whole — no scrim, and no
+   * empty text column holding a third of the card open. A banner with no
+   * artwork at all is nothing *but* its copy, so it keeps the panel either way.
+   */
+  const overlaid = hasCopy(banner) || !banner.imageUrl;
 
   const shell = cn(
     'group relative flex overflow-hidden rounded-(--radius-card)',
     ratio === 'wide' && 'aspect-16/9',
     ratio === 'panel' && 'aspect-16/10 sm:aspect-2/1',
     ratio === 'tall' && 'aspect-4/5',
+    // The advertising strip between two rows of products. Shallow enough to
+    // read as a break in the page rather than as a screen of its own, and
+    // shallower still on a wide one, where a 16/9 band would push the next row
+    // of products off the bottom entirely.
+    ratio === 'strip' && 'aspect-3/1 sm:aspect-5/1',
     tinted ? TONES[banner.tone] : 'bg-surface-alt',
     className,
   );
@@ -88,21 +148,26 @@ export function PromoBannerCard({
     <>
       {banner.imageUrl ? (
         <>
+          {/* Decorative while there is copy over it to carry the meaning; the
+              only thing on the card when there is not, so it says what it is. */}
           <Image
             src={banner.imageUrl}
-            alt=""
-            aria-hidden
+            alt={overlaid ? '' : (banner.title ?? banner.subtitle ?? '')}
+            aria-hidden={overlaid || undefined}
             fill
-            sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+            sizes={sizes}
             className="object-cover transition-transform duration-500 group-hover:scale-105"
           />
-          <span
-            aria-hidden
-            className="absolute inset-0 bg-linear-to-r from-black/65 via-black/25 to-transparent"
-          />
+          {overlaid ? (
+            <span
+              aria-hidden
+              className="absolute inset-0 bg-linear-to-r from-black/65 via-black/25 to-transparent"
+            />
+          ) : null}
         </>
       ) : null}
 
+      {overlaid ? (
       <span
         className={cn(
           'relative flex w-full max-w-[22rem] flex-col justify-center p-5 sm:p-6',
@@ -155,6 +220,7 @@ export function PromoBannerCard({
           </span>
         ) : null}
       </span>
+      ) : null}
     </>
   );
 

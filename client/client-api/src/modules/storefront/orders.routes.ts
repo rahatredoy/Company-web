@@ -13,6 +13,7 @@ import type { OrderStatus } from '../../lib/constants';
 import { RATE_LIMITS } from '../../lib/constants';
 import { ERROR_CODES, notFound, unprocessable } from '../../lib/errors';
 import { buildMeta, noContent, ok, paginated, parseBody, parseParams, parseQuery } from '../../lib/http';
+import { stockUnitsOf } from '../../lib/measure';
 import { enforce } from '../../lib/rate-limit';
 import { storeOf, type StoreContext } from '../../plugins/tenant';
 import { releaseStock } from './checkout.service';
@@ -265,21 +266,31 @@ export async function authoriseOrder(
 /** Puts every reserved line back, with a ledger row for each move. */
 export async function releaseOrderStock(tx: TenantExecutor, orderId: string): Promise<void> {
   const lines = await tx
-    .select({ variantId: orderItems.variantId, quantity: orderItems.quantity })
+    .select({
+      variantId: orderItems.variantId,
+      quantity: orderItems.quantity,
+      measure: orderItems.measure,
+    })
     .from(orderItems)
     .where(eq(orderItems.orderId, orderId));
 
   for (const line of lines) {
     if (!line.variantId) continue;
 
-    const outcome = await releaseStock(tx, line.variantId, line.quantity);
+    /*
+     * Released in the same units it was reserved in — base units for a product
+     * sold by measure. Putting back the quantity instead would return two grams
+     * of a cancelled kilo and quietly lose the rest of the shelf.
+     */
+    const stockUnits = stockUnitsOf(line);
+    const outcome = await releaseStock(tx, line.variantId, stockUnits);
     if (!outcome.released || !outcome.warehouseId) continue;
 
     await tx.insert(inventoryTransactions).values({
       variantId: line.variantId,
       warehouseId: outcome.warehouseId,
       type: 'order_released',
-      quantity: line.quantity,
+      quantity: stockUnits,
       fromBucket: 'reserved',
       toBucket: 'available',
       availableAfter: outcome.availableAfter,

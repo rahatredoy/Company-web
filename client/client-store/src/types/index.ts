@@ -11,6 +11,25 @@ import type { TemplateKey } from '@/templates/meta';
 
 // ---------------------------------------------------------------- store ----
 
+/**
+ * A product sold by weight or volume, or null for one sold one at a time.
+ *
+ * Mirrors `client-api/src/modules/storefront/types.ts#MeasureSale`. Sent whole
+ * rather than as five loose fields so a card has one thing to branch on: null
+ * renders the plain Add button, anything else renders the size picker.
+ */
+export interface MeasureSale {
+  /** The base unit every number here is counted in. */
+  unit: 'g' | 'ml' | 'pc';
+  /** How much of it the price buys. 1000 = the price is per kilo. */
+  pricingMeasure: number;
+  /** Printed after the price: "Per 1kg", "Per 100g", "Per Piece". */
+  pricingLabel: string;
+  /** Floor on a line's total, in base units — the "(Min. 350gm)" on the card. */
+  minMeasure: number | null;
+  options: { label: string; measure: number }[];
+}
+
 export interface NavigationNode {
   id: string;
   label: string;
@@ -177,6 +196,20 @@ export interface ProductSummary {
   /** One-line spec for the electronics card. */
   keySpec: string | null;
   hasVariants: boolean;
+  /**
+   * What a one-click Add puts in the basket.
+   *
+   * A basket line is a variant — that is what holds the price and the stock a
+   * checkout reserves — and a `simple` product owns exactly one, so a card can
+   * add without asking the server anything. For a `variable` product this is
+   * only the variant its page opens on; the card opens a picker instead.
+   */
+  defaultVariantId: string | null;
+  /** The quantity a one-click Add starts at, so a "sold in threes" product does. */
+  minOrderQuantity: number;
+  maxOrderQuantity: number | null;
+  /** Non-null when the card shows a size picker instead of a plain Add. */
+  measure: MeasureSale | null;
 }
 
 export interface VariantOption {
@@ -220,6 +253,7 @@ export interface ProductDetail extends Omit<ProductSummary, 'primaryImage' | 'se
   isReturnable: boolean;
   minOrderQuantity: number;
   maxOrderQuantity: number | null;
+  measure: MeasureSale | null;
   seo: { title: string | null; description: string | null };
 }
 
@@ -234,6 +268,26 @@ export interface Category {
   children: Category[];
   breadcrumb: { name: string; slug: string }[];
   seo: { title: string | null; description: string | null };
+}
+
+/**
+ * What the homepage's "shop by category" block is given: per department, the
+ * aisles worth previewing and which products head each one.
+ *
+ * Ids rather than products, because every product on the homepage is resolved
+ * through one batched `?ids=` read — see `primeProductSummaries`. Categories are
+ * ids too: the names, pictures and counts come from the category tree this page
+ * has already fetched, so a department cannot be described one way in the rail
+ * and another way here.
+ */
+export interface CategoryShowcaseRow {
+  categoryId: string;
+  productIds: string[];
+}
+
+export interface CategoryShowcaseGroup {
+  categoryId: string;
+  rows: CategoryShowcaseRow[];
 }
 
 export interface Brand {
@@ -432,9 +486,20 @@ export interface CartLine {
   name: string;
   variantTitle: string | null;
   imageUrl: string | null;
+  /** The price of one of *these* — of one 500gm bag, not of the kilo. */
   unitPrice: string;
   unitSalePrice: string | null;
   quantity: number;
+  /**
+   * Which size this line buys, for a product sold by weight or volume.
+   *
+   * Null on an ordinary line. Both travel because `quantity` alone is
+   * ambiguous once a product has sizes — two of something is two bags, and
+   * which bag is the difference between 200g and 2kg — and `measure` is what
+   * checkout re-prices and reserves stock against.
+   */
+  measureLabel: string | null;
+  measure: number | null;
   lineTotal: string;
   inStock: boolean;
   /** Set when stock fell below the requested quantity since it was added. */

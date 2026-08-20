@@ -116,6 +116,22 @@ export const orderItems = pgTable(
     /** What was actually charged per unit after any sale price. */
     unitSalePrice: numeric('unit_sale_price', { precision: 12, scale: 2 }),
     quantity: integer('quantity').notNull(),
+
+    /**
+     * Which measure was bought, frozen like every other snapshot on this line.
+     *
+     * Null for an ordinary product, and that is the reading everything downstream
+     * takes: `quantity` alone means "three of them". For a product sold by
+     * measure it means "three of `measure_label`", and `measure` is how much of
+     * the base unit one of them is — so a line for 2 x 500gm is quantity 2,
+     * measure 500, and the kilo it took off the shelf is the product of the two.
+     *
+     * Both are stored rather than derived from the product, because the product's
+     * option list is editable and a receipt has to keep saying what was sold.
+     */
+    measureLabel: varchar('measure_label', { length: 24 }),
+    measure: integer('measure'),
+
     lineDiscount: numeric('line_discount', { precision: 12, scale: 2 }).notNull().default('0'),
     lineTax: numeric('line_tax', { precision: 12, scale: 2 }).notNull().default('0'),
     lineTotal: numeric('line_total', { precision: 14, scale: 2 }).notNull(),

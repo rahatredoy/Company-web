@@ -29,7 +29,7 @@ import {
 } from './checkout.service';
 import { claimOrderNumber } from './orders.service';
 import { rememberGuestOrder } from './guest-orders';
-import { loadStoreCurrency } from './service';
+import { loadMeasureDefaults, loadStoreCurrency } from './service';
 
 const shippingQuerySchema = z.object({
   country: z.string().trim().max(60).optional(),
@@ -57,6 +57,14 @@ const checkoutSchema = z.object({
         productId: z.string().uuid(),
         variantId: z.string().uuid(),
         quantity: z.coerce.number().int().min(1).max(99),
+        /**
+         * Which size was picked, in base units, for a product sold by weight or
+         * volume — 500 for half a kilo. Optional, and validated against the
+         * product's own list in `priceLines`; a line that omits it on a measure
+         * product is priced at the product's own pricing measure, which is what
+         * the "Per 1kg" on the card advertises.
+         */
+        measure: z.coerce.number().int().min(1).max(10_000_000).nullable().optional(),
       }),
     )
     .min(1, 'Your basket is empty.')
@@ -123,7 +131,7 @@ export default async function checkoutRoutes(app: FastifyInstance) {
     const method = await resolvePaymentMethod(store, body.paymentProvider);
 
     const placed = await store.db.transaction(async (tx) => {
-      const lines = await priceLines(tx, body.lines);
+      const lines = await priceLines(tx, body.lines, await loadMeasureDefaults(store));
       const subtotal = lines.reduce((sum, line) => sum + moneyToNumber(line.lineTotal), 0);
 
       const shipping = await resolveShipping(tx, body, subtotal);
@@ -177,6 +185,8 @@ export default async function checkoutRoutes(app: FastifyInstance) {
           unitPrice: line.unitPrice,
           unitSalePrice: line.unitSalePrice,
           quantity: line.quantity,
+          measureLabel: line.measureLabel,
+          measure: line.measure,
           lineTotal: line.lineTotal,
         })),
       );
@@ -335,7 +345,12 @@ async function resolveCoupon(
  */
 async function commitStock(tx: TenantExecutor, orderId: string, lines: PricedLine[]): Promise<void> {
   for (const line of lines) {
-    const outcome = await reserveStock(tx, line.variantId, line.quantity);
+    /*
+     * `stockUnits`, not `quantity`. For an ordinary product they are the same
+     * number; for one sold by measure the quantity is how many 500gm bags and
+     * this is the thousand grams they come to.
+     */
+    const outcome = await reserveStock(tx, line.variantId, line.stockUnits);
 
     if (!outcome.reserved) {
       throw unprocessable(
@@ -352,7 +367,7 @@ async function commitStock(tx: TenantExecutor, orderId: string, lines: PricedLin
       variantId: line.variantId,
       warehouseId: outcome.warehouseId,
       type: 'order_reserved',
-      quantity: -line.quantity,
+      quantity: -line.stockUnits,
       fromBucket: 'available',
       toBucket: 'reserved',
       availableAfter: outcome.availableAfter,

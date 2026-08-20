@@ -1,26 +1,13 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { Wallet } from 'lucide-react';
 import type { RefundRow, SessionResponse } from '@/lib/types';
 import { can } from '@/lib/types';
-import { serverGet, serverGetPaginated } from '@/lib/server-api';
-import { formatDate, formatMoney } from '@/lib/format';
+import { serverGet, serverGetListed } from '@/lib/server-api';
+import { BATCH_SIZE } from '@/lib/list';
 import { EmptyState } from '@/components/admin/empty-state';
 import { PageHeader } from '@/components/admin/page-header';
-import { Pagination } from '@/components/admin/pagination';
-import { RefundActions } from '@/components/admin/refund-actions';
+import { RefundList } from '@/components/admin/refund-list';
 import { TableFilters } from '@/components/admin/table-filters';
-import { StatusBadge } from '@/components/ui/status-badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableEmpty,
-  TableHead,
-  TableHeader,
-  TableRow,
-  TableWrapper,
-} from '@/components/ui/table';
 
 export const metadata: Metadata = { title: 'Refunds' };
 export const dynamic = 'force-dynamic';
@@ -48,10 +35,13 @@ export default async function RefundsPage({
   const session = await serverGet<SessionResponse>('/api/v1/admin/auth/session');
   const canApprove = session.authenticated && can(session.admin, 'refunds.approve');
 
-  const { data, meta } = await serverGetPaginated<RefundRow>('/api/v1/admin/refunds', {
-    page: single('page') ?? 1,
-    search: single('search'),
-    status: single('status'),
+  // One object, so the first batch here and every batch the browser asks for
+  // afterwards read the same filtered list. No cursor on this one, which is what
+  // makes the API count it.
+  const query = { search: single('search'), status: single('status') };
+  const first = await serverGetListed<RefundRow>('/api/v1/admin/refunds', {
+    ...query,
+    pageSize: BATCH_SIZE,
   });
 
   const filtered = Boolean(single('search') || (single('status') && single('status') !== 'all'));
@@ -65,64 +55,19 @@ export default async function RefundsPage({
 
       <TableFilters searchPlaceholder="Refund or order number" statusOptions={STATUS_OPTIONS} />
 
-      {data.length === 0 && !filtered ? (
+      {first.data.length === 0 && !filtered ? (
         <EmptyState
           icon={Wallet}
           title="No refunds"
           description="Completing a return raises one here for approval."
         />
       ) : (
-        <>
-          <TableWrapper>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Refund</TableHead>
-                  <TableHead>Order</TableHead>
-                  <TableHead>Raised</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="w-64" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 ? (
-                  <TableEmpty colSpan={6}>No refund matches those filters.</TableEmpty>
-                ) : (
-                  data.map((refund) => (
-                    <TableRow key={refund.id}>
-                      <TableCell>
-                        <span className="block font-mono text-sm font-medium">{refund.refundNumber}</span>
-                        <span className="block text-xs text-muted-foreground">{refund.customerName}</span>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/orders/${refund.orderId}`} className="font-mono text-sm hover:underline">
-                          {refund.orderNumber}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDate(refund.createdAt)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={refund.status} />
-                        {refund.method ? (
-                          <span className="block text-xs text-muted-foreground">via {refund.method}</span>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
-                        {formatMoney(refund.amount, refund.currency)}
-                      </TableCell>
-                      <TableCell>
-                        <RefundActions refund={refund} canApprove={canApprove} />
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableWrapper>
-          <Pagination {...meta} />
-        </>
+        <RefundList
+          initial={{ rows: first.data, meta: first.meta }}
+          query={query}
+          filtered={filtered}
+          canApprove={canApprove}
+        />
       )}
     </div>
   );

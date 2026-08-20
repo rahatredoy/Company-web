@@ -9,6 +9,7 @@ import { getTemplate } from '@/templates/registry';
 import { Breadcrumb, ProductListing } from '@/components/catalog/product-listing';
 import { apiFetch, isStoreNotFound } from '@/lib/api/client';
 import { cookieHeader, storeCall } from '@/lib/tenant';
+import { ScrollRail } from '@/components/ui/scroll-rail';
 import { cn } from '@/lib/utils';
 
 async function getCategory(slug: string): Promise<Category | null> {
@@ -153,28 +154,43 @@ export default async function CategoryPage({
       ) : null}
 
       {category.children.length > 0 ? (
-        <ul aria-label={`Narrow ${category.name}`} className="mt-5 flex flex-wrap gap-2">
+        <ScrollRail label={`Narrow ${category.name}`} className="mt-5">
           {category.children.map((child) => {
             const selected = selectedSubs.includes(child.slug);
 
             return (
-              <li key={child.id}>
+              <li
+                key={child.id}
+                /*
+                 * Two chips to a phone screen; from `sm` up, however many fit.
+                 *
+                 * The `2.5rem` taken off is the `gap-2` between the pair plus a
+                 * 2rem gutter, so the third chip is left peeking rather than
+                 * butting against the edge — the arrow then sits over a sliver
+                 * of the next chip instead of over the second one's label, and
+                 * the row reads as continuing before anything is measured.
+                 */
+                className="basis-[calc((100%-2.5rem)/2)] sm:basis-auto"
+              >
                 <Link
                   href={subHref(child.slug)}
                   // The chips sit above the grid, so re-rendering in place beats
                   // throwing the visitor back to the top of the page.
                   scroll={false}
                   className={cn(
-                    'inline-flex items-center gap-1.5 rounded-(--radius-pill) border px-4 py-2 text-sm transition-colors',
+                    // `w-full` only while the width is imposed from the `li`: a
+                    // chip narrower than its slot would leave the gaps uneven
+                    // and make "two per screen" look like an accident.
+                    'flex w-full items-center justify-center gap-1.5 rounded-(--radius-pill) border px-4 py-2 text-sm transition-colors sm:w-auto',
                     selected
                       ? 'border-primary bg-primary text-primary-foreground'
                       : 'border-border bg-surface hover:border-primary hover:text-primary',
                   )}
                 >
-                  {child.name}
+                  <span className="truncate">{child.name}</span>
                   {selected ? (
                     <>
-                      <X className="size-3.5" aria-hidden />
+                      <X className="size-3.5 shrink-0" aria-hidden />
                       <span className="sr-only">(selected — activate to remove)</span>
                     </>
                   ) : null}
@@ -182,7 +198,7 @@ export default async function CategoryPage({
               </li>
             );
           })}
-        </ul>
+        </ScrollRail>
       ) : null}
 
       <div className="mt-8">

@@ -97,7 +97,7 @@ function Homepage({ config, sections }: TemplateHomepageProps) {
   );
 }
 
-const GRID = 'grid grid-cols-1 gap-x-6 gap-y-12 sm:grid-cols-2 lg:grid-cols-3';
+const GRID = 'product-grid grid grid-cols-1 gap-x-6 gap-y-12 sm:grid-cols-2 lg:grid-cols-3';
 
 const template: StorefrontTemplate = {
   key: 'minimal_store',

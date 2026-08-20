@@ -104,7 +104,7 @@ function Homepage({ config, sections }: TemplateHomepageProps) {
   );
 }
 
-const GRID = 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6';
+const GRID = 'product-grid grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6';
 
 const template: StorefrontTemplate = {
   key: 'marketplace',

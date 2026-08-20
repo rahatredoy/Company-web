@@ -89,10 +89,19 @@ export function CheckoutForm({
     const payload = {
       email: value('email'),
       phone: value('phone'),
+      /*
+       * Ids, quantities and — for a product sold by weight — which size. No
+       * money: the basket lives in `localStorage`, so every price here is a
+       * number the customer could have edited, and the API re-derives all of it.
+       * The size is sent for the same reason a quantity is: it is what was
+       * asked for, not what it costs, and the API checks it against the
+       * product's own list before pricing anything.
+       */
       lines: cart.lines.map((line) => ({
         productId: line.productId,
         variantId: line.variantId,
         quantity: line.quantity,
+        measure: line.measure,
       })),
       shippingAddress: {
         fullName: value('fullName'),

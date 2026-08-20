@@ -13,7 +13,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { attributeInputType, mediaType, productStatus, productType } from './enums';
+import { attributeInputType, mediaType, productSellBy, productStatus, productType } from './enums';
 
 /** Self-referencing tree. Depth is not enforced in SQL — the API refuses cycles. */
 export const categories = pgTable(
@@ -30,6 +30,12 @@ export const categories = pgTable(
     bannerUrl: text('banner_url'),
     isActive: boolean('is_active').notNull().default(true),
     showInMenu: boolean('show_in_menu').notNull().default(true),
+    /**
+     * Leads the storefront navigation. A different question from `showInMenu`
+     * (may it appear at all) and from `isActive` (may a shopper see it at all),
+     * so it is its own column rather than a rank baked into `sortOrder`.
+     */
+    isFeatured: boolean('is_featured').notNull().default(false),
     sortOrder: integer('sort_order').notNull().default(0),
     seoTitle: varchar('seo_title', { length: 160 }),
     seoDescription: varchar('seo_description', { length: 300 }),
@@ -144,6 +150,28 @@ export const products = pgTable(
     isFeatured: boolean('is_featured').notNull().default(false),
     isNewArrival: boolean('is_new_arrival').notNull().default(false),
 
+    /**
+     * One optional clip, beside the gallery rather than in it.
+     *
+     * `product_media` can hold a `video` row, but the gallery is written as a
+     * whole list of images and reordered as one — a video mixed into it would be
+     * dragged around as though it were a thumbnail and dropped by any client
+     * that only sends images back. A product has at most one, so it is a column.
+     */
+    videoUrl: text('video_url'),
+
+    /**
+     * Whether stock decides what may be sold.
+     *
+     * Off means the shop keeps counting units but never refuses a sale on them —
+     * made-to-order, digital, or a line the owner restocks faster than the panel
+     * can be updated. It is **not** the same as having no `inventory_levels`
+     * rows: an untracked product can still have a count worth reading, and a
+     * tracked one with no rows yet is simply unmeasured. Both read as sellable,
+     * for different reasons, and the storefront and checkout honour both.
+     */
+    trackInventory: boolean('track_inventory').notNull().default(true),
+
     /** Maintained by the order pipeline; never accepted from a request body. */
     soldCount: integer('sold_count').notNull().default(0),
     viewCount: integer('view_count').notNull().default(0),
@@ -156,6 +184,59 @@ export const products = pgTable(
 
     minOrderQuantity: integer('min_order_quantity').notNull().default(1),
     maxOrderQuantity: integer('max_order_quantity'),
+
+    /**
+     * Sold one at a time, or weighed out.
+     *
+     * `measure` turns the price into a rate and lets the shopper choose how much
+     * — the 1kg / 500gm / 250gm dropdown on a greengrocer's card. It is a switch
+     * on the product rather than a product type, because everything else about
+     * such a product (one variant, one price, one stock pool) is exactly a
+     * `simple` product; only how a quantity is read changes. Off is the default
+     * and is what every existing product stays.
+     */
+    sellBy: productSellBy('sell_by').notNull().default('unit'),
+
+    /**
+     * The unit stock and every quantity is counted in, when `sell_by = measure`.
+     *
+     * Always the small one — `g`, `ml`, `pc` — so `inventory_levels.available`
+     * and `order_items.quantity` stay the integers they already are and nothing
+     * downstream of them had to change. A shop with 40kg of pumpkin reads 40000.
+     */
+    measureUnit: varchar('measure_unit', { length: 8 }),
+
+    /**
+     * How many base units the shelf price buys. 1000 = the price is per kilo.
+     *
+     * The price column is untouched by this feature: `price_from` and the
+     * variant's `price` mean "the cost of `pricing_measure` base units", and one
+     * option's price is derived from that in `lib/measure.ts#priceForMeasure` —
+     * rounded once, so a kilo costs the same bought whole as bought in tenths.
+     */
+    pricingMeasure: integer('pricing_measure'),
+
+    /** Printed after the price: "Per 1kg", "Per 100g", "Per Piece". */
+    pricingLabel: varchar('pricing_label', { length: 24 }),
+
+    /**
+     * Floor on a line's *total* measure, in base units — the "(Min. 350gm)" on
+     * the card. A floor on the total rather than on the option is what lets a
+     * shop offer 100gm and still refuse to weigh out less than 350gm of it.
+     */
+    minMeasure: integer('min_measure'),
+
+    /**
+     * The measures a shopper may pick, biggest first.
+     *
+     * Null means "use the store's default list" (`store_settings.preferences.
+     * measureOptions`), which is why it is nullable rather than seeded: a shop
+     * that sells fifty vegetables the same four ways sets the list once, and a
+     * product that needs its own says so here. A list, not a step, because
+     * 1kg/500gm/250gm/100gm is what a shopper recognises and 50g increments up
+     * to a kilo is a dropdown with twenty rows in it.
+     */
+    measureOptions: jsonb('measure_options').$type<{ label: string; measure: number }[]>(),
 
     seoTitle: varchar('seo_title', { length: 160 }),
     seoDescription: varchar('seo_description', { length: 300 }),

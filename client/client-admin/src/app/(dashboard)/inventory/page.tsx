@@ -1,35 +1,22 @@
 import type { Metadata } from 'next';
-import { Warehouse } from 'lucide-react';
-import type { InventoryRow, SessionResponse } from '@/lib/types';
-import { can } from '@/lib/types';
-import { serverGet, serverGetPaginated } from '@/lib/server-api';
-import { formatRelative } from '@/lib/format';
-import { EmptyState } from '@/components/admin/empty-state';
-import { PageHeader } from '@/components/admin/page-header';
-import { Pagination } from '@/components/admin/pagination';
-import { TableFilters } from '@/components/admin/table-filters';
-import { StockAdjuster } from '@/components/admin/stock-adjuster';
-import { Badge } from '@/components/ui/badge';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableEmpty,
-  TableHead,
-  TableHeader,
-  TableRow,
-  TableWrapper,
-} from '@/components/ui/table';
+  INVENTORY_DEFAULTS,
+  InventoryManager,
+  type InventoryFilterState,
+  type StockSort,
+} from '@/components/admin/inventory-manager';
+import { serverGet, serverGetListed, serverGetOptional } from '@/lib/server-api';
+import { BATCH_SIZE } from '@/lib/list';
+import {
+  can,
+  type InventoryRow,
+  type InventoryStats,
+  type SessionResponse,
+  type WarehouseRow,
+} from '@/lib/types';
 
 export const metadata: Metadata = { title: 'Inventory' };
 export const dynamic = 'force-dynamic';
-
-const STATUS_OPTIONS = [
-  { value: 'all', label: 'All stock' },
-  { value: 'out', label: 'Out of stock' },
-  { value: 'low', label: 'Running low' },
-  { value: 'in_stock', label: 'In stock' },
-];
 
 export default async function InventoryPage({
   searchParams,
@@ -41,90 +28,65 @@ export default async function InventoryPage({
     const value = params[key];
     return Array.isArray(value) ? value[0] : value;
   };
+  const oneOf = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
+    const value = single(key);
+    return allowed.includes(value as T) ? (value as T) : fallback;
+  };
 
-  const session = await serverGet<SessionResponse>('/api/v1/admin/auth/session');
-  const canAdjust = session.authenticated && can(session.admin, 'inventory.adjust');
+  const filters: InventoryFilterState = {
+    search: single('search') ?? '',
+    status: oneOf('status', ['all', 'in_stock', 'low', 'out'] as const, 'all'),
+    warehouseId: single('warehouse') ?? '',
+    sort: oneOf(
+      'sort',
+      ['available', 'reserved', 'product', 'warehouse', 'updatedAt'] as const satisfies readonly StockSort[],
+      INVENTORY_DEFAULTS.sort,
+    ),
+    order: oneOf('order', ['asc', 'desc'] as const, INVENTORY_DEFAULTS.order),
+  };
 
-  const { data, meta } = await serverGetPaginated<InventoryRow>('/api/v1/admin/inventory', {
-    page: single('page') ?? 1,
-    search: single('search'),
-    status: single('status'),
-  });
+  const [session, stats, warehouses, levels] = await Promise.all([
+    serverGet<SessionResponse>('/api/v1/admin/auth/session'),
+    // A card missing beats the whole screen failing, so the tally is optional.
+    serverGetOptional<InventoryStats>('/api/v1/admin/inventory/stats'),
+    serverGet<WarehouseRow[]>('/api/v1/admin/warehouses'),
+    /*
+     * The **first batch only**, and no cursor — which is what makes the API count
+     * the filtered set and return `total`. The batches after it are fetched in
+     * the browser by cursor and skip the count.
+     */
+    serverGetListed<InventoryRow>('/api/v1/admin/inventory', {
+      pageSize: BATCH_SIZE,
+      search: filters.search || undefined,
+      status: filters.status,
+      warehouseId: filters.warehouseId || undefined,
+      sort: filters.sort,
+      order: filters.order,
+    }),
+  ]);
 
-  const filtered = Boolean(single('search') || (single('status') && single('status') !== 'all'));
+  /*
+   * Units held per warehouse, so the warehouses tab can say what is on each one's
+   * shelves and warn before a delete the API is going to refuse. Read from the
+   * first batch rather than as its own request: it is a hint on a card, and one
+   * that is short because the reader has not scrolled is still more use than
+   * nothing.
+   */
+  const unitsByWarehouse: Record<string, number> = {};
+  for (const row of levels.data) {
+    const held = row.available + row.reserved + row.returnPending + row.damaged + row.incoming;
+    unitsByWarehouse[row.warehouseId] = (unitsByWarehouse[row.warehouseId] ?? 0) + held;
+  }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Inventory"
-        description="Emptiest first — the rows that need doing something about are at the top."
-      />
-
-      <TableFilters searchPlaceholder="Product name or SKU" statusOptions={STATUS_OPTIONS} />
-
-      {data.length === 0 && !filtered ? (
-        <EmptyState
-          icon={Warehouse}
-          title="Nothing is being tracked yet"
-          description="A product with no stock record is treated as always available. Adjust one to start counting it."
-        />
-      ) : (
-        <>
-          <TableWrapper>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Warehouse</TableHead>
-                  <TableHead className="text-right">Available</TableHead>
-                  <TableHead className="text-right">Reserved</TableHead>
-                  <TableHead>Updated</TableHead>
-                  <TableHead className="w-24" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 ? (
-                  <TableEmpty colSpan={6}>No stock matches those filters.</TableEmpty>
-                ) : (
-                  data.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>
-                        <span className="block font-medium">{row.productName}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {[row.variantTitle, row.sku].filter(Boolean).join(' · ')}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{row.warehouseName}</TableCell>
-                      <TableCell className="text-right">
-                        <span className="font-medium tabular-nums">{row.available}</span>
-                        {row.available <= 0 ? (
-                          <Badge variant="danger" className="ml-2">
-                            Out
-                          </Badge>
-                        ) : row.available <= row.lowStockThreshold ? (
-                          <Badge variant="warning" className="ml-2">
-                            Low
-                          </Badge>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {row.reserved}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatRelative(row.updatedAt)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <StockAdjuster row={row} canAdjust={canAdjust} />
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableWrapper>
-          <Pagination {...meta} />
-        </>
-      )}
-    </div>
+    <InventoryManager
+      initial={{ rows: levels.data, meta: levels.meta }}
+      stats={stats}
+      warehouses={warehouses}
+      unitsByWarehouse={unitsByWarehouse}
+      currency={session.authenticated ? session.store.currency : 'USD'}
+      canAdjust={session.authenticated && can(session.admin, 'inventory.adjust')}
+      filters={filters}
+    />
   );
 }

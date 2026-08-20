@@ -1,39 +1,57 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
-import { ShoppingCart } from 'lucide-react';
-import type { OrderRow, SessionResponse } from '@/lib/types';
-import { serverGet, serverGetPaginated } from '@/lib/server-api';
-import { formatDateTime, formatMoney } from '@/lib/format';
-import { EmptyState } from '@/components/admin/empty-state';
-import { PageHeader } from '@/components/admin/page-header';
-import { Pagination } from '@/components/admin/pagination';
-import { TableFilters } from '@/components/admin/table-filters';
-import { StatusBadge } from '@/components/ui/status-badge';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableEmpty,
-  TableHead,
-  TableHeader,
-  TableRow,
-  TableWrapper,
-} from '@/components/ui/table';
+  ORDER_DEFAULTS,
+  OrderManager,
+  type DatePreset,
+  type OrderFilterState,
+} from '@/components/admin/order-manager';
+import { serverGet, serverGetListed, serverGetOptional } from '@/lib/server-api';
+import { BATCH_SIZE } from '@/lib/list';
+import { can, type OrderRow, type OrderStats, type SessionResponse } from '@/lib/types';
 
 export const metadata: Metadata = { title: 'Orders' };
 export const dynamic = 'force-dynamic';
 
-const STATUS_OPTIONS = [
-  { value: 'all', label: 'All orders' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'confirmed', label: 'Confirmed' },
-  { value: 'processing', label: 'Processing' },
-  { value: 'packed', label: 'Packed' },
-  { value: 'shipped', label: 'Shipped' },
-  { value: 'delivered', label: 'Delivered' },
-  { value: 'cancelled', label: 'Cancelled' },
-  { value: 'returned', label: 'Returned' },
-];
+/**
+ * A calendar day in the store's own timezone, as `YYYY-MM-DD`.
+ *
+ * The presets have to agree with the tally above the list, and that is counted in
+ * `store_settings.timezone` — so "today" for a shop in Dhaka is its own day, not
+ * whichever one the server happens to be having. `en-CA` is the locale that
+ * formats as YYYY-MM-DD, which is what the API's date filters take.
+ */
+function dayIn(zone: string, offsetDays = 0): string {
+  const at = new Date(Date.now() + offsetDays * 86_400_000);
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: zone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(at);
+  } catch {
+    // An unknown timezone in the settings must not take the page down with it.
+    return at.toISOString().slice(0, 10);
+  }
+}
+
+/** A preset is only ever shorthand for a `from`/`to` pair the API understands. */
+function rangeFor(preset: DatePreset, zone: string, custom: { from: string; to: string }) {
+  switch (preset) {
+    case 'today':
+      return { from: dayIn(zone), to: dayIn(zone) };
+    case 'week':
+      return { from: dayIn(zone, -6), to: dayIn(zone) };
+    case 'month':
+      return { from: dayIn(zone, -29), to: dayIn(zone) };
+    case 'custom':
+      return custom;
+    default:
+      return { from: '', to: '' };
+  }
+}
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function OrdersPage({
   searchParams,
@@ -45,90 +63,68 @@ export default async function OrdersPage({
     const value = params[key];
     return Array.isArray(value) ? value[0] : value;
   };
+  const oneOf = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
+    const value = single(key);
+    return allowed.includes(value as T) ? (value as T) : fallback;
+  };
+  const date = (key: string) => {
+    const value = single(key) ?? '';
+    return DATE.test(value) ? value : '';
+  };
 
-  const session = await serverGet<SessionResponse>('/api/v1/admin/auth/session');
-  const currency = session.authenticated ? session.store.currency : 'USD';
+  const [session, stats] = await Promise.all([
+    serverGet<SessionResponse>('/api/v1/admin/auth/session'),
+    // A card missing beats the whole screen failing, so the tally is optional.
+    serverGetOptional<OrderStats>('/api/v1/admin/orders/stats'),
+  ]);
 
-  const { data, meta } = await serverGetPaginated<OrderRow>('/api/v1/admin/orders', {
-    page: single('page') ?? 1,
-    search: single('search'),
-    status: single('status'),
-    sort: single('sort'),
-    order: single('order'),
+  const admin = session.authenticated ? session.admin : null;
+  const store = session.authenticated ? session.store : null;
+  const zone = stats?.timezone || store?.timezone || 'UTC';
+
+  const preset = oneOf('range', ['all', 'today', 'week', 'month', 'custom'] as const, 'all');
+  const range = rangeFor(preset, zone, { from: date('from'), to: date('to') });
+
+  const filters: OrderFilterState = {
+    search: single('search') ?? '',
+    status: single('status') ?? 'all',
+    paymentStatus: single('payment') ?? 'all',
+    needsAction: oneOf('open', ['all', 'yes'] as const, 'all'),
+    preset,
+    from: range.from,
+    to: range.to,
+    sort: oneOf('sort', ['placedAt', 'grandTotal', 'orderNumber'] as const, ORDER_DEFAULTS.sort),
+    order: oneOf('order', ['asc', 'desc'] as const, ORDER_DEFAULTS.order),
+  };
+
+  /*
+   * The **first batch only**, and no cursor — which is what makes the API count
+   * the filtered book of orders and return `total`. Every batch after this one
+   * is fetched in the browser by cursor and skips the count.
+   *
+   * Rendered here rather than in the browser so the first response already
+   * carries rows: the reader sees the list before any JavaScript runs.
+   */
+  const first = await serverGetListed<OrderRow>('/api/v1/admin/orders', {
+    pageSize: BATCH_SIZE,
+    search: filters.search || undefined,
+    status: filters.status,
+    paymentStatus: filters.paymentStatus,
+    needsAction: filters.needsAction,
+    from: filters.from || undefined,
+    to: filters.to || undefined,
+    sort: filters.sort,
+    order: filters.order,
   });
 
-  const filtered = Boolean(single('search') || (single('status') && single('status') !== 'all'));
-
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Orders"
-        description="Everything customers have bought, newest first."
-      />
-
-      <TableFilters searchPlaceholder="Order number, name or email" statusOptions={STATUS_OPTIONS} />
-
-      {data.length === 0 && !filtered ? (
-        <EmptyState
-          icon={ShoppingCart}
-          title="No orders yet"
-          description="When someone buys something from your store, it will appear here."
-        />
-      ) : (
-        <>
-          <TableWrapper>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Order</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Placed</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Payment</TableHead>
-                  <TableHead className="text-right">Items</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 ? (
-                  <TableEmpty colSpan={7}>No order matches those filters.</TableEmpty>
-                ) : (
-                  data.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell>
-                        <Link
-                          href={`/orders/${order.id}`}
-                          className="font-mono text-sm font-medium hover:underline"
-                        >
-                          {order.orderNumber}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <span className="block font-medium">{order.customerName}</span>
-                        <span className="block text-xs text-muted-foreground">{order.email}</span>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDateTime(order.placedAt)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={order.status} />
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={order.paymentStatus} />
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{order.itemCount}</TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
-                        {formatMoney(order.grandTotal, order.currency || currency)}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableWrapper>
-          <Pagination {...meta} />
-        </>
-      )}
-    </div>
+    <OrderManager
+      initial={{ rows: first.data, meta: first.meta }}
+      stats={stats}
+      currency={store?.currency ?? 'USD'}
+      canUpdate={can(admin, 'orders.update')}
+      canCancel={can(admin, 'orders.cancel')}
+      filters={filters}
+    />
   );
 }

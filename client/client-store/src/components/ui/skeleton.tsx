@@ -28,7 +28,7 @@ export function ProductCardSkeleton({ portrait = false }: { portrait?: boolean }
 
 export function ProductGridSkeleton({
   count = 12,
-  className = 'grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4',
+  className = 'product-grid grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4',
   portrait = false,
 }: {
   count?: number;

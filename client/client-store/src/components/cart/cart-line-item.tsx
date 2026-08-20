@@ -58,6 +58,23 @@ export function CartLineItem({
       lowStock: false,
       isNewArrival: false,
       isBestSeller: false,
+      /*
+       * The line already knows which variant it is, which is more than a summary
+       * usually carries — so a card rebuilt from a wishlist entry can add the
+       * same one straight back. The quantity bounds are not on the line and are
+       * left at their defaults; the picker reads the real ones from the product.
+       */
+      defaultVariantId: line.variantId,
+      minOrderQuantity: 1,
+      maxOrderQuantity: null,
+      /*
+       * Null even for a line that was sold by weight. The wishlist card would
+       * have to price its sizes from a *rate*, and this line carries the price
+       * of the one size it holds — so a card rebuilt from it would offer four
+       * sizes at the 500gm price. The real config comes back with the product
+       * when the wishlist is rendered from the catalogue.
+       */
+      measure: null,
       keySpec: null,
       hasVariants: false,
     });

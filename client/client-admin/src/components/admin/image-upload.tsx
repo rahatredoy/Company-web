@@ -31,14 +31,27 @@ export function ImageUpload({
   defaultValue = '',
   disabled = false,
   label = 'Upload an image',
+  compact = false,
+  onChange,
 }: {
   name: string;
   purpose: UploadPurpose;
   defaultValue?: string;
   disabled?: boolean;
   label?: string;
+  /** Preview beside the button instead of above it — for a small mark, not a photo. */
+  compact?: boolean;
+  /** For a parent holding the value in state rather than reading `FormData`. */
+  onChange?: (url: string) => void;
 }) {
   const [value, setValue] = React.useState(defaultValue);
+
+  // A parent that owns the value needs to hear every route it can change by:
+  // the upload, the remove button and the pasted address all funnel through here.
+  const commit = (next: string) => {
+    setValue(next);
+    onChange?.(next);
+  };
   const [uploading, setUploading] = React.useState(false);
   const [error, setError] = React.useState('');
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -73,7 +86,7 @@ export function ImageUpload({
         return;
       }
 
-      setValue(payload.data.url);
+      commit(payload.data.url);
     } catch (caught) {
       setError(errorMessage(caught, 'We could not reach the store. Try again.'));
     } finally {
@@ -83,71 +96,91 @@ export function ImageUpload({
     }
   };
 
-  return (
-    <div className="space-y-3">
-      <input type="hidden" name={name} value={value} />
+  const box = compact ? 'size-14' : 'h-32 w-32';
 
-      {value ? (
-        <div className="relative w-fit">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={value}
-            alt=""
-            className="h-32 w-32 rounded-md border bg-muted object-cover"
-            onError={() => setError('That address does not load as an image.')}
-          />
-          {!disabled ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="icon-sm"
-              className="absolute -right-2 -top-2 rounded-full"
-              onClick={() => setValue('')}
-              aria-label="Remove image"
-            >
-              <X aria-hidden />
-            </Button>
-          ) : null}
-        </div>
-      ) : (
-        <div
-          className={cn(
-            'grid h-32 w-32 place-items-center rounded-md border border-dashed text-muted-foreground',
-            disabled && 'opacity-60',
-          )}
-        >
-          <ImagePlus className="size-6" aria-hidden />
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          disabled={disabled || uploading}
-          onChange={onPick}
-        />
+  const preview = value ? (
+    <div className="relative w-fit">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={value}
+        alt=""
+        className={cn(box, 'rounded-md border bg-muted object-cover')}
+        onError={() => setError('That address does not load as an image.')}
+      />
+      {!disabled ? (
         <Button
           type="button"
           variant="secondary"
-          size="sm"
-          disabled={disabled || uploading}
-          onClick={() => inputRef.current?.click()}
+          size="icon-sm"
+          className={cn('absolute rounded-full', compact ? '-top-2.5 -right-2.5 size-6' : '-top-2 -right-2')}
+          onClick={() => commit('')}
+          aria-label="Remove image"
         >
-          {uploading ? <Loader2 className="animate-spin" aria-hidden /> : <Upload aria-hidden />}
-          {uploading ? 'Uploading…' : label}
+          <X aria-hidden />
         </Button>
-        <span className="text-xs text-muted-foreground">or paste an address</span>
-      </div>
+      ) : null}
+    </div>
+  ) : (
+    <div
+      className={cn(
+        box,
+        'grid place-items-center rounded-md border border-dashed text-muted-foreground',
+        disabled && 'opacity-60',
+      )}
+    >
+      <ImagePlus className={compact ? 'size-4' : 'size-6'} aria-hidden />
+    </div>
+  );
+
+  const picker = (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        disabled={disabled || uploading}
+        onChange={onPick}
+      />
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        disabled={disabled || uploading}
+        onClick={() => inputRef.current?.click()}
+      >
+        {uploading ? <Loader2 className="animate-spin" aria-hidden /> : <Upload aria-hidden />}
+        {uploading ? 'Uploading…' : label}
+      </Button>
+    </>
+  );
+
+  return (
+    <div className={cn(compact ? 'space-y-2' : 'space-y-3')}>
+      <input type="hidden" name={name} value={value} />
+
+      {compact ? (
+        <div className="flex items-center gap-3">
+          {preview}
+          {picker}
+        </div>
+      ) : (
+        <>
+          {preview}
+          <div className="flex flex-wrap items-center gap-2">
+            {picker}
+            <span className="text-xs text-muted-foreground">or paste an address</span>
+          </div>
+        </>
+      )}
 
       <Input
         value={value}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => commit(event.target.value)}
         placeholder="https://…"
         disabled={disabled || uploading}
         aria-label="Image address"
+        className={compact ? 'h-9 text-xs' : undefined}
       />
 
       {error ? <p className="text-xs font-medium text-destructive">{error}</p> : null}

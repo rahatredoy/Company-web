@@ -3,11 +3,14 @@ import {
   BadgePercent,
   Boxes,
   ChartNoAxesCombined,
+  CircleHelp,
   FileText,
   Gauge,
   Globe,
   Image,
   LayoutGrid,
+  LayoutTemplate,
+  Mail,
   MessageSquareText,
   Package,
   RotateCcw,
@@ -29,7 +32,7 @@ export interface NavItem {
   icon: LucideIcon;
   /** Hidden unless the signed-in admin holds this. The API enforces it too. */
   permission: Permission;
-  /** Matches child routes as well, e.g. /products/new. */
+  /** Matches child routes as well, e.g. /products/<id>. */
   exact?: boolean;
 }
 
@@ -75,13 +78,16 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: 'Discounts', href: '/discounts', icon: BadgePercent, permission: 'marketing.view' },
       { label: 'Banners', href: '/banners', icon: Image, permission: 'marketing.view' },
       { label: 'Newsletter', href: '/newsletter', icon: MessageSquareText, permission: 'marketing.view' },
+      { label: 'Messages', href: '/messages', icon: Mail, permission: 'marketing.view' },
     ],
   },
   {
     label: 'Website',
     items: [
       { label: 'Design', href: '/website/design', icon: Globe, permission: 'website.view' },
+      { label: 'Homepage', href: '/website/homepage', icon: LayoutTemplate, permission: 'website.view' },
       { label: 'Pages', href: '/website/pages', icon: FileText, permission: 'website.view' },
+      { label: 'FAQs', href: '/website/faqs', icon: CircleHelp, permission: 'website.view' },
     ],
   },
   {

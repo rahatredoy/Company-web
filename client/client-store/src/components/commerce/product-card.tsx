@@ -3,8 +3,10 @@ import Link from 'next/link';
 import type { ProductSummary } from '@/types';
 import { cn } from '@/lib/utils';
 import { PriceDisplay } from './price-display';
-import { RatingStars } from './rating-stars';
 import { WishlistButton } from './wishlist-button';
+import { QuickAdd } from './quick-add';
+import { MeasureAdd } from './measure-add';
+import { minimumNote } from '@/lib/commerce/measure';
 
 export type ProductCardVariant = 'compact' | 'standard' | 'editorial' | 'spec' | 'wide';
 
@@ -120,8 +122,15 @@ export function ProductCard({
           </div>
         ) : null}
 
-        {/* A client island, so the card itself stays a Server Component. */}
+        {/*
+          Two client islands, so the card itself stays a Server Component.
+
+          A product sold by weight takes its picker below the picture instead of
+          the floating button — a size dropdown over the artwork would cover the
+          thing the shopper is identifying it by.
+        */}
         <WishlistButton product={product} />
+        {product.measure ? null : <QuickAdd product={product} locale={locale} />}
       </div>
 
       <div
@@ -141,8 +150,8 @@ export function ProductCard({
           them. A one-line name beside a two-line one used to leave the shorter
           card's price stranded halfway down — every card in a row is stretched
           to the tallest, and the slack landed in the middle. Fixing the text
-          block's height puts every price and every rating on the same line
-          across the row, and takes the wasted height out of the card entirely.
+          block's height puts every price on the same line across the row, and
+          takes the wasted height out of the card entirely.
         */}
         {/*
           Line height is pinned in pixels and the min-height is exactly twice
@@ -167,17 +176,32 @@ export function ProductCard({
           <p className="line-clamp-1 text-xs text-muted">{product.keySpec}</p>
         ) : null}
 
-        <PriceDisplay
-          price={product.price}
-          salePrice={product.salePrice}
-          currency={product.currency}
-          locale={locale}
-          size={isCompact ? 'sm' : 'md'}
-        />
+        {/*
+          The price and what it buys, on one line.
 
-        {product.ratingCount > 0 && !isEditorial ? (
-          <RatingStars rating={product.ratingAverage} count={product.ratingCount} size={isCompact ? 'xs' : 'sm'} />
-        ) : null}
+          The rate is *part of the price* for a product sold by weight — "৳40"
+          beside "Per 1kg" is a different offer from "৳40" alone — so it sits
+          with the number rather than under the name, and the shop's floor sits
+          with it because it is the other half of what the price means.
+        */}
+        <div className="flex flex-wrap items-baseline gap-x-1.5">
+          <PriceDisplay
+            price={product.price}
+            salePrice={product.salePrice}
+            currency={product.currency}
+            locale={locale}
+            size={isCompact ? 'sm' : 'md'}
+          />
+
+          {product.measure ? (
+            <span className="text-[11px] text-subtle">
+              {product.measure.pricingLabel}
+              {minimumNote(product.measure) ? ' (' + minimumNote(product.measure) + ')' : ''}
+            </span>
+          ) : null}
+        </div>
+
+        {product.measure && product.inStock ? <MeasureAdd product={product} className="mt-1" /> : null}
 
         {isSpec && product.inStock ? (
           <p className={cn('text-xs font-medium', product.lowStock ? 'text-warning' : 'text-success')}>

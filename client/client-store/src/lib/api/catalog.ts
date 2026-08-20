@@ -1,6 +1,12 @@
 import 'server-only';
 import { cache } from 'react';
-import type { Brand, Category, HomepageSection, ProductSummary } from '@/types';
+import type {
+  Brand,
+  Category,
+  CategoryShowcaseGroup,
+  HomepageSection,
+  ProductSummary,
+} from '@/types';
 import { storeCall } from '@/lib/tenant';
 import { apiFetch } from './client';
 
@@ -36,6 +42,40 @@ export const getCategories = cache(async (): Promise<Category[]> => {
 export const getBrands = cache(async (): Promise<Brand[]> => {
   return apiFetch<Brand[]>('/api/v1/storefront/brands', await publicOptions(['brands'], 300));
 });
+
+/**
+ * Which products head each aisle of the "shop by category" block.
+ *
+ * One call for the whole block, however many departments it draws. Asking the
+ * listing endpoint per aisle instead would have been a dozen requests, each one
+ * making the API count the aisle and build a filter panel nothing renders.
+ *
+ * Scalar arguments rather than one options object, because `cache` keys on
+ * argument *identity*: an object literal is a new reference on every call, so two
+ * sections asking the same question would each pay for it.
+ *
+ * Tagged with both `categories` and `products` — the answer moves when either
+ * the tree or the catalogue does, and it holds ids rather than prices, so its
+ * window is the homepage's rather than a listing's.
+ */
+export const getCategoryShowcase = cache(
+  async (
+    /** The categories the block names, comma-separated; empty for the store's own order. */
+    ids: string,
+    /** Which department in that order this block starts at — see `offset` on the API. */
+    offset: number,
+    categories: number,
+    rows: number,
+    perRow: number,
+  ): Promise<CategoryShowcaseGroup[]> => {
+    return apiFetch<CategoryShowcaseGroup[]>('/api/v1/storefront/categories/showcase', {
+      ...(await publicOptions(['categories', 'products'])),
+      // An empty string is dropped by `buildUrl`, so the API sees no `ids` at all
+      // rather than an empty list it would have to decide the meaning of.
+      query: { ids, offset, categories, rows, perRow },
+    });
+  },
+);
 
 /**
  * Products already resolved during **this** render, by id.

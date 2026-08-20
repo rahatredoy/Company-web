@@ -159,6 +159,8 @@ export interface OrderLineView {
   sku: string | null;
   imageUrl: string | null;
   quantity: number;
+  /** "500gm" for a line sold by measure; null for an ordinary one. */
+  measureLabel: string | null;
   unitPrice: string;
   lineTotal: string;
   productSlug: string | null;
@@ -229,6 +231,7 @@ export async function loadOrderDetail(db: TenantDb, orderId: string): Promise<Or
         sku: orderItems.sku,
         imageUrl: orderItems.imageUrl,
         quantity: orderItems.quantity,
+        measureLabel: orderItems.measureLabel,
         unitPrice: orderItems.unitPrice,
         unitSalePrice: orderItems.unitSalePrice,
         lineTotal: orderItems.lineTotal,
@@ -290,6 +293,13 @@ export async function loadOrderDetail(db: TenantDb, orderId: string): Promise<Or
       sku: line.sku,
       imageUrl: line.imageUrl,
       quantity: line.quantity,
+      /*
+       * What was weighed out, on a receipt that has to keep saying so: the
+       * product's option list is editable and this line is not. The unit price
+       * beside it is the price of one of *these*, not of the kilo the shelf
+       * advertises, which is why both travel together.
+       */
+      measureLabel: line.measureLabel,
       // The price actually charged, not the list price — a receipt that shows
       // what something normally costs is not a receipt.
       unitPrice: line.unitSalePrice ?? line.unitPrice,

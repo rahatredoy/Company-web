@@ -2,15 +2,37 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, ExternalLink } from 'lucide-react';
+import {
+  Baby,
+  Book,
+  Car,
+  Check,
+  Dumbbell,
+  ExternalLink,
+  Flower2,
+  Gamepad2,
+  HeartPulse,
+  Laptop,
+  Music,
+  PawPrint,
+  Printer,
+  Shirt,
+  ShoppingBasket,
+  Sofa,
+  Sparkles,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react';
 import { api, errorMessage } from '@/lib/api';
 import { titleCase } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Alert } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field } from '@/components/ui/field';
 import { ImageUpload } from '@/components/admin/image-upload';
+import { SELECT_CLASS } from './category-tree';
 import { Input, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
@@ -25,8 +47,25 @@ export interface DesignPayload {
     messages: { text: string; linkUrl: string | null; linkLabel: string | null }[];
   };
   tagline: string | null;
+  /**
+   * Category slug → glyph key. Slug-keyed because that is how the storefront
+   * looks it up, which is also why an entry survives a rename only as far as
+   * the slug does — moving a category's slug leaves its glyph behind.
+   */
+  categoryIcons: Record<string, string>;
+  /** The closed set of glyphs the storefront knows how to draw. */
+  categoryIconKeys: string[];
   templates: string[];
   themes: string[];
+}
+
+/** One top-level category, offered a glyph by the card below. */
+export interface CategoryChoice {
+  id: string;
+  name: string;
+  slug: string;
+  /** False for a category the storefront's rail will not list at all. */
+  inMenu: boolean;
 }
 
 /**
@@ -48,6 +87,36 @@ const THEME_SWATCH: Record<string, string> = {
   olive_premium: '#6b7a2f',
 };
 
+/**
+ * The same sixteen glyphs `client-store`'s `category-sidebar.tsx` draws, copied
+ * rather than shared because the two are separate deployments — the same reason
+ * `THEME_SWATCH` above is copied.
+ *
+ * The picker is filled from the API's `categoryIconKeys`, never from this map,
+ * so a glyph added on the storefront side and not here still saves and still
+ * draws in the shop; it only loses its preview. An unmapped key therefore
+ * previews nothing rather than something wrong — a picker showing a t-shirt
+ * beside Automotive would be worse than one showing no icon at all.
+ */
+const CATEGORY_GLYPHS: Record<string, LucideIcon> = {
+  electronics: Laptop,
+  fashion: Shirt,
+  home: Sofa,
+  beauty: Sparkles,
+  sports: Dumbbell,
+  toys: Gamepad2,
+  tools: Wrench,
+  automotive: Car,
+  books: Book,
+  health: HeartPulse,
+  pets: PawPrint,
+  garden: Flower2,
+  grocery: ShoppingBasket,
+  music: Music,
+  baby: Baby,
+  office: Printer,
+};
+
 /** How many announcement lines the strip will rotate through. */
 const ANNOUNCEMENT_SLOTS = [0, 1, 2];
 
@@ -66,16 +135,26 @@ const ANNOUNCEMENT_SLOTS = [0, 1, 2];
  */
 export function DesignPicker({
   design,
+  categories,
   storefrontUrl,
   canManage,
 }: {
   design: DesignPayload;
+  /** `null` when this admin may not read categories — not the same as none. */
+  categories: CategoryChoice[] | null;
   storefrontUrl: string;
   canManage: boolean;
 }) {
   const router = useRouter();
   const [template, setTemplate] = React.useState(design.templateKey);
   const [theme, setTheme] = React.useState(design.colorThemeKey);
+  /*
+   * Seeded from what is stored rather than from the categories on screen, so a
+   * save carries the entries this card is not showing as well. A category
+   * hidden from the menu, or one whose slug has since moved, keeps its glyph
+   * instead of being pruned by whoever next saves the design.
+   */
+  const [icons, setIcons] = React.useState<Record<string, string>>(design.categoryIcons ?? {});
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
 
@@ -106,6 +185,7 @@ export function DesignPicker({
         faviconUrl: text('faviconUrl'),
         tagline: text('tagline'),
         announcement: { enabled: data.get('announcementEnabled') === 'on', messages },
+        categoryIcons: icons,
       });
 
       toast.success('Your storefront has been updated.');
@@ -265,6 +345,84 @@ export function DesignPicker({
               </Field>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Category icons</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            The small mark beside a category in your storefront&rsquo;s category list. Only
+            top-level categories carry one. Leave a category on <em>No icon</em> and it
+            shows its name alone.
+          </p>
+
+          {categories === null ? (
+            <Alert variant="warning">
+              Your account cannot read categories, so they could not be listed here. Any
+              icons already chosen are kept.
+            </Alert>
+          ) : categories.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              You have no top-level categories yet. Add one under Categories and it will
+              appear here.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {categories.map((category) => {
+                const chosen = icons[category.slug] ?? '';
+                const Glyph = chosen ? (CATEGORY_GLYPHS[chosen] ?? null) : null;
+
+                return (
+                  <li
+                    key={category.id}
+                    className="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,15rem)]"
+                  >
+                    <span className="flex min-w-0 items-center gap-2.5 text-sm">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+                        {Glyph ? (
+                          <Glyph className="size-4 text-muted-foreground" aria-hidden />
+                        ) : (
+                          <span className="text-xs text-muted-foreground" aria-hidden>
+                            &mdash;
+                          </span>
+                        )}
+                      </span>
+                      <span className="min-w-0 truncate">{category.name}</span>
+                      {category.inMenu ? null : <Badge variant="outline">Not in menu</Badge>}
+                    </span>
+
+                    <select
+                      aria-label={`Icon for ${category.name}`}
+                      value={chosen}
+                      disabled={!canManage}
+                      onChange={(event) => {
+                        const key = event.target.value;
+                        setIcons((current) => {
+                          const next = { ...current };
+                          // An empty choice drops the entry: storing '' would
+                          // fail the API's enum and reject the whole save.
+                          if (key) next[category.slug] = key;
+                          else delete next[category.slug];
+                          return next;
+                        });
+                      }}
+                      className={SELECT_CLASS}
+                    >
+                      <option value="">No icon</option>
+                      {design.categoryIconKeys.map((key) => (
+                        <option key={key} value={key}>
+                          {titleCase(key)}
+                        </option>
+                      ))}
+                    </select>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </CardContent>
       </Card>
 

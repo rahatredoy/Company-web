@@ -2,9 +2,13 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, MessageSquare, Star, Trash2, X } from 'lucide-react';
+import { Check, Eye, MessageSquare, Star, Trash2, X } from 'lucide-react';
 import type { ReviewRow } from '@/lib/types';
-import { api, errorMessage } from '@/lib/api';
+import { api, errorMessage, type ListMeta } from '@/lib/api';
+import { useInfiniteList } from '@/hooks/use-infinite-list';
+import { useViewTarget } from '@/hooks/use-detail';
+import { InfiniteStack } from './infinite-table';
+import { ReviewDetail } from './review-detail';
 import { formatDate } from '@/lib/format';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -45,11 +49,32 @@ function Stars({ rating }: { rating: number }) {
  * rejecting both recompute the product's rating from the approved rows, which is
  * why a rejection changes the star average as well as the list.
  */
-export function ReviewModeration({ rows, canManage }: { rows: ReviewRow[]; canManage: boolean }) {
+export function ReviewModeration({
+  initial,
+  query,
+  canManage,
+  filtered,
+  storefrontBase,
+}: {
+  /** The first batch, rendered on the server. The rest arrive by cursor. */
+  initial: { rows: ReviewRow[]; meta: ListMeta };
+  query: Record<string, string | undefined>;
+  canManage: boolean;
+  filtered: boolean;
+  /** Null when the store's public address is not known to this deployment. */
+  storefrontBase: string | null;
+}) {
   const router = useRouter();
+  const list = useInfiniteList<ReviewRow>({ path: '/api/v1/admin/reviews', query, initial });
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState('');
   const [replying, setReplying] = React.useState<ReviewRow | null>(null);
+  /*
+   * The read-only panel. The card here already shows the body, so this is for
+   * the twelve columns it does not: the photographs, the moderation trail, the
+   * order that made it a verified purchase, and who wrote it.
+   */
+  const viewing = useViewTarget<ReviewRow>();
   const [saving, setSaving] = React.useState(false);
 
   const act = async (review: ReviewRow, run: () => Promise<unknown>, message: string) => {
@@ -90,94 +115,121 @@ export function ReviewModeration({ rows, canManage }: { rows: ReviewRow[]; canMa
     <>
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
-      <ul className="space-y-4">
-        {rows.map((review) => (
-          <li key={review.id} className="rounded-lg border bg-card p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Stars rating={review.rating} />
-                  <span className="font-medium">{review.customerName}</span>
-                  {review.verifiedPurchase ? (
-                    <StatusBadge status="verified" label="Verified purchase" />
-                  ) : null}
-                  <StatusBadge status={review.status} />
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {review.productName} · {formatDate(review.createdAt)}
-                </p>
+      <InfiniteStack
+        rows={list.rows}
+        total={list.total}
+        noun="review"
+        hasMore={list.hasMore}
+        loading={list.loading}
+        error={list.error}
+        onLoadMore={list.loadMore}
+        onRetry={list.retry}
+        estimateRowHeight={200}
+        gap={16}
+        empty={filtered ? 'Nothing matches those filters.' : 'No reviews yet.'}
+        render={(review) => (
+          <div className="rounded-lg border bg-card p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Stars rating={review.rating} />
+                <span className="font-medium">{review.customerName}</span>
+                {review.verifiedPurchase ? (
+                  <StatusBadge status="verified" label="Verified purchase" />
+                ) : null}
+                <StatusBadge status={review.status} />
               </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {review.productName} · {formatDate(review.createdAt)}
+              </p>
             </div>
 
-            {review.body ? <p className="mt-3 text-sm leading-relaxed">{review.body}</p> : null}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`View the review by ${review.customerName}`}
+              onClick={() => viewing.view(review)}
+            >
+              <Eye />
+            </Button>
+          </div>
 
-            {review.adminReply ? (
-              <p className="mt-3 rounded-md bg-muted p-3 text-sm">
-                <span className="font-medium">Your reply: </span>
-                {review.adminReply}
-              </p>
-            ) : null}
+          {review.body ? <p className="mt-3 text-sm leading-relaxed">{review.body}</p> : null}
 
-            {canManage ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {review.status !== 'approved' ? (
-                  <Button
-                    size="sm"
-                    disabled={busy !== null}
-                    loading={busy === review.id}
-                    onClick={() =>
-                      act(
-                        review,
-                        () => api.patch(`/api/v1/admin/reviews/${review.id}`, { status: 'approved' }),
-                        'Review published.',
-                      )
-                    }
-                  >
-                    <Check aria-hidden /> Approve
-                  </Button>
-                ) : null}
+          {review.adminReply ? (
+            <p className="mt-3 rounded-md bg-muted p-3 text-sm">
+              <span className="font-medium">Your reply: </span>
+              {review.adminReply}
+            </p>
+          ) : null}
 
-                {review.status !== 'rejected' ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy !== null}
-                    onClick={() =>
-                      act(
-                        review,
-                        () => api.patch(`/api/v1/admin/reviews/${review.id}`, { status: 'rejected' }),
-                        'Review rejected and hidden.',
-                      )
-                    }
-                  >
-                    <X aria-hidden /> Reject
-                  </Button>
-                ) : null}
-
-                <Button size="sm" variant="ghost" onClick={() => setReplying(review)}>
-                  <MessageSquare aria-hidden /> {review.adminReply ? 'Edit reply' : 'Reply'}
-                </Button>
-
+          {canManage ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {review.status !== 'approved' ? (
                 <Button
                   size="sm"
-                  variant="ghost"
                   disabled={busy !== null}
-                  onClick={() => {
-                    if (!window.confirm('Delete this review permanently?')) return;
-                    void act(
+                  loading={busy === review.id}
+                  onClick={() =>
+                    act(
                       review,
-                      () => api.delete(`/api/v1/admin/reviews/${review.id}`),
-                      'Review deleted.',
-                    );
-                  }}
+                      () => api.patch(`/api/v1/admin/reviews/${review.id}`, { status: 'approved' }),
+                      'Review published.',
+                    )
+                  }
                 >
-                  <Trash2 aria-hidden /> Delete
+                  <Check aria-hidden /> Approve
                 </Button>
-              </div>
-            ) : null}
-          </li>
-        ))}
-      </ul>
+              ) : null}
+
+              {review.status !== 'rejected' ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    act(
+                      review,
+                      () => api.patch(`/api/v1/admin/reviews/${review.id}`, { status: 'rejected' }),
+                      'Review rejected and hidden.',
+                    )
+                  }
+                >
+                  <X aria-hidden /> Reject
+                </Button>
+              ) : null}
+
+              <Button size="sm" variant="ghost" onClick={() => setReplying(review)}>
+                <MessageSquare aria-hidden /> {review.adminReply ? 'Edit reply' : 'Reply'}
+              </Button>
+
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy !== null}
+                onClick={() => {
+                  if (!window.confirm('Delete this review permanently?')) return;
+                  void act(
+                    review,
+                    () => api.delete(`/api/v1/admin/reviews/${review.id}`),
+                    'Review deleted.',
+                  );
+                }}
+              >
+                <Trash2 aria-hidden /> Delete
+              </Button>
+            </div>
+          ) : null}
+          </div>
+        )}
+      />
+
+      <ReviewDetail
+        row={viewing.row}
+        open={viewing.open}
+        onOpenChange={viewing.onOpenChange}
+        storefrontBase={storefrontBase}
+      />
 
       <Dialog open={replying !== null} onOpenChange={(open) => !open && setReplying(null)}>
         <DialogContent>

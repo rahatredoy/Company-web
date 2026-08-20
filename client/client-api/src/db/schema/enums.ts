@@ -37,6 +37,14 @@ export const securityEventType = pgEnum('security_event_type', [
 // --- catalog ---------------------------------------------------------------------
 export const productStatus = pgEnum('product_status', ['draft', 'active', 'inactive']);
 export const productType = pgEnum('product_type', ['simple', 'variable']);
+/**
+ * Whether a quantity is a count of things or an amount of something.
+ *
+ * `unit` is a product sold one at a time — a box of eggs, a shirt. `measure`
+ * is weighed or poured: the price is a rate, the shopper picks how much, and
+ * stock is counted in the small base unit. See `lib/measure.ts`.
+ */
+export const productSellBy = pgEnum('product_sell_by', ['unit', 'measure']);
 export const publishStatus = pgEnum('publish_status', ['draft', 'published']);
 export const mediaType = pgEnum('media_type', ['image', 'video']);
 

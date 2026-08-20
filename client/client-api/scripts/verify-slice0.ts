@@ -10,7 +10,7 @@
 import { request as httpRequest } from 'node:http';
 import { config } from '../src/config/index';
 import { openTenantPoolForSlug } from '../src/db/tenant-manager';
-import { tenantCacheKey } from '../src/lib/company-client';
+import { publishTenantInvalidation, tenantCacheKey } from '../src/lib/company-client';
 import { closeRedis, redis } from '../src/lib/redis';
 
 function arg(name: string): string | undefined {
@@ -20,13 +20,18 @@ function arg(name: string): string | undefined {
 
 const BASE = `http://localhost:${config.api.port}/api/v1/admin`;
 /**
- * The fixture store, deliberately **not** whatever `DEV_STORE_SLUG` happens to
- * point at: the owner credential below belongs to this one store, so following
- * that dev convenience knob would run every check against a database where it
- * is not the password. Pass `--slug` with `--email`/`--password` to verify a
- * different store.
+ * The store to verify. This used to be pinned to the `abc-fashion` fixture
+ * because the owner credential below belonged to that one store, and following
+ * `DEV_STORE_SLUG` would have run every check against a database where it is
+ * not the password. That fixture no longer exists, so the pin named nothing and
+ * the script failed before its first check.
+ *
+ * The credential is still store-specific, so it does **not** follow the slug:
+ * pass `--email`/`--password` for whatever store `--slug` (or `DEV_STORE_SLUG`)
+ * resolves to. The defaults below are the old fixture's and are kept only so an
+ * `abc-fashion` rebuilt by `create-test-clients.ts` still runs bare.
  */
-const SLUG = arg('slug') ?? 'abc-fashion';
+const SLUG = arg('slug') ?? config.devStoreSlug ?? 'abc-fashion';
 const OWNER = arg('email') ?? 'owner@abcfashion.com';
 const PASSWORD = arg('password') ?? 'OwnerPass2026';
 const STAFF = 'staff.tester@abcfashion.com';
@@ -139,6 +144,28 @@ async function clearAuthRateLimits(): Promise<void> {
     const keys = await redis.keys(`rl:${scope}:*`).catch(() => []);
     if (keys.length > 0) await redis.del(...keys).catch(() => undefined);
   }
+}
+
+/**
+ * Retries a call until it reflects a change that propagates asynchronously.
+ *
+ * A tenant-status change reaches the API over Redis pub/sub, so there is a real
+ * gap — a network round trip, no more — between writing it and the server acting
+ * on it. Polling briefly is not the same as sleeping until the check passes: the
+ * assertion is unchanged and still fails if the state never arrives, and it
+ * returns the moment it does rather than always paying a fixed delay.
+ */
+async function settle<T extends { status: number; body: any }>(
+  attempt: () => Promise<T>,
+  matches: (result: T) => boolean,
+  tries = 20,
+): Promise<T> {
+  let last = await attempt();
+  for (let i = 1; i < tries && !matches(last); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    last = await attempt();
+  }
+  return last;
 }
 
 async function main(): Promise<void> {
@@ -371,7 +398,13 @@ async function main(): Promise<void> {
         ['store not ready', { storeStatus: 'creating' }, 'STORE_NOT_READY'],
       ] as const) {
         await redis.setex(cacheKey, 60, JSON.stringify({ ...record, ...patch }));
-        const blocked = await call('/auth/session');
+        // The API holds the record in process for a few seconds as well, so the
+        // write has to be announced or the server keeps serving the copy it
+        // already has and this checks nothing. Same channel the control plane
+        // publishes on — and, like a real suspension, it arrives a moment later
+        // rather than instantly, which is what `settle` waits for.
+        await publishTenantInvalidation([cacheKey]);
+        const blocked = await settle(() => call('/auth/session'), (r) => r.body?.code === expected);
         check(
           `a ${label} store is refused with ${expected}`,
           blocked.status === 403 && blocked.body?.code === expected,
@@ -380,7 +413,8 @@ async function main(): Promise<void> {
       }
 
       await redis.del(cacheKey);
-      const restored = await call('/auth/session');
+      await publishTenantInvalidation([cacheKey]);
+      const restored = await settle(() => call('/auth/session'), (r) => r.status === 200);
       check('the store works again once the block clears', restored.status === 200, restored.body);
     }
   }

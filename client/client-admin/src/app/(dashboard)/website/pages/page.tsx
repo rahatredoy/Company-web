@@ -3,25 +3,14 @@ import Link from 'next/link';
 import { FileText, Plus } from 'lucide-react';
 import type { PageRow, SessionResponse } from '@/lib/types';
 import { can } from '@/lib/types';
-import { serverGet, serverGetPaginated } from '@/lib/server-api';
-import { formatRelative } from '@/lib/format';
+import { currentStoreSlug, serverGet, serverGetListed } from '@/lib/server-api';
+import { storefrontUrl } from '@/lib/env';
+import { BATCH_SIZE } from '@/lib/list';
 import { EmptyState } from '@/components/admin/empty-state';
 import { PageHeader } from '@/components/admin/page-header';
-import { Pagination } from '@/components/admin/pagination';
+import { PageList } from '@/components/admin/page-list';
 import { TableFilters } from '@/components/admin/table-filters';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { StatusBadge } from '@/components/ui/status-badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableEmpty,
-  TableHead,
-  TableHeader,
-  TableRow,
-  TableWrapper,
-} from '@/components/ui/table';
 
 export const metadata: Metadata = { title: 'Pages' };
 export const dynamic = 'force-dynamic';
@@ -46,11 +35,15 @@ export default async function PagesListPage({
   const session = await serverGet<SessionResponse>('/api/v1/admin/auth/session');
   const canManage = session.authenticated && can(session.admin, 'website.manage');
 
-  const { data, meta } = await serverGetPaginated<PageRow>('/api/v1/admin/website/pages', {
-    page: single('page') ?? 1,
-    search: single('search'),
-    status: single('status'),
-  });
+  // One object, so the first batch here and every batch the browser asks for
+  // afterwards read the same filtered list. No cursor on this one, which is what
+  // makes the API count it.
+  const query = { search: single('search'), status: single('status') };
+  const [slug, first] = await Promise.all([
+    // For the view panel's link out to the published page.
+    currentStoreSlug(),
+    serverGetListed<PageRow>('/api/v1/admin/website/pages', { ...query, pageSize: BATCH_SIZE }),
+  ]);
 
   const filtered = Boolean(single('search') || (single('status') && single('status') !== 'all'));
 
@@ -72,55 +65,15 @@ export default async function PagesListPage({
 
       <TableFilters searchPlaceholder="Page title" statusOptions={STATUS_OPTIONS} />
 
-      {data.length === 0 && !filtered ? (
+      {first.data.length === 0 && !filtered ? (
         <EmptyState icon={FileText} title="No pages yet" description="Add one to link it from your footer." />
       ) : (
-        <>
-          <TableWrapper>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Address</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>In footer</TableHead>
-                  <TableHead>Updated</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 ? (
-                  <TableEmpty colSpan={5}>No page matches those filters.</TableEmpty>
-                ) : (
-                  data.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>
-                        <Link href={`/website/pages/${row.id}`} className="font-medium hover:underline">
-                          {row.title}
-                        </Link>
-                        {row.systemKey ? (
-                          <Badge variant="info" className="ml-2">
-                            Policy
-                          </Badge>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">/page/{row.slug}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={row.status} />
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {row.showInFooter ? 'Yes' : '—'}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatRelative(row.updatedAt)}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableWrapper>
-          <Pagination {...meta} />
-        </>
+        <PageList
+          initial={{ rows: first.data, meta: first.meta }}
+          query={query}
+          filtered={filtered}
+          storefrontBase={slug ? storefrontUrl(slug) : null}
+        />
       )}
     </div>
   );

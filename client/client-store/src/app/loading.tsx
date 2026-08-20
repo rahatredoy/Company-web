@@ -15,7 +15,7 @@ export default function Loading() {
       <div className="grid grid-cols-4 gap-4 sm:grid-cols-8">
         {Array.from({ length: 8 }, (_, index) => (
           <div key={index} className="flex flex-col items-center gap-2">
-            <Skeleton className="size-16 rounded-full sm:size-20" />
+            <Skeleton className="size-16 rounded-(--radius-card) sm:size-20" />
             <Skeleton className="h-3 w-12" />
           </div>
         ))}
@@ -27,7 +27,7 @@ export default function Loading() {
         <Skeleton className="mx-auto h-7 w-48" />
         <ProductGridSkeleton
           count={12}
-          className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+          className="product-grid grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
         />
       </div>
     </div>

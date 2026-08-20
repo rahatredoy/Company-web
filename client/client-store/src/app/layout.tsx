@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Geist, Playfair_Display, Space_Grotesk } from 'next/font/google';
-import { DESKTOP_LAYOUT_WIDTH, publicConfig } from '@/config';
+import { DESKTOP_LAYOUT_WIDTH, PHONE_SCREEN_MAX_WIDTH, publicConfig } from '@/config';
 import { getStoreConfig } from '@/lib/api/store';
 import { getTemplate } from '@/templates/registry';
 import { resolveTheme } from '@/themes';
@@ -131,6 +131,35 @@ export async function generateViewport(): Promise<Viewport> {
   };
 }
 
+/**
+ * Marks the document as being read on a phone-sized screen.
+ *
+ * Only `desktop` mobile mode renders it, and only that mode needs it: the layout
+ * viewport there is 1280px on a phone as well as on a monitor, so every width
+ * media query answers the same on both and CSS on its own cannot tell them
+ * apart. `screen` describes the device rather than the viewport, so it can — and
+ * the short edge is what is read, so turning the phone does not change the
+ * answer.
+ *
+ * Inline and synchronous in `<head>`, for the reason `ThemeStyle` is: it runs
+ * before the first paint, so a product rail is a rail in the first frame instead
+ * of a six-across grid that reflows once React arrives. That also rules out an
+ * effect, and is why the attribute goes on `documentElement` — outside the tree
+ * React hydrates, so setting it can never be a hydration mismatch.
+ *
+ * With JavaScript off nothing is marked and the phone keeps the plain desktop
+ * grid, which is exactly what this mode did before the rails existed.
+ */
+function PhoneScreenFlag() {
+  return (
+    <script
+      dangerouslySetInnerHTML={{
+        __html: `try{if(Math.min(screen.width,screen.height)<=${PHONE_SCREEN_MAX_WIDTH})document.documentElement.setAttribute('data-phone-layout','')}catch(e){}`,
+      }}
+    />
+  );
+}
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const config = await getStoreConfig();
   const template = await getTemplate(config.design.templateKey);
@@ -141,6 +170,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <head>
         {/* Painted before any content, so the first frame is already on-brand. */}
         <ThemeStyle themeKey={config.design.colorThemeKey} />
+        {publicConfig.mobileLayout === 'desktop' ? <PhoneScreenFlag /> : null}
       </head>
       <body className={`${FONT_VARIABLES} ${template.bodyClassName} antialiased`}>
         <StorefrontProviders>

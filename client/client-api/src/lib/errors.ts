@@ -2,6 +2,8 @@ export const ERROR_CODES = {
   // --- generic ---------------------------------------------------------------
   BAD_REQUEST: 'BAD_REQUEST',
   VALIDATION_FAILED: 'VALIDATION_FAILED',
+  /** A keyset cursor that did not decode — tampered with, or from an older build. */
+  INVALID_CURSOR: 'INVALID_CURSOR',
   UNAUTHORIZED: 'UNAUTHORIZED',
   FORBIDDEN: 'FORBIDDEN',
   NOT_FOUND: 'NOT_FOUND',

@@ -127,6 +127,19 @@ async function call(
 }
 
 /**
+ * Several keywords, the way loremflickr wants them: comma-separated.
+ *
+ * A space encoded as `%20` is refused with a **403** — not a placeholder, not a
+ * 404, a hard refusal that Next's image optimiser reports as `upstream image
+ * response failed`, once per picture, for every product on the page. The
+ * separator is the entire difference: `/600/600/dslr,camera` is answered,
+ * `/600/600/dslr%20camera` is not. Each word is still encoded on its own, so a
+ * keyword carrying anything else stays a legal path segment.
+ */
+const keywords = (keyword: string) =>
+  keyword.trim().split(/\s+/).map(encodeURIComponent).join(',');
+
+/**
  * A photograph of roughly the right thing.
  *
  * The keyword is what makes the demo readable — a random 600×600 under
@@ -135,10 +148,10 @@ async function call(
  * its photograph between runs.
  */
 const photo = (keyword: string, seed: number, size = 600) =>
-  `https://loremflickr.com/${size}/${size}/${encodeURIComponent(keyword)}?lock=${seed}`;
+  `https://loremflickr.com/${size}/${size}/${keywords(keyword)}?lock=${seed}`;
 
 const wide = (keyword: string, seed: number) =>
-  `https://loremflickr.com/1200/675/${encodeURIComponent(keyword)}?lock=${seed}`;
+  `https://loremflickr.com/1200/675/${keywords(keyword)}?lock=${seed}`;
 
 // ------------------------------------------------------------------ data ----
 
@@ -413,6 +426,42 @@ const BANNERS = [
     position: 'home_promo',
     isActive: true,
     sortOrder: 30,
+  },
+  // Six on `home_promo` against three slots, deliberately: the storefront
+  // rotates a placement that holds more than fits, and a seed that stops at
+  // exactly three would never show that it does.
+  {
+    title: 'Fitness Season',
+    subtitle: 'Training gear, trackers and recovery',
+    imageUrl: wide('gym equipment', 35),
+    mobileImageUrl: photo('gym equipment', 35, 800),
+    linkUrl: '/category/sports-outdoors',
+    buttonLabel: 'Get Moving',
+    position: 'home_promo',
+    isActive: true,
+    sortOrder: 40,
+  },
+  {
+    title: 'Style Edit',
+    subtitle: 'This season in clothing and accessories',
+    imageUrl: wide('fashion clothing', 36),
+    mobileImageUrl: photo('fashion clothing', 36, 800),
+    linkUrl: '/category/fashion',
+    buttonLabel: 'Shop Fashion',
+    position: 'home_promo',
+    isActive: true,
+    sortOrder: 50,
+  },
+  {
+    title: 'Toys & Play',
+    subtitle: 'Games and gifts for every age',
+    imageUrl: wide('toys children', 37),
+    mobileImageUrl: photo('toys children', 37, 800),
+    linkUrl: '/category/toys-games',
+    buttonLabel: 'Shop Toys',
+    position: 'home_promo',
+    isActive: true,
+    sortOrder: 60,
   },
 ];
 
@@ -3093,11 +3142,22 @@ async function main(): Promise<void> {
     path: string,
   ): Promise<Array<{ id: string; name?: string; code?: string; title?: string }>> {
     const rows: Array<{ id: string; name?: string; code?: string; title?: string }> = [];
-    for (let page = 1; ; page += 1) {
-      const list = await call(`${path}?page=${page}&pageSize=100`);
+    let cursor: string | undefined;
+
+    for (;;) {
+      const query = new URLSearchParams({ pageSize: '100' });
+      if (cursor) query.set('cursor', cursor);
+
+      const list = await call(`${path}?${query.toString()}`);
       const batch = (list.body?.data ?? []) as typeof rows;
       rows.push(...batch);
-      if (batch.length === 0 || page >= Number(list.body?.meta?.totalPages ?? 1)) return rows;
+
+      // Followed by cursor rather than by page number, because these lists no
+      // longer report a page count — and because a keyset walk cannot skip a row
+      // the way a numbered one can when the list shifts underneath it.
+      const meta = list.body?.meta as { nextCursor?: string | null; hasMore?: boolean } | undefined;
+      if (batch.length === 0 || !meta?.hasMore || !meta.nextCursor) return rows;
+      cursor = meta.nextCursor;
     }
   }
 
@@ -3599,20 +3659,6 @@ async function main(): Promise<void> {
     await call(`/website/homepage/${section.id}`, { method: 'DELETE' });
   }
 
-  const circleOrder = ['electronics', 'fashion', 'home', 'beauty', 'sports', 'toys', 'automotive', 'tools']
-    .map((key) => categoryIds.get(key))
-    .filter((id): id is string => Boolean(id));
-
-  /** Six departments as picture cards, a different selection from the circles. */
-  const featuredCategoryIds = ['electronics', 'fashion', 'home', 'sports', 'beauty', 'garden']
-    .map((key) => categoryIds.get(key))
-    .filter((id): id is string => Boolean(id));
-
-  /** One department's aisles — the subcategory block. */
-  const electronicsChildIds = ['smartphones', 'laptops', 'audio', 'cameras', 'tv', 'printers']
-    .map((key) => categoryIds.get(key))
-    .filter((id): id is string => Boolean(id));
-
   const SECTIONS: Array<Record<string, unknown>> = [
     {
       type: 'hero',
@@ -3651,13 +3697,24 @@ async function main(): Promise<void> {
       },
     },
     {
+      /*
+       * The **only** category block on the page, deliberately.
+       *
+       * `category_grid` renders as the same circular rail on this template, so a
+       * second one further down is the top rail drawn twice — which is what the
+       * page had, and what a visitor reads as "did I scroll back up?". A shop
+       * that wants a grid of one department's aisles can add one from the
+       * homepage builder; it should not be the seeded default.
+       */
       type: 'category_circle',
       title: null,
       subtitle: null,
       sortOrder: 20,
-      // Eight named, seven drawn — the eighth is what turns the last tile into
-      // "More" rather than leaving the rail looking complete when it is not.
-      config: { categoryIds: circleOrder, limit: 7 },
+      // Neither a list nor a limit: the rail scrolls and carries no "More" tile,
+      // so a cap would hide departments with nothing left to reach them by, and
+      // a frozen id list would hide whatever the owner adds after this ran.
+      // Empty means every top-level category, in the store's own order.
+      config: {},
     },
     {
       type: 'benefits',
@@ -3719,6 +3776,36 @@ async function main(): Promise<void> {
             imageUrl: wide('summer shopping', 23),
             tone: 'mint',
           },
+          // Six, not three: the three panels are a window onto the list and it
+          // rotates, so a store running more campaigns than it has room for is
+          // the case worth seeding rather than the one that happens to fit.
+          {
+            id: 'top-rated',
+            title: 'Top Rated',
+            subtitle: 'Four stars and up, chosen by shoppers',
+            buttonLabel: 'Shop Now',
+            linkUrl: '/shop?sort=rating',
+            imageUrl: photo('headphones', 24, 500),
+            tone: 'peach',
+          },
+          {
+            id: 'under-50',
+            title: 'Under $50',
+            subtitle: 'Everyday picks that cost less',
+            buttonLabel: 'Shop Now',
+            linkUrl: '/shop?maxPrice=50',
+            imageUrl: photo('sneakers', 25, 500),
+            tone: 'sand',
+          },
+          {
+            id: 'free-delivery',
+            title: 'Free Delivery',
+            subtitle: 'On every order over $100',
+            buttonLabel: 'Shop Now',
+            linkUrl: '/shop',
+            imageUrl: wide('delivery parcel', 26),
+            tone: 'sky',
+          },
         ],
       },
     },
@@ -3746,13 +3833,6 @@ async function main(): Promise<void> {
       // Resolved from the `banners` table by placement rather than embedded, so
       // the `/banners` admin screen is what edits this strip.
       config: { bannerPosition: 'home_hero' },
-    },
-    {
-      type: 'category_grid',
-      title: 'Featured Categories',
-      subtitle: 'Browse the departments our customers shop most',
-      sortOrder: 60,
-      config: { categoryIds: featuredCategoryIds, limit: 6 },
     },
     {
       type: 'collection',
@@ -3783,13 +3863,16 @@ async function main(): Promise<void> {
       config: { source: 'recommended', limit: 12 },
     },
     {
-      type: 'category_grid',
-      title: 'Shop Electronics',
-      subtitle: 'Every aisle in the department',
+      type: 'product_grid',
+      title: 'More to Explore',
+      subtitle: 'A different part of the shop every hour',
       sortOrder: 80,
-      // Subcategories, which is the same block pointed one level down — the
-      // reason `category_grid` takes ids rather than a depth.
-      config: { categoryIds: electronicsChildIds, limit: 6 },
+      // Every other block here asks a question — newest, best selling, best
+      // reviewed — and a product that answers none of them reaches the homepage
+      // never. `discover` is the whole catalogue on an hourly rotation, so a
+      // shop of two hundred products shows all two hundred over a day rather
+      // than the same forty for ever.
+      config: { source: 'discover', limit: 12 },
     },
     {
       type: 'collection',

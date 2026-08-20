@@ -57,7 +57,21 @@ const csp = [
   "form-action 'self'",
   "frame-ancestors 'none'",
   "object-src 'none'",
-  "img-src 'self' data: blob:",
+  /*
+   * Product pictures live on the store's own R2 public domain — a different
+   * hostname for every deployment, and one this app is never told: it holds no
+   * storage config, and `NEXT_PUBLIC_API_URL` names the API, not the bucket. The
+   * product form also accepts any `https` URL an owner pastes, so even a fixed
+   * bucket host would not cover what the panel is asked to display.
+   *
+   * `'self' data: blob:` alone therefore blocked **every** thumbnail in the
+   * panel — products, inventory, dashboard — which is why those lists rendered
+   * as rows of placeholder icons. Images are not executable; the exposure here
+   * is that a pasted URL can tell its host an admin loaded the page, which the
+   * owner chose by pasting it. Scripts, styles, frames and connections stay
+   * locked down, and `connect-src` is still the store's own API only.
+   */
+  "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   process.env.NODE_ENV === 'production'
     ? "script-src 'self' 'unsafe-inline'"
@@ -74,6 +88,15 @@ const nextConfig: NextConfig = {
   async rewrites() {
     if (!devStoreSlug) return [];
     return [{ source: '/api/:path*', destination: `${apiUrl}/api/:path*` }];
+  },
+  /**
+   * A product is added in a panel beside the list now, not on a page of its own.
+   * `?new=1` is what opens that panel, so the retired route still lands on the
+   * form rather than on a 404 — which is what a bookmark, a browser suggestion
+   * or a link in somebody's notes would otherwise hit.
+   */
+  async redirects() {
+    return [{ source: '/products/new', destination: '/products?new=1', permanent: true }];
   },
   async headers() {
     return [

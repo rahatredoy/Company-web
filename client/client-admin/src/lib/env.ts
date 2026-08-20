@@ -25,12 +25,28 @@ export const publicEnv = {
    */
   devStoreSlug: process.env.NEXT_PUBLIC_DEV_STORE_SLUG || undefined,
   storeUrlPattern: process.env.NEXT_PUBLIC_STORE_URL_PATTERN ?? 'http://{slug}.localhost:3003',
+  /**
+   * Where the owner's **SaaS account** lives — plan, billing, invoices, domains.
+   *
+   * None of that is this panel's to show: the control plane owns it and this app
+   * holds no session for it. Anything about paying for the store therefore links
+   * out rather than rendering here. Empty falls back to the root domain, which
+   * is right in production and wrong in development, where the company site is
+   * on a port of its own.
+   */
+  platformUrl: process.env.NEXT_PUBLIC_PLATFORM_URL || undefined,
 } as const;
 
 export const isDevSlugMode = Boolean(publicEnv.devStoreSlug);
 
 export function storefrontUrl(slug: string): string {
   return publicEnv.storeUrlPattern.replace(/\{slug\}/g, slug);
+}
+
+/** A page of the owner's SaaS dashboard, e.g. `platformUrl('/dashboard/plans')`. */
+export function platformUrl(path = ''): string {
+  const base = (publicEnv.platformUrl ?? `https://${publicEnv.rootDomain}`).replace(/\/$/, '');
+  return `${base}${path}`;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
@@ -15,6 +15,12 @@ import { audit } from '../../lib/audit';
 import { invalidateStorefrontOnWrite } from '../../lib/cache';
 import { conflict, notFound } from '../../lib/errors';
 import { noContent, ok, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import {
+  DEFAULT_MEASURE_OPTIONS,
+  MAX_MEASURE_OPTIONS,
+  measureOptionSchema,
+  normaliseMeasureOptions,
+} from '../../lib/measure';
 import { slugify } from '../../lib/utils';
 import { storeOf } from '../../plugins/tenant';
 
@@ -32,6 +38,15 @@ const settingsSchema = z.object({
   whatsappNumber: z.string().trim().max(24).nullable().default(null),
   whatsappEnabled: z.boolean().default(false),
   lowStockThreshold: z.coerce.number().int().min(0).max(10_000).default(5),
+  /**
+   * The shop's default picker for products sold by weight or volume.
+   *
+   * Set once here rather than per product, because a greengrocer sells fifty
+   * vegetables the same four ways. A product may still name its own list; an
+   * empty one here just means every measure product falls back to the platform
+   * default (1kg/500gm/250gm/100gm).
+   */
+  measureOptions: z.array(measureOptionSchema).max(MAX_MEASURE_OPTIONS).default([]),
 });
 
 const attributeSchema = z.object({
@@ -52,6 +67,13 @@ const attributeSchema = z.object({
     )
     .max(200)
     .default([]),
+});
+
+const reorderSchema = z.object({
+  order: z
+    .array(z.object({ id: z.string().uuid(), sortOrder: z.number().int().min(0).max(100_000) }))
+    .min(1, 'Nothing to reorder.')
+    .max(500),
 });
 
 const paymentSchema = z.object({
@@ -101,6 +123,9 @@ export default async function settingsRoutes(app: FastifyInstance) {
         whatsappNumber: preferences.whatsappNumber ?? null,
         whatsappEnabled: preferences.whatsappEnabled === true,
         lowStockThreshold: preferences.lowStockThreshold ?? 5,
+        measureOptions: normaliseMeasureOptions(preferences.measureOptions ?? []),
+        /** What a product falls back to when neither it nor the shop names a list. */
+        defaultMeasureOptions: DEFAULT_MEASURE_OPTIONS,
         /** Non-zero means changing currency is refused. */
         orderCount: Number(tally?.total ?? 0),
       });
@@ -149,6 +174,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
             whatsappNumber: body.whatsappNumber ?? undefined,
             whatsappEnabled: body.whatsappEnabled,
             lowStockThreshold: body.lowStockThreshold,
+            measureOptions: normaliseMeasureOptions(body.measureOptions),
             // Kept in step so the storefront's selector logic stays honest.
             currencies: [body.currency],
             languages: [body.language],
@@ -247,18 +273,150 @@ export default async function settingsRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const store = storeOf(request);
 
-      const [rows, values] = await Promise.all([
+      /*
+       * How many products each value is attached to, both ways round: a variant
+       * value (`product_variant_values` — picking it buys a different thing) and a
+       * descriptive one (`product_attribute_values` — it only narrows a listing).
+       * The panel needs this to say whether a value can still be deleted, and
+       * counting it here is one query rather than one per row on screen.
+       */
+      const [rows, values, usage] = await Promise.all([
         store.db.select().from(attributes).orderBy(asc(attributes.sortOrder), asc(attributes.name)),
         store.db.select().from(attributeValues).orderBy(asc(attributeValues.sortOrder)),
+        store.db
+          .execute<{ attribute_value_id: string; variants: number; products: number }>(sql`
+            select av.id as attribute_value_id,
+                   count(distinct pvv.variant_id)::int as variants,
+                   count(distinct coalesce(v.product_id, pav.product_id))::int as products
+              from ${attributeValues} av
+              left join product_variant_values pvv on pvv.attribute_value_id = av.id
+              left join product_variants v on v.id = pvv.variant_id
+              left join product_attribute_values pav on pav.attribute_value_id = av.id
+             group by av.id
+          `)
+          .then((result) => result.rows ?? []),
       ]);
+
+      const usageOf = new Map(usage.map((row) => [row.attribute_value_id, row]));
 
       return ok(
         reply,
-        rows.map((row) => ({
-          ...row,
-          values: values.filter((value) => value.attributeId === row.id),
-        })),
+        rows.map((row) => {
+          const own = values
+            .filter((value) => value.attributeId === row.id)
+            .map((value) => {
+              const counted = usageOf.get(value.id);
+              return {
+                ...value,
+                variantCount: Number(counted?.variants ?? 0),
+                productCount: Number(counted?.products ?? 0),
+              };
+            });
+
+          return {
+            ...row,
+            values: own,
+            /** Products reached through any of this attribute's values. */
+            productCount: own.reduce((sum, value) => sum + value.productCount, 0),
+            variantCount: own.reduce((sum, value) => sum + value.variantCount, 0),
+          };
+        }),
       );
+    },
+  );
+
+  /**
+   * The whole list's order in one statement. `sort_order` is what the storefront
+   * lists its filters by, so a half-applied reorder is visible to shoppers.
+   *
+   * Registered before `/attributes/:id` for legibility only; find-my-way matches
+   * the static segment ahead of the parametric one regardless.
+   */
+  app.patch(
+    '/attributes/reorder',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('attributes.manage')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { order } = parseBody(reorderSchema, request.body);
+
+      const ids = order.map((entry) => entry.id);
+      const cases = sql.join(
+        order.map((entry) => sql`when ${attributes.id} = ${entry.id}::uuid then ${entry.sortOrder}`),
+        sql` `,
+      );
+
+      await store.db
+        .update(attributes)
+        .set({ sortOrder: sql`case ${cases} else ${attributes.sortOrder} end`, updatedAt: new Date() })
+        .where(inArray(attributes.id, ids));
+
+      await audit(store.db, request, {
+        action: 'attribute.reorder',
+        module: 'settings',
+        entity: 'attribute',
+        entityId: ids[0]!,
+        entityLabel: `${ids.length} attribute${ids.length === 1 ? '' : 's'}`,
+        newValues: { order },
+      });
+
+      return noContent(reply);
+    },
+  );
+
+  /**
+   * Deleting one value.
+   *
+   * `PUT /attributes/:id` deliberately **merges** its value list rather than
+   * replacing it, so a value cannot be removed by leaving it out — omission is
+   * indistinguishable from a form that failed to load, and the cascade would
+   * quietly unmake every variant built on it. Removing one is therefore its own
+   * request, and it is refused while anything still points at it.
+   */
+  app.delete(
+    '/attributes/:id/values/:valueId',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('attributes.manage')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id, valueId } = parseParams(
+        z.object({ id: z.string().uuid('Invalid identifier.'), valueId: z.string().uuid('Invalid identifier.') }),
+        request.params,
+      );
+
+      const [value] = await store.db
+        .select({ id: attributeValues.id, value: attributeValues.value })
+        .from(attributeValues)
+        .where(and(eq(attributeValues.id, valueId), eq(attributeValues.attributeId, id)))
+        .limit(1);
+
+      if (!value) throw notFound('That value does not exist.');
+
+      const [inUse] = await store.db
+        .execute<{ total: number }>(
+          sql`
+            select (
+              (select count(*) from product_variant_values where attribute_value_id = ${valueId}::uuid)
+              +
+              (select count(*) from product_attribute_values where attribute_value_id = ${valueId}::uuid)
+            )::int as total
+          `,
+        )
+        .then((result) => result.rows ?? []);
+
+      if (Number(inUse?.total ?? 0) > 0) {
+        throw conflict('Products are using this value. Remove it from them first.');
+      }
+
+      await store.db.delete(attributeValues).where(eq(attributeValues.id, valueId));
+
+      await audit(store.db, request, {
+        action: 'attribute.value.delete',
+        module: 'settings',
+        entity: 'attribute',
+        entityId: id,
+        entityLabel: value.value,
+      });
+
+      return noContent(reply);
     },
   );
 
@@ -332,10 +490,33 @@ export default async function settingsRoutes(app: FastifyInstance) {
         const [existing] = await tx.select().from(attributes).where(eq(attributes.id, id)).limit(1);
         if (!existing) throw notFound('That attribute does not exist.');
 
+        /*
+         * The slug moves only when it is the field being changed.
+         *
+         * It is the key in the storefront's filter query string — `?size=m` is
+         * this row's slug and its value's — so a rename must not move it, or
+         * every filtered link a shop has shared stops selecting anything. The
+         * update used to omit the column entirely, which made the slug
+         * permanent: an attribute created as "Colour" and renamed to "Shade"
+         * kept filtering on `colour` with nothing in the panel to say so.
+         */
+        const slug = body.slug === undefined ? existing.slug : slugify(body.slug || body.name);
+
+        if (slug !== existing.slug) {
+          const [clash] = await tx
+            .select({ id: attributes.id })
+            .from(attributes)
+            .where(and(eq(attributes.slug, slug), ne(attributes.id, id)))
+            .limit(1);
+
+          if (clash) throw conflict('Another attribute already uses that slug.');
+        }
+
         const [row] = await tx
           .update(attributes)
           .set({
             name: body.name,
+            slug,
             inputType: body.inputType,
             isVariantAttribute: body.isVariantAttribute,
             isFilterable: body.isFilterable,

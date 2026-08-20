@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
@@ -6,6 +6,7 @@ import {
   orderItems,
   orders,
   refunds,
+  returnAttachments,
   returnHistory,
   returnItems,
   returns,
@@ -13,7 +14,8 @@ import {
 import type { TenantExecutor } from '../../db/tenant-manager';
 import { audit } from '../../lib/audit';
 import { ERROR_CODES, conflict, notFound } from '../../lib/errors';
-import { buildMeta, ok, paginated, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { cursorField, listed, ok, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { keyset } from '../../lib/keyset';
 import { moneyToNumber, toMoney } from '../../lib/utils';
 import { claimDailyRef } from '../storefront/orders.service';
 import { storeOf } from '../../plugins/tenant';
@@ -37,6 +39,7 @@ const RETURN_TRANSITIONS: Record<ReturnStatus, ReturnStatus[]> = {
 };
 
 const listQuerySchema = z.object({
+  ...cursorField,
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().trim().max(120).optional(),
@@ -69,6 +72,16 @@ export default async function adminReturnRoutes(app: FastifyInstance) {
 
       const where = filters.length ? and(...filters) : undefined;
 
+      // Newest first, then the id — the id is what makes the order total, and a
+      // cursor into a list with ties names no position.
+      const page = keyset<{ id: string; createdAt: Date }>([
+        { expr: returns.createdAt, order: 'desc', of: (row) => row.createdAt },
+        { expr: returns.id, order: 'desc', of: (row) => row.id },
+      ]);
+
+      const seek = page.after(query.cursor);
+      const scan = seek ? and(seek, ...filters) : where;
+
       const [rows, tally] = await Promise.all([
         store.db
           .select({
@@ -86,22 +99,35 @@ export default async function adminReturnRoutes(app: FastifyInstance) {
           })
           .from(returns)
           .innerJoin(orders, eq(orders.id, returns.orderId))
-          .where(where)
-          .orderBy(desc(returns.createdAt))
-          .limit(query.pageSize)
-          .offset((query.page - 1) * query.pageSize),
+          .where(scan)
+          .orderBy(...page.orderBy)
+          // One row more than fits, which separates "there is another batch"
+          // from "that was the last one" without a second query.
+          .limit(query.pageSize + 1)
+          .offset(query.cursor ? 0 : (query.page - 1) * query.pageSize),
 
-        store.db
-          .select({ total: count() })
-          .from(returns)
-          .innerJoin(orders, eq(orders.id, returns.orderId))
-          .where(where),
+        // Counted on the first batch only: the scroll shows the figure once, and
+        // the count is the half of a list read that cannot stop at `pageSize`.
+        query.cursor
+          ? undefined
+          : store.db
+              .select({ total: count() })
+              .from(returns)
+              .innerJoin(orders, eq(orders.id, returns.orderId))
+              .where(where),
       ]);
 
-      return paginated(
+      const batch = page.batch(rows, query.pageSize);
+
+      return listed(
         reply,
-        rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
-        buildMeta(query.page, query.pageSize, Number(tally[0]?.total ?? 0)),
+        batch.rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+        {
+          pageSize: query.pageSize,
+          nextCursor: batch.nextCursor,
+          hasMore: batch.hasMore,
+          total: tally ? Number(tally[0]?.total ?? 0) : undefined,
+        },
       );
     },
   );
@@ -113,23 +139,24 @@ export default async function adminReturnRoutes(app: FastifyInstance) {
       const store = storeOf(request);
       const { id } = parseParams(uuidParamSchema, request.params);
 
+      /*
+       * The whole return row, not a chosen subset. The four timestamps it carries
+       * — reviewed, received, completed, updated — are the only record of how
+       * long each stage actually took, and a screen that shows a status without
+       * them can say a return is `received` but not since when.
+       */
       const [row] = await store.db
         .select({
-          id: returns.id,
-          returnNumber: returns.returnNumber,
-          orderId: returns.orderId,
+          ret: returns,
           orderNumber: orders.orderNumber,
+          orderStatus: orders.status,
           customerName: orders.customerName,
           email: orders.email,
+          phone: orders.phone,
           currency: orders.currency,
-          status: returns.status,
-          resolution: returns.resolution,
-          reason: returns.reason,
-          description: returns.description,
-          refundableAmount: returns.refundableAmount,
-          rejectionReason: returns.rejectionReason,
-          adminNote: returns.adminNote,
-          createdAt: returns.createdAt,
+          grandTotal: orders.grandTotal,
+          refundedTotal: orders.refundedTotal,
+          placedAt: orders.placedAt,
         })
         .from(returns)
         .innerJoin(orders, eq(orders.id, returns.orderId))
@@ -138,17 +165,22 @@ export default async function adminReturnRoutes(app: FastifyInstance) {
 
       if (!row) throw notFound('That return does not exist.', ERROR_CODES.RETURN_NOT_FOUND);
 
-      const [items, history] = await Promise.all([
+      const [items, history, attachments, refundRows] = await Promise.all([
         store.db
           .select({
             id: returnItems.id,
             orderItemId: returnItems.orderItemId,
+            productId: orderItems.productId,
             productName: orderItems.productName,
+            variantTitle: orderItems.variantTitle,
+            imageUrl: orderItems.imageUrl,
             sku: orderItems.sku,
             quantity: returnItems.quantity,
+            orderedQuantity: orderItems.quantity,
             unitPrice: returnItems.unitPrice,
             lineTotal: returnItems.lineTotal,
             inspectionResult: returnItems.inspectionResult,
+            inspectionNote: returnItems.inspectionNote,
             restockedQuantity: returnItems.restockedQuantity,
             variantId: orderItems.variantId,
           })
@@ -161,14 +193,57 @@ export default async function adminReturnRoutes(app: FastifyInstance) {
           .from(returnHistory)
           .where(eq(returnHistory.returnId, id))
           .orderBy(desc(returnHistory.createdAt)),
+
+        // What the customer photographed. A damage claim is usually decided on
+        // these, so a panel that omits them is missing the evidence.
+        store.db
+          .select()
+          .from(returnAttachments)
+          .where(eq(returnAttachments.returnId, id))
+          .orderBy(asc(returnAttachments.createdAt)),
+
+        // Whether the money actually went back, which the return row never says.
+        store.db
+          .select({
+            id: refunds.id,
+            refundNumber: refunds.refundNumber,
+            status: refunds.status,
+            amount: refunds.amount,
+            currency: refunds.currency,
+            method: refunds.method,
+            completedAt: refunds.completedAt,
+            createdAt: refunds.createdAt,
+          })
+          .from(refunds)
+          .where(eq(refunds.returnId, id))
+          .orderBy(desc(refunds.createdAt)),
       ]);
 
       return ok(reply, {
-        ...row,
-        createdAt: row.createdAt.toISOString(),
+        ...row.ret,
+        createdAt: row.ret.createdAt.toISOString(),
+        updatedAt: row.ret.updatedAt.toISOString(),
+        reviewedAt: row.ret.reviewedAt?.toISOString() ?? null,
+        receivedAt: row.ret.receivedAt?.toISOString() ?? null,
+        completedAt: row.ret.completedAt?.toISOString() ?? null,
+        orderNumber: row.orderNumber,
+        orderStatus: row.orderStatus,
+        customerName: row.customerName,
+        email: row.email,
+        phone: row.phone,
+        currency: row.currency,
+        orderTotal: row.grandTotal,
+        orderRefundedTotal: row.refundedTotal,
+        orderPlacedAt: row.placedAt.toISOString(),
         items,
         history: history.map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() })),
-        allowedTransitions: RETURN_TRANSITIONS[row.status as ReturnStatus],
+        attachments: attachments.map((file) => ({ ...file, createdAt: file.createdAt.toISOString() })),
+        refunds: refundRows.map((refund) => ({
+          ...refund,
+          createdAt: refund.createdAt.toISOString(),
+          completedAt: refund.completedAt?.toISOString() ?? null,
+        })),
+        allowedTransitions: RETURN_TRANSITIONS[row.ret.status as ReturnStatus],
       });
     },
   );
@@ -271,6 +346,13 @@ async function restockInspected(
       id: returnItems.id,
       quantity: returnItems.quantity,
       variantId: orderItems.variantId,
+      /*
+       * The measure the line was sold in, so a returned 500gm bag puts back five
+       * hundred grams rather than one. A return's own quantity counts the same
+       * things the order line did — bags, not grams — because that is what the
+       * customer picked and what `returned_quantity` is checked against.
+       */
+      measure: orderItems.measure,
     })
     .from(returnItems)
     .innerJoin(orderItems, eq(orderItems.id, returnItems.orderItemId))
@@ -279,6 +361,7 @@ async function restockInspected(
   for (const item of items) {
     const good = Math.min(wanted.get(item.id) ?? 0, item.quantity);
     const damaged = item.quantity - good;
+    const per = item.measure && item.measure > 0 ? item.measure : 1;
 
     await tx
       .update(returnItems)
@@ -292,8 +375,8 @@ async function restockInspected(
 
     const result = await tx.execute<{ warehouse_id: string; available: number; reserved: number }>(sql`
       update inventory_levels
-         set available = available + ${good},
-             damaged   = damaged + ${damaged},
+         set available = available + ${good * per},
+             damaged   = damaged + ${damaged * per},
              updated_at = now()
        where id = (
          select id from inventory_levels where variant_id = ${item.variantId}::uuid limit 1
@@ -308,7 +391,7 @@ async function restockInspected(
       variantId: item.variantId,
       warehouseId: level.warehouse_id,
       type: 'return_restocked',
-      quantity: good,
+      quantity: good * per,
       fromBucket: 'return_pending',
       toBucket: 'available',
       availableAfter: Number(level.available),

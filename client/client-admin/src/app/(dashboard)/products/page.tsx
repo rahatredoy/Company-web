@@ -1,41 +1,37 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
-import { Package, Plus } from 'lucide-react';
-import { EmptyState } from '@/components/admin/empty-state';
-import { PageHeader } from '@/components/admin/page-header';
-import { Pagination } from '@/components/admin/pagination';
-import { TableFilters } from '@/components/admin/table-filters';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableEmpty,
-  TableHead,
-  TableHeader,
-  TableRow,
-  TableWrapper,
-} from '@/components/ui/table';
-import { serverGet, serverGetPaginated } from '@/lib/server-api';
-import { formatMoney, formatNumber } from '@/lib/format';
-import type { ProductRow, ProductStatus, SessionResponse } from '@/lib/types';
+  ProductManager,
+  type ProductFilterState,
+  type ProductSort,
+} from '@/components/admin/product-manager';
+import {
+  currentStoreSlug,
+  serverGet,
+  serverGetAll,
+  serverGetListed,
+  serverGetOptional,
+} from '@/lib/server-api';
+import { BATCH_SIZE, PRODUCT_LIST_SORT } from '@/lib/list';
+import { storefrontUrl } from '@/lib/env';
+import {
+  can,
+  type BrandRow,
+  type CategoryRow,
+  type ProductRow,
+  type ProductStats,
+  type SessionResponse,
+  type StoreSettingsRow,
+} from '@/lib/types';
 
 export const metadata: Metadata = { title: 'Products' };
 export const dynamic = 'force-dynamic';
 
-const STATUS_FILTERS = [
-  { value: 'all', label: 'All' },
-  { value: 'active', label: 'Active' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'inactive', label: 'Inactive' },
-];
-
-const STATUS_TONE: Record<ProductStatus, 'success' | 'warning' | 'neutral'> = {
-  active: 'success',
-  draft: 'warning',
-  inactive: 'neutral',
-};
+/**
+ * Enough for the filter and the quick-edit selects. These lists fill a `<select>`,
+ * and one missing its second hundred silently cannot file a product where it
+ * belongs — so they are read whole rather than a page at a time.
+ */
+const REFERENCE_CAP = 5;
 
 export default async function ProductsPage({
   searchParams,
@@ -47,115 +43,79 @@ export default async function ProductsPage({
     const value = params[key];
     return Array.isArray(value) ? value[0] : value;
   };
+  const oneOf = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
+    const value = single(key);
+    return allowed.includes(value as T) ? (value as T) : fallback;
+  };
 
-  // The store's own currency, so prices are not silently shown in dollars to a
-  // shop that trades in something else.
-  const session = await serverGet<SessionResponse>('/api/v1/admin/auth/session');
-  const currency = session.authenticated ? session.store.currency : 'USD';
+  const filters: ProductFilterState = {
+    search: single('search') ?? '',
+    status: oneOf('status', ['all', 'active', 'draft', 'inactive'] as const, 'all'),
+    categoryId: single('category') ?? '',
+    brandId: single('brand') ?? '',
+    stock: oneOf('stock', ['all', 'in_stock', 'low', 'out', 'untracked'] as const, 'all'),
+    featured: oneOf('featured', ['all', 'yes', 'no'] as const, 'all'),
+    // The fallbacks come from `lib/list.ts`, not from `PRODUCT_DEFAULTS`: that
+    // object lives in a `'use client'` module and arrives here as a client
+    // reference, so `.sort` was `undefined` and the URL said so.
+    sort: oneOf(
+      'sort',
+      ['createdAt', 'updatedAt', 'name', 'price', 'sold', 'stock'] as const satisfies readonly ProductSort[],
+      PRODUCT_LIST_SORT.sort,
+    ),
+    order: oneOf('order', ['asc', 'desc'] as const, PRODUCT_LIST_SORT.order),
+  };
 
-  const { data, meta } = await serverGetPaginated<ProductRow>('/api/v1/admin/products', {
-    page: single('page') ?? 1,
-    search: single('search'),
-    status: single('status'),
-    sort: single('sort'),
-    order: single('order'),
-  });
+  const [session, slug, stats, categories, brands, settings, first] = await Promise.all([
+    serverGet<SessionResponse>('/api/v1/admin/auth/session'),
+    currentStoreSlug(),
+    // A card missing beats the whole screen failing, so the tally is optional.
+    serverGetOptional<ProductStats>('/api/v1/admin/products/stats'),
+    serverGetAll<CategoryRow>('/api/v1/admin/categories', {}, { maxBatches: REFERENCE_CAP }),
+    serverGetAll<BrandRow>('/api/v1/admin/brands', {}, { maxBatches: REFERENCE_CAP }),
+    // Only for the create panel's measure picker; optional, so a settings blip
+    // cannot stop the catalogue from opening.
+    serverGetOptional<StoreSettingsRow>('/api/v1/admin/settings'),
+    /*
+     * The **first batch only**, and no cursor — which is what makes the API count
+     * the filtered catalogue and return `total`. Every batch after this one is
+     * fetched in the browser by cursor, and none of them pays for that count
+     * again.
+     *
+     * Rendering it here rather than in the browser is what puts a filled table in
+     * the first response: the reader sees rows before any JavaScript has run.
+     */
+    serverGetListed<ProductRow>('/api/v1/admin/products', {
+      pageSize: BATCH_SIZE,
+      search: filters.search || undefined,
+      status: filters.status,
+      categoryId: filters.categoryId || undefined,
+      brandId: filters.brandId || undefined,
+      stock: filters.stock,
+      featured: filters.featured,
+      sort: filters.sort,
+      order: filters.order,
+    }),
+  ]);
 
-  const filtered = Boolean(single('search') || (single('status') && single('status') !== 'all'));
+  const admin = session.authenticated ? session.admin : null;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Products"
-        description="Everything your store sells."
-        actions={
-          <Button asChild>
-            <Link href="/products/new">
-              <Plus /> New product
-            </Link>
-          </Button>
-        }
-      />
-
-      <TableFilters searchPlaceholder="Search by name or web address…" statusOptions={STATUS_FILTERS} />
-
-      {data.length === 0 && !filtered ? (
-        <EmptyState
-          icon={Package}
-          title="No products yet"
-          description="Add the first one and it will show up here, ready to publish when you are."
-          action={
-            <Button asChild>
-              <Link href="/products/new">
-                <Plus /> Add your first product
-              </Link>
-            </Button>
-          }
-        />
-      ) : (
-        <>
-          <TableWrapper>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Brand</TableHead>
-                  <TableHead className="text-right">Price</TableHead>
-                  <TableHead className="text-right">Sold</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 ? (
-                  <TableEmpty colSpan={7}>No product matches those filters.</TableEmpty>
-                ) : (
-                  data.map((product) => (
-                    <TableRow key={product.id}>
-                      <TableCell>
-                        <Link href={`/products/${product.id}`} className="font-medium hover:underline">
-                          {product.name}
-                        </Link>
-                        {product.isFeatured ? (
-                          <Badge variant="outline" className="ml-2">
-                            Featured
-                          </Badge>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {product.sku ?? '—'}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">{product.categoryName ?? '—'}</TableCell>
-                      <TableCell className="text-muted-foreground">{product.brandName ?? '—'}</TableCell>
-                      <TableCell className="text-right whitespace-nowrap">
-                        {product.salePriceFrom ? (
-                          <span className="space-x-1.5">
-                            <span className="font-medium">{formatMoney(product.salePriceFrom, currency)}</span>
-                            <span className="text-xs text-muted-foreground line-through">
-                              {formatMoney(product.priceFrom, currency)}
-                            </span>
-                          </span>
-                        ) : (
-                          <span className="font-medium">{formatMoney(product.priceFrom, currency)}</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right text-muted-foreground">
-                        {formatNumber(product.soldCount)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={STATUS_TONE[product.status]}>{product.status}</Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableWrapper>
-
-          <Pagination {...meta} />
-        </>
-      )}
-    </div>
+    <ProductManager
+      initial={{ rows: first.data, meta: first.meta }}
+      stats={stats}
+      categories={categories.map((row) => ({ id: row.id, name: row.name, parentId: row.parentId }))}
+      brands={brands.map((row) => ({ id: row.id, name: row.name }))}
+      currency={session.authenticated ? session.store.currency : 'USD'}
+      permissions={{
+        create: can(admin, 'products.create'),
+        update: can(admin, 'products.update'),
+        delete: can(admin, 'products.delete'),
+      }}
+      storefrontBase={slug ? storefrontUrl(slug) : null}
+      storeMeasureOptions={settings?.measureOptions}
+      filters={filters}
+      openCreate={single('new') === '1'}
+    />
   );
 }

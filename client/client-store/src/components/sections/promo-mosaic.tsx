@@ -1,7 +1,8 @@
 import type { PromoBanner, ProductSummary } from '@/types';
 import { cn } from '@/lib/utils';
 import { DealOfTheDay } from './deal-of-the-day';
-import { PromoBannerCard } from './promo-banner-grid';
+import { PromoBannerGrid } from './promo-banner-grid';
+import { PromoMosaicBanners } from './promo-mosaic-banners';
 
 /**
  * The three-zone promotional block: a deal card beside a small grid of
@@ -12,6 +13,9 @@ import { PromoBannerCard } from './promo-banner-grid';
  * sensibly: with no deal product the banners take the full width, and with
  * fewer than three banners the remaining slots simply close up rather than
  * leaving holes in the grid.
+ *
+ * With *more* than three the extra ones are not dropped: the three panels are
+ * a window onto the list, and it moves every ten seconds.
  */
 export function PromoMosaic({
   dealProduct,
@@ -30,19 +34,11 @@ export function PromoMosaic({
 }) {
   if (!dealProduct && banners.length === 0) return null;
 
+  // Without the deal card the block is just a promo row, and that is a layout
+  // this file would otherwise keep a second copy of.
   if (!dealProduct) {
-    return (
-      <ul className={cn('grid gap-4 sm:grid-cols-2 lg:grid-cols-3', className)}>
-        {banners.slice(0, 3).map((banner) => (
-          <li key={banner.id}>
-            <PromoBannerCard banner={banner} ratio="wide" />
-          </li>
-        ))}
-      </ul>
-    );
+    return <PromoBannerGrid banners={banners} columns={3} ratio="wide" className={className} />;
   }
-
-  const [first, second, third] = banners;
 
   return (
     <div className={cn('grid gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]', className)}>
@@ -54,18 +50,7 @@ export function PromoMosaic({
         layout="split"
       />
 
-      {banners.length > 0 ? (
-        <div className="grid gap-4">
-          {first || second ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {first ? <PromoBannerCard banner={first} ratio="panel" /> : null}
-              {second ? <PromoBannerCard banner={second} ratio="panel" /> : null}
-            </div>
-          ) : null}
-
-          {third ? <PromoBannerCard banner={third} ratio="panel" /> : null}
-        </div>
-      ) : null}
+      {banners.length > 0 ? <PromoMosaicBanners banners={banners} /> : null}
     </div>
   );
 }

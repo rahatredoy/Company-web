@@ -9,14 +9,21 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
 
 /**
- * The two things staff can do to a customer record.
+ * The three things staff can do to a customer record.
  *
  * There is no delete. Orders point at these rows, and a shop that can erase a
  * customer can erase its own history; blocking stops a sign-in without touching
  * anything that was already bought.
+ *
+ * Marketing consent is here because it arrives by every channel except this
+ * panel — a reply to an email, a phone call, a word at the till — and the API
+ * has always accepted it. Without the switch the only way to honour "stop
+ * emailing me" was to block the account, which also stops them shopping.
  */
 export function CustomerActions({
   customer,
@@ -64,6 +71,13 @@ export function CustomerActions({
     );
   };
 
+  const onToggleMarketing = (next: boolean) => {
+    void patch(
+      { acceptsMarketing: next },
+      next ? 'Marketing emails allowed.' : 'Marketing emails stopped.',
+    );
+  };
+
   const onSaveNote = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const note = String(new FormData(event.currentTarget).get('adminNote') ?? '').trim();
@@ -78,7 +92,24 @@ export function CustomerActions({
       <CardContent className="space-y-4">
         {error ? <Alert variant="danger">{error}</Alert> : null}
 
-        <form onSubmit={onSaveNote} className="space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <Label htmlFor="acceptsMarketing">Marketing emails</Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {customer.acceptsMarketing
+                ? 'They have agreed to receive campaigns.'
+                : 'They will not be sent campaigns.'}
+            </p>
+          </div>
+          <Switch
+            id="acceptsMarketing"
+            checked={customer.acceptsMarketing}
+            disabled={saving}
+            onCheckedChange={onToggleMarketing}
+          />
+        </div>
+
+        <form onSubmit={onSaveNote} className="space-y-3 border-t pt-4">
           <Field
             label="Internal note"
             htmlFor="adminNote"

@@ -265,6 +265,18 @@ view of a catalogue from a shopper's, and there is no session here.
 this API yet, and one flag would have made every account page a 404 the moment the shop started
 working.
 
+One read on this surface answers a whole homepage block rather than a resource:
+`GET /storefront/categories/showcase` returns, per department, which products head each of its
+aisles — **ids only**, ranked for every aisle in a single `row_number()` query. `offset` is how a
+homepage carries one block per department **spread between its other sections** instead of six panels
+stacked in one place, and it is an offset rather than an id because these blocks are seeded into a
+store on the day it has no categories at all. The alternative was
+the listing endpoint once per aisle, which is a dozen requests and a dozen facet builds for a block
+that renders no filter panel; the ids are resolved through the same batched `?ids=` read the rest of
+the homepage already uses. `verify-storefront.ts` covers it: no heading over an empty row, nothing
+named that the listing will not serve, no widening past the caps, and a hidden category answers
+nothing rather than the whole shop.
+
 An admin write drops this store's storefront cache on its way out — an `onResponse` hook registered
 once in `modules/catalog/routes.ts`, rather than a call in each handler that a future route could
 forget. The remaining delay is the storefront's own ISR window (60s on listings, 300s on taxonomy),

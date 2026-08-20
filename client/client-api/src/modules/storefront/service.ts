@@ -8,10 +8,16 @@ import {
   productAttributeValues,
   productMedia,
   productSpecifications,
+  productVariants,
   products,
   storeSettings,
 } from '../../db/schema/index';
 import { CACHE_TTL, cached, tenantKey } from '../../lib/cache';
+import {
+  normaliseMeasureOptions,
+  resolveMeasureConfig,
+  type MeasureOption,
+} from '../../lib/measure';
 import type { FilterGroup, ProductImage, ProductSummary, SortValue } from './types';
 
 /**
@@ -21,6 +27,77 @@ import type { FilterGroup, ProductImage, ProductSummary, SortValue } from './typ
  * surface cannot, no matter which route reaches it.
  */
 export const PUBLISHED_PRODUCT = eq(products.status, 'active');
+
+/**
+ * How long the storefront keeps the same window on the catalogue before it moves
+ * on.
+ *
+ * A shop with two hundred products and half a dozen blocks on its front page
+ * shows about forty of them, and always the same forty: "best sellers" is the
+ * same twelve every day by definition, and a product nobody has bought or
+ * reviewed yet is in none of the blocks at all. So most of the catalogue can
+ * only be reached by searching for something the visitor has not seen and does
+ * not know to ask for. Moving the window is what puts the rest of the shop in
+ * front of them.
+ *
+ * An hour, and it cannot usefully be much less: these responses are held two
+ * minutes in Redis, two minutes at the edge and two minutes by the storefront's
+ * own ISR, so a rotation near those numbers would mostly turn inside a cache
+ * nobody can see. It is also long enough not to reshuffle the page under a
+ * shopper who is still reading it — a homepage that has changed on the way back
+ * from a product page reads as a fault rather than as variety.
+ *
+ * It lives here rather than beside either of its callers because **both the
+ * homepage's product blocks and the category showcase's aisles turn on the same
+ * stroke.** Two clocks would mean a panel of aisles flipping at one moment and
+ * the rails above it at another, which a visitor reads as the page rebuilding
+ * itself twice.
+ */
+export const ROTATION_SECONDS = 60 * 60;
+
+/**
+ * Which rotation this store is in.
+ *
+ * Phased per store rather than aligned to the wall clock: every homepage on the
+ * platform turning over on the same stroke of the hour is a stampede onto the
+ * databases at the top of every hour, and one hash of the tenant reference
+ * spreads them across it. The reference is fixed for the life of the store, so
+ * a store's rotation never jumps sideways on a restart or a deploy.
+ *
+ * `now` is a parameter, and this is exported alongside the two resolvers that
+ * read it, for one reason: `scripts/verify-home-rotation.ts` walks a whole lap
+ * and asserts the coverage this platform claims. There is no way to prove that
+ * from outside — a caller cannot move the clock, and a lap is a day long.
+ */
+export function rotationIndex(tenantRef: string, now = Date.now()): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < tenantRef.length; index += 1) {
+    hash = Math.imul(hash ^ tenantRef.charCodeAt(index), 0x01000193) >>> 0;
+  }
+
+  return Math.floor((Math.floor(now / 1000) + (hash % ROTATION_SECONDS)) / ROTATION_SECONDS);
+}
+
+/**
+ * The window a rotation is looking at, wrapped around the end of the list.
+ *
+ * The window advances by **its own width** each turn, so a lap works through the
+ * list rather than sampling it: everything in it is shown, and nothing is shown
+ * twice before the rest have had their turn. A list that already fits is
+ * returned as it is — a block showing everything it has stays where it is, which
+ * is also what guarantees the wrap cannot put one entry in the same window
+ * twice.
+ *
+ * This is the in-memory twin of what `resolveSource` does with `OFFSET`, used
+ * where the list is already in hand: the aisles of one department, after the
+ * empty ones have been dropped.
+ */
+export function rotateWindow<T>(list: T[], size: number, rotation: number): T[] {
+  if (list.length <= size) return list;
+
+  const start = (rotation * size) % list.length;
+  return [...list.slice(start), ...list.slice(0, start)].slice(0, size);
+}
 
 /**
  * How many units sold earns the "Best Seller" flash.
@@ -90,6 +167,42 @@ export async function loadStoreCurrency(store: {
 
 const currencyMemo = new Map<string, { currency: string; expiresAt: number }>();
 const CURRENCY_MEMO_MS = 5_000;
+
+/**
+ * The store's default measure picker — the 1kg/500gm/250gm/100gm list.
+ *
+ * Read on every listing that contains a product sold by measure, for the same
+ * reason the currency is: a product whose own `measure_options` is null defers to
+ * this, so it is needed before a card can be described and cannot be fetched
+ * alongside the listing that it helps render. Cached the same way and for the
+ * same span, and it is a display list rather than a price, so a few seconds of
+ * staleness costs a shopper one stale dropdown at worst.
+ *
+ * Absent is a real answer and is cached as one: a shop that has never touched
+ * this gets `DEFAULT_MEASURE_OPTIONS` from `resolveMeasureConfig`, and an empty
+ * array here must not be mistaken for a cache miss and re-read per card.
+ */
+export async function loadMeasureDefaults(store: { tenantRef: string; db: TenantDb }): Promise<MeasureOption[]> {
+  const memo = measureMemo.get(store.tenantRef);
+  if (memo && memo.expiresAt > Date.now()) return memo.options;
+
+  const options = await cached(
+    tenantKey(store.tenantRef, 'storefront', 'measure-defaults'),
+    CACHE_TTL.storefrontConfig,
+    async () => {
+      const [row] = await store.db
+        .select({ preferences: storeSettings.preferences })
+        .from(storeSettings)
+        .limit(1);
+      return normaliseMeasureOptions(row?.preferences?.measureOptions ?? []);
+    },
+  );
+
+  measureMemo.set(store.tenantRef, { options, expiresAt: Date.now() + CURRENCY_MEMO_MS });
+  return options;
+}
+
+const measureMemo = new Map<string, { options: MeasureOption[]; expiresAt: number }>();
 
 // ------------------------------------------------------------------ money ----
 
@@ -228,19 +341,71 @@ export interface ListingFilters {
   attributes?: Record<string, string[]>;
 }
 
-/** What a customer pays, as SQL — the sale price when there is one. */
-const effectivePriceSql = sql<string>`coalesce(${products.salePriceFrom}, ${products.priceFrom}, 0)`;
+/**
+ * The sale price a shopper can actually get **right now**, or null.
+ *
+ * `products.sale_price_from` is denormalised from the variants and carries no
+ * window, so on its own it advertises a sale that has not started and one that
+ * ended last month. The window lives on the variant — `sale_starts_at` /
+ * `sale_ends_at` — and `effectiveSale` has always applied it on the product
+ * page and at checkout. Everything *else* read the flat column, so a listing
+ * card could offer a price the product page then refused; now that the admin
+ * panel can set a window, that gap became reachable.
+ *
+ * `min` over the live ones rather than the cheapest variant's sale price: this
+ * is a "from" price, and the lowest sale a shopper can currently get is the
+ * honest answer to it. A null bound means "no bound", so a sale with neither
+ * behaves exactly as it did before.
+ */
+export const liveSalePriceSql = sql<string | null>`(
+  select min(v.sale_price)
+    from ${productVariants} v
+   where v.product_id = ${products.id}
+     and v.is_active
+     and v.sale_price is not null
+     and (v.sale_starts_at is null or v.sale_starts_at <= now())
+     and (v.sale_ends_at is null or v.sale_ends_at >= now())
+)`;
 
 /**
- * True when the product has no stock records at all, or has some available.
+ * Whether any variant is on sale right now — the filter's half of the above.
  *
- * The first half matters more than it looks: a store that has never opened the
- * inventory screens has no `inventory_levels` rows, and reading that as "zero
- * available" would hide every product in the shop behind an Out of Stock badge.
- * Absent records mean stock is not being tracked, which is not the same as none.
+ * A semi-join rather than a comparison against `liveSalePriceSql`, because
+ * `exists` stops at the first matching variant and can be answered straight from
+ * `product_variants_product_idx`, while the aggregate has to read them all. It
+ * is asked over every candidate row in the catalogue, not just the page.
+ */
+export const liveSaleExistsSql = sql`exists (
+  select 1
+    from ${productVariants} v
+   where v.product_id = ${products.id}
+     and v.is_active
+     and v.sale_price is not null
+     and v.sale_price < v.price
+     and (v.sale_starts_at is null or v.sale_starts_at <= now())
+     and (v.sale_ends_at is null or v.sale_ends_at >= now())
+)`;
+
+/** What a customer pays, as SQL — the live sale price when there is one. */
+const effectivePriceSql = sql<string>`coalesce(${liveSalePriceSql}, ${products.priceFrom}, 0)`;
+
+/**
+ * True when stock is not allowed to refuse the sale, or there is some available.
+ *
+ * Three clauses, and only the last is about a count. `track_inventory` off is
+ * the owner's decision that this line always sells — made to order, digital,
+ * restocked faster than the panel is opened. No `inventory_levels` rows at all
+ * is a shop that has never opened the inventory screens, and reading that
+ * absence as "zero available" would hide the entire catalogue behind an Out of
+ * Stock badge. Absent records are not the same as none, and neither is a
+ * deliberate refusal to count.
+ *
+ * `stockBandFor` and the mapper below must agree with this exactly, or a product
+ * would be returned by the filter and then contradicted by its own badge.
  */
 const inStockSql = sql`(
-  not exists (
+  ${products.trackInventory} = false
+  or not exists (
     select 1 from inventory_levels il
     join product_variants pv on pv.id = il.variant_id
     where pv.product_id = ${products.id}
@@ -323,11 +488,9 @@ export function listingConditions(filters: ListingFilters, exclude?: string): SQ
 
   if (exclude !== 'inStock' && filters.inStock) conditions.push(inStockSql);
 
-  if (filters.sale) {
-    conditions.push(
-      sql`${products.salePriceFrom} is not null and ${products.salePriceFrom} < ${products.priceFrom}`,
-    );
-  }
+  // "On sale" means on sale *now*. Reading the denormalised column instead
+  // would list a product whose window has closed and then show it at full price.
+  if (filters.sale) conditions.push(liveSaleExistsSql);
 
   for (const [slug, values] of Object.entries(filters.attributes ?? {})) {
     if (values.length === 0 || exclude === `attr.${slug}`) continue;
@@ -371,6 +534,16 @@ export interface ProductBaseRow {
   ratingCount: number;
   isNewArrival: boolean;
   soldCount: number;
+  trackInventory: boolean;
+  defaultVariantId: string | null;
+  minOrderQuantity: number;
+  maxOrderQuantity: number | null;
+  sellBy: 'unit' | 'measure';
+  measureUnit: string | null;
+  pricingMeasure: number | null;
+  pricingLabel: string | null;
+  minMeasure: number | null;
+  measureOptions: { label: string; measure: number }[] | null;
   brandId: string | null;
   brandName: string | null;
   brandSlug: string | null;
@@ -383,11 +556,58 @@ export const productBaseColumns = {
   name: products.name,
   type: products.type,
   priceFrom: products.priceFrom,
-  salePriceFrom: products.salePriceFrom,
+  /*
+   * The live sale, not the flat column — every listing, card and search result
+   * reads this, and a price shown beside a product must be the one it sells for.
+   */
+  salePriceFrom: liveSalePriceSql,
   ratingAverage: products.ratingAverage,
   ratingCount: products.ratingCount,
   isNewArrival: products.isNewArrival,
   soldCount: products.soldCount,
+  /** Not shown anywhere; it is what decides whether the stock badge counts. */
+  trackInventory: products.trackInventory,
+  /*
+   * The variant a card adds to the basket.
+   *
+   * A basket line is a *variant*, never a product — that is what carries the
+   * price and the stock a checkout reserves — so a card with an Add button had
+   * no way to answer what it was adding without fetching the product first. A
+   * `simple` product owns exactly one variant, so for the products this
+   * actually serves the answer is already decided; a `variable` one sends the
+   * default it opens on, and the card asks for the rest only when a shopper
+   * opens the picker.
+   *
+   * A correlated subquery rather than a join: a join to the default variant
+   * would multiply the row set of every listing query that reads these columns,
+   * and the index on `(product_id)` makes this a probe per row.
+   */
+  defaultVariantId: sql<string | null>`(
+    select v.id from product_variants v
+     where v.product_id = ${products.id} and v.is_active = true
+     order by v.is_default desc, v.sort_order asc
+     limit 1
+  )`,
+  /*
+   * Quantity bounds, so a one-click add obeys the same limits the product page
+   * does. `min` is what the button adds — a product sold in threes must not
+   * reach the basket as one — and `max` is what caps the line once it is there.
+   */
+  minOrderQuantity: products.minOrderQuantity,
+  maxOrderQuantity: products.maxOrderQuantity,
+  /*
+   * How a quantity is read on this product — a count, or an amount weighed out.
+   *
+   * On the card rather than behind a second request, because the whole point of
+   * the picker is that a shopper fills a basket from the listing: fetching the
+   * measure list per card would be a request per product on a page of forty.
+   */
+  sellBy: products.sellBy,
+  measureUnit: products.measureUnit,
+  pricingMeasure: products.pricingMeasure,
+  pricingLabel: products.pricingLabel,
+  minMeasure: products.minMeasure,
+  measureOptions: products.measureOptions,
   brandId: brands.id,
   brandName: brands.name,
   brandSlug: brands.slug,
@@ -418,6 +638,7 @@ export async function decorateSummaries(
   db: TenantDb,
   rows: ProductBaseRow[],
   currency: string,
+  measureDefaults: MeasureOption[] = [],
 ): Promise<ProductSummary[]> {
   if (rows.length === 0) return [];
 
@@ -475,10 +696,11 @@ export async function decorateSummaries(
     const images = imagesBy.get(row.id) ?? [];
     const stock = stockBy.get(row.id);
 
-    // No rows at all means stock is not tracked for this product, which reads as
-    // available. See `inStockSql` — the two must agree or a product would be
-    // listed by the filter and then contradicted by its own badge.
-    const tracked = (stock?.trackedRows ?? 0) > 0;
+    // Untracked reads as available, whether that is the owner's choice or simply
+    // a shop that has never recorded a level. See `inStockSql` — the two must
+    // agree or a product would be listed by the filter and then contradicted by
+    // its own badge.
+    const tracked = row.trackInventory && (stock?.trackedRows ?? 0) > 0;
     const available = stock?.available ?? 0;
 
     return {
@@ -503,6 +725,10 @@ export async function decorateSummaries(
       isBestSeller: row.soldCount >= BEST_SELLER_MIN_SOLD,
       keySpec: specBy.get(row.id) ?? null,
       hasVariants: row.type === 'variable',
+      defaultVariantId: row.defaultVariantId,
+      minOrderQuantity: row.minOrderQuantity,
+      maxOrderQuantity: row.maxOrderQuantity,
+      measure: resolveMeasureConfig(row, measureDefaults),
     } satisfies ProductSummary;
   });
 }

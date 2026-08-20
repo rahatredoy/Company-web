@@ -128,7 +128,7 @@ function Homepage({ config, sections }: TemplateHomepageProps) {
   );
 }
 
-const GRID = 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5';
+const GRID = 'product-grid grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5';
 
 const template: StorefrontTemplate = {
   key: 'electronics',

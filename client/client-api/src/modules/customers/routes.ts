@@ -1,13 +1,23 @@
-import { and, asc, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { customerAddresses, customers, orders } from '../../db/schema/index';
+import {
+  customerAddresses,
+  customerSessions,
+  customers,
+  orders,
+  reviews,
+  wishlistItems,
+  wishlists,
+} from '../../db/schema/index';
 import { audit } from '../../lib/audit';
 import { notFound } from '../../lib/errors';
-import { buildMeta, ok, paginated, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { cursorField, listed, ok, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { keyset } from '../../lib/keyset';
 import { storeOf } from '../../plugins/tenant';
 
 const listQuerySchema = z.object({
+  ...cursorField,
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().trim().max(120).optional(),
@@ -30,8 +40,12 @@ const patchSchema = z.object({
  * a shop that can erase a customer can erase its own books. Blocking is the
  * lever: it stops a sign-in without touching anything that was already bought.
  *
- * `password_hash`, `failed_login_count` and `locked_until` are never selected.
- * Staff have no reason to see them and a spread would eventually leak them.
+ * `password_hash` is never selected anywhere here — it is the credential itself,
+ * and a spread would eventually leak it. The lockout columns are a different
+ * thing and the detail endpoint *does* return them: "why can this person not
+ * sign in" is a question the shop gets asked and cannot otherwise answer, and a
+ * failed-attempt count is a fact about an account rather than a secret held in
+ * it.
  */
 export default async function customerRoutes(app: FastifyInstance) {
   app.get(
@@ -53,7 +67,6 @@ export default async function customerRoutes(app: FastifyInstance) {
       ].filter(Boolean);
 
       const where = filters.length ? and(...filters) : undefined;
-      const direction = query.order === 'asc' ? asc : desc;
 
       // Spend and order count come from `orders` rather than `customer_stats`,
       // which is a rollup nothing maintains yet — a figure that is stale is
@@ -62,6 +75,27 @@ export default async function customerRoutes(app: FastifyInstance) {
         select coalesce(sum(o.grand_total), 0)::text from ${orders} o
         where o.customer_id = ${customers.id} and o.status not in ('cancelled', 'failed')
       )`;
+
+      /*
+       * The chosen column, then the id. The id is what makes the order total: two
+       * customers who registered in the same millisecond have no order between
+       * them, and a cursor into a list with ties names no position — one would
+       * arrive in two batches and the other in none.
+       *
+       * `totalSpent` is compared as the same coalesced subquery the `ORDER BY`
+       * uses, so the seek and the sort can never disagree.
+       */
+      const page = keyset<{ id: string; createdAt: Date; fullName: string; totalSpent: string }>([
+        {
+          expr: query.sort === 'totalSpent' ? spent : customers[query.sort],
+          order: query.order,
+          of: (row) => row[query.sort],
+        },
+        { expr: customers.id, order: query.order, of: (row) => row.id },
+      ]);
+
+      const seek = page.after(query.cursor);
+      const scan = seek ? and(seek, ...filters) : where;
 
       const [rows, tally] = await Promise.all([
         store.db
@@ -81,25 +115,34 @@ export default async function customerRoutes(app: FastifyInstance) {
             totalSpent: spent,
           })
           .from(customers)
-          .where(where)
-          .orderBy(
-            query.sort === 'totalSpent' ? direction(spent) : direction(customers[query.sort]),
-          )
-          .limit(query.pageSize)
-          .offset((query.page - 1) * query.pageSize),
+          .where(scan)
+          .orderBy(...page.orderBy)
+          // One row more than fits, which separates "there is another batch"
+          // from "that was the last one" without a second query.
+          .limit(query.pageSize + 1)
+          .offset(query.cursor ? 0 : (query.page - 1) * query.pageSize),
 
-        store.db.select({ total: count() }).from(customers).where(where),
+        // Counted on the first batch only: the scroll shows the figure once, and
+        // the count is the half of a list read that cannot stop at `pageSize`.
+        query.cursor ? undefined : store.db.select({ total: count() }).from(customers).where(where),
       ]);
 
-      return paginated(
+      const batch = page.batch(rows, query.pageSize);
+
+      return listed(
         reply,
-        rows.map((row) => ({
+        batch.rows.map((row) => ({
           ...row,
           createdAt: row.createdAt.toISOString(),
           lastLoginAt: row.lastLoginAt?.toISOString() ?? null,
           orderCount: Number(row.orderCount),
         })),
-        buildMeta(query.page, query.pageSize, Number(tally[0]?.total ?? 0)),
+        {
+          pageSize: query.pageSize,
+          nextCursor: batch.nextCursor,
+          hasMore: batch.hasMore,
+          total: tally ? Number(tally[0]?.total ?? 0) : undefined,
+        },
       );
     },
   );
@@ -111,19 +154,32 @@ export default async function customerRoutes(app: FastifyInstance) {
       const store = storeOf(request);
       const { id } = parseParams(uuidParamSchema, request.params);
 
+      /*
+       * Every column but the password hash, named one by one rather than taken
+       * with a spread — a spread over `customers` would pick up `password_hash`
+       * the moment anybody adds a column, and a leak that arrives by refactor is
+       * the kind nobody reviews.
+       */
       const [customer] = await store.db
         .select({
           id: customers.id,
-          fullName: customers.fullName,
           email: customers.email,
+          fullName: customers.fullName,
           phone: customers.phone,
           status: customers.status,
           customerType: customers.customerType,
-          acceptsMarketing: customers.acceptsMarketing,
           emailVerifiedAt: customers.emailVerifiedAt,
+          acceptsMarketing: customers.acceptsMarketing,
+          failedLoginCount: customers.failedLoginCount,
+          lockedUntil: customers.lockedUntil,
+          lastLoginAt: customers.lastLoginAt,
+          lastLoginIp: customers.lastLoginIp,
+          passwordChangedAt: customers.passwordChangedAt,
+          /** Whether they can sign in at all — an account with none cannot. */
+          hasPassword: sql<boolean>`${customers.passwordHash} is not null`,
           adminNote: customers.adminNote,
           createdAt: customers.createdAt,
-          lastLoginAt: customers.lastLoginAt,
+          updatedAt: customers.updatedAt,
         })
         .from(customers)
         .where(eq(customers.id, id))
@@ -131,14 +187,19 @@ export default async function customerRoutes(app: FastifyInstance) {
 
       if (!customer) throw notFound('That customer does not exist.');
 
-      const [customerOrders, addresses] = await Promise.all([
+      const [customerOrders, addresses, tally, sessions, reviewTally, wishlist] = await Promise.all([
         store.db
           .select({
             id: orders.id,
             orderNumber: orders.orderNumber,
             status: orders.status,
             paymentStatus: orders.paymentStatus,
+            shippingStatus: orders.shippingStatus,
+            itemCount: sql<number>`(
+              select coalesce(sum(oi.quantity), 0)::int from order_items oi where oi.order_id = ${orders.id}
+            )`,
             grandTotal: orders.grandTotal,
+            refundedTotal: orders.refundedTotal,
             currency: orders.currency,
             placedAt: orders.placedAt,
           })
@@ -147,16 +208,93 @@ export default async function customerRoutes(app: FastifyInstance) {
           .orderBy(desc(orders.placedAt))
           .limit(50),
 
-        store.db.select().from(customerAddresses).where(eq(customerAddresses.customerId, id)),
+        store.db
+          .select()
+          .from(customerAddresses)
+          .where(eq(customerAddresses.customerId, id))
+          .orderBy(desc(customerAddresses.isDefault)),
+
+        // Counted on the same basis as the list's columns: a cancelled or failed
+        // order is still an order placed, but is not money the shop took.
+        store.db
+          .select({
+            orderCount: count(),
+            totalSpent: sql<string>`coalesce(sum(${orders.grandTotal}) filter (
+              where ${orders.status} not in ('cancelled', 'failed')
+            ), 0)::text`,
+            refunded: sql<string>`coalesce(sum(${orders.refundedTotal}), 0)::text`,
+            firstOrderAt: sql<string | null>`min(${orders.placedAt})::text`,
+            lastOrderAt: sql<string | null>`max(${orders.placedAt})::text`,
+          })
+          .from(orders)
+          .where(eq(orders.customerId, id)),
+
+        // Where they are signed in. `token_hash` is a credential and is not
+        // selected; the device it was last seen on is not one.
+        store.db
+          .select({
+            id: customerSessions.id,
+            ipAddress: customerSessions.ipAddress,
+            userAgent: customerSessions.userAgent,
+            remember: customerSessions.remember,
+            lastSeenAt: customerSessions.lastSeenAt,
+            expiresAt: customerSessions.expiresAt,
+            revokedAt: customerSessions.revokedAt,
+            createdAt: customerSessions.createdAt,
+          })
+          .from(customerSessions)
+          .where(eq(customerSessions.customerId, id))
+          .orderBy(desc(customerSessions.lastSeenAt))
+          .limit(10),
+
+        store.db.select({ total: count() }).from(reviews).where(eq(reviews.customerId, id)),
+
+        store.db
+          .select({ total: count() })
+          .from(wishlistItems)
+          .innerJoin(wishlists, eq(wishlists.id, wishlistItems.wishlistId))
+          .where(eq(wishlists.customerId, id)),
       ]);
+
+      const stats = tally[0];
 
       return ok(reply, {
         ...customer,
         emailVerified: customer.emailVerifiedAt !== null,
-        createdAt: customer.createdAt.toISOString(),
+        emailVerifiedAt: customer.emailVerifiedAt?.toISOString() ?? null,
+        lockedUntil: customer.lockedUntil?.toISOString() ?? null,
         lastLoginAt: customer.lastLoginAt?.toISOString() ?? null,
-        orders: customerOrders.map((order) => ({ ...order, placedAt: order.placedAt.toISOString() })),
-        addresses,
+        passwordChangedAt: customer.passwordChangedAt?.toISOString() ?? null,
+        createdAt: customer.createdAt.toISOString(),
+        updatedAt: customer.updatedAt.toISOString(),
+        /** Locked *now*, rather than a timestamp the reader has to compare. */
+        isLocked: customer.lockedUntil !== null && customer.lockedUntil.getTime() > Date.now(),
+        stats: {
+          orderCount: Number(stats?.orderCount ?? 0),
+          totalSpent: stats?.totalSpent ?? '0',
+          refundedTotal: stats?.refunded ?? '0',
+          firstOrderAt: stats?.firstOrderAt ? new Date(stats.firstOrderAt).toISOString() : null,
+          lastOrderAt: stats?.lastOrderAt ? new Date(stats.lastOrderAt).toISOString() : null,
+          reviewCount: Number(reviewTally[0]?.total ?? 0),
+          wishlistCount: Number(wishlist[0]?.total ?? 0),
+        },
+        orders: customerOrders.map((order) => ({
+          ...order,
+          itemCount: Number(order.itemCount),
+          placedAt: order.placedAt.toISOString(),
+        })),
+        addresses: addresses.map((address) => ({
+          ...address,
+          createdAt: address.createdAt.toISOString(),
+          updatedAt: address.updatedAt.toISOString(),
+        })),
+        sessions: sessions.map((session) => ({
+          ...session,
+          lastSeenAt: session.lastSeenAt.toISOString(),
+          expiresAt: session.expiresAt.toISOString(),
+          revokedAt: session.revokedAt?.toISOString() ?? null,
+          createdAt: session.createdAt.toISOString(),
+        })),
       });
     },
   );

@@ -22,6 +22,7 @@ import {
   breadcrumbFor,
   buildFacets,
   decorateSummaries,
+  loadMeasureDefaults,
   descendantIds,
   discountPercent,
   effectiveSale,
@@ -203,7 +204,7 @@ export default async function storefrontProductRoutes(app: FastifyInstance) {
             .leftJoin(brands, eq(brands.id, products.brandId))
             .where(and(PUBLISHED_PRODUCT, inArray(products.id, ids)));
 
-          const decorated = await decorateSummaries(store.db, rows, currency);
+          const decorated = await decorateSummaries(store.db, rows, currency, await loadMeasureDefaults(store));
           // Returned in the order the section named them, not the order the
           // database happened to scan — the owner's arrangement is the point of
           // the section.
@@ -268,7 +269,7 @@ export default async function storefrontProductRoutes(app: FastifyInstance) {
           ]);
 
           return {
-            items: await decorateSummaries(store.db, rows, currency),
+            items: await decorateSummaries(store.db, rows, currency, await loadMeasureDefaults(store)),
             meta: buildMeta(query.page, query.pageSize, Number(tally[0]?.total ?? 0)),
           };
         },
@@ -347,7 +348,7 @@ export default async function storefrontProductRoutes(app: FastifyInstance) {
       )
       .limit(limit);
 
-    return ok(reply, await decorateSummaries(store.db, rows, currency));
+    return ok(reply, await decorateSummaries(store.db, rows, currency, await loadMeasureDefaults(store)));
   });
 
   /** The curated "frequently bought together" pairing, if the owner made one. */
@@ -377,7 +378,7 @@ export default async function storefrontProductRoutes(app: FastifyInstance) {
 
     if (!anchorRow) throw notFound('No bundle for this product.');
 
-    const items = await decorateSummaries(store.db, [anchorRow, ...rows], currency);
+    const items = await decorateSummaries(store.db, [anchorRow, ...rows], currency, await loadMeasureDefaults(store));
 
     // Summed on the server so the figure the customer is shown and the figure
     // the cart would charge come from one calculation, not two.
@@ -420,7 +421,7 @@ async function loadProductDetail(
 
   if (!row) return null;
 
-  const [summary] = await decorateSummaries(store.db, [row], currency);
+  const [summary] = await decorateSummaries(store.db, [row], currency, await loadMeasureDefaults(store));
   if (!summary) return null;
 
   const [mediaRows, specRows, variantRows, selectionRows, optionRows, tree] = await Promise.all([
@@ -545,7 +546,14 @@ async function loadProductDetail(
 
   const variants: ProductVariantView[] = variantRows.map((variant) => {
     const sale = effectiveSale(variant.salePrice, variant.saleStartsAt, variant.saleEndsAt);
-    const band = stockBandFor(Number(variant.trackedRows) > 0, Number(variant.available), Number(variant.threshold));
+    // Tracked means both that the owner lets stock refuse a sale and that there
+    // is a level to refuse it with. `inStockSql` reads it the same way, and the
+    // two have to agree or the listing would offer what this page then denies.
+    const band = stockBandFor(
+      row.trackInventory && Number(variant.trackedRows) > 0,
+      Number(variant.available),
+      Number(variant.threshold),
+    );
 
     return {
       id: variant.id,

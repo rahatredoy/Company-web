@@ -51,7 +51,14 @@ export interface StorefrontTemplate extends TemplateChrome {
   Homepage: ComponentType<TemplateHomepageProps>;
   /** Which `ProductCard` presentation this template's grids use. */
   cardVariant: 'compact' | 'standard' | 'editorial' | 'spec' | 'wide';
-  /** Tailwind grid classes, mobile-first. Templates differ mainly here. */
+  /**
+   * Tailwind grid classes, mobile-first. Templates differ mainly here.
+   *
+   * Every one of them begins with `product-grid`, which carries no Tailwind
+   * meaning at all: it is the hook `globals.css` hangs the two-across rail off
+   * for a phone reading the desktop layout. A template that omits it renders six
+   * cards across a 400px screen.
+   */
   gridClassName: string;
   /** Whether the mobile bottom bar suits this design. */
   mobileBottomNav: boolean;

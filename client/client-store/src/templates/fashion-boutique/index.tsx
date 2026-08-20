@@ -146,7 +146,7 @@ function Homepage({ config, sections }: TemplateHomepageProps) {
   );
 }
 
-const GRID = 'grid grid-cols-2 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
+const GRID = 'product-grid grid grid-cols-2 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
 
 const template: StorefrontTemplate = {
   key: 'fashion_boutique',

@@ -1,15 +1,27 @@
 import { and, asc, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
+import type { TenantDb } from '../../db/tenant-manager';
 import { z } from 'zod';
-import { banners, contactMessages, coupons, newsletterSubscribers } from '../../db/schema/index';
+import {
+  banners,
+  categories,
+  contactMessages,
+  couponRedemptions,
+  coupons,
+  customers,
+  newsletterSubscribers,
+  orders,
+} from '../../db/schema/index';
 import { audit } from '../../lib/audit';
 import { invalidateStorefrontOnWrite } from '../../lib/cache';
-import { ERROR_CODES, conflict, notFound } from '../../lib/errors';
-import { buildMeta, noContent, ok, paginated, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { ERROR_CODES, conflict, notFound, unprocessable } from '../../lib/errors';
+import { cursorField, listed, noContent, ok, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { keyset } from '../../lib/keyset';
 import { moneySchema } from '../../lib/validation';
 import { storeOf } from '../../plugins/tenant';
 
 const pageQuerySchema = z.object({
+  ...cursorField,
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().trim().max(120).optional(),
@@ -42,6 +54,16 @@ const bannerSchema = z.object({
   imageUrl: z.string().trim().url('Use a full web address.').max(2000),
   mobileImageUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().default(null),
   linkUrl: z.string().trim().max(2000).nullable().default(null),
+  /**
+   * The category or subcategory the banner opens, chosen from the panel's
+   * picker rather than typed.
+   *
+   * It outranks `linkUrl`, which is what the panel's other destination mode
+   * writes — a shop advertising a category should not have to know that its
+   * address is `/category/<slug>`, and a slug that is later renamed moves the
+   * banner with it instead of leaving it pointing at a 404.
+   */
+  categoryId: z.string().uuid('Pick a category from the list.').nullable().default(null),
   buttonLabel: z.string().trim().max(60).nullable().default(null),
   position: z.enum(['home_hero', 'home_promo', 'category_top', 'sidebar', 'popup']).default('home_hero'),
   startsAt: z.coerce.date().nullable().default(null),
@@ -49,6 +71,30 @@ const bannerSchema = z.object({
   isActive: z.boolean().default(true),
   sortOrder: z.coerce.number().int().min(0).max(100_000).default(0),
 });
+
+/**
+ * Refuses a banner naming a category that is not in this store's catalogue.
+ *
+ * The foreign key would refuse it too, but as a 500 with a constraint name in
+ * it — the panel's picker is built from this store's own categories, so a body
+ * that names anything else is either a stale form or somebody probing, and both
+ * deserve the same plain 422 the rest of the form's fields give.
+ */
+async function assertCategoryExists(db: TenantDb, categoryId: string | null): Promise<void> {
+  if (!categoryId) return;
+
+  const [row] = await db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(eq(categories.id, categoryId))
+    .limit(1);
+
+  if (!row) {
+    throw unprocessable('That category no longer exists.', ERROR_CODES.VALIDATION_FAILED, {
+      categoryId: ['That category no longer exists.'],
+    });
+  }
+}
 
 /**
  * Coupons, banners and the mailing list.
@@ -81,27 +127,113 @@ export default async function marketingRoutes(app: FastifyInstance) {
 
       const where = filters.length ? and(...filters) : undefined;
 
+      // Newest first, then the id — the id is what makes the order total, and a
+      // cursor into a list with ties names no position.
+      const page = keyset<{ id: string; createdAt: Date }>([
+        { expr: coupons.createdAt, order: 'desc', of: (row) => row.createdAt },
+        { expr: coupons.id, order: 'desc', of: (row) => row.id },
+      ]);
+
+      const seek = page.after(query.cursor);
+      const scan = seek ? and(seek, ...filters) : where;
+
       const [rows, tally] = await Promise.all([
         store.db
           .select()
           .from(coupons)
-          .where(where)
-          .orderBy(desc(coupons.createdAt))
-          .limit(query.pageSize)
-          .offset((query.page - 1) * query.pageSize),
-        store.db.select({ total: count() }).from(coupons).where(where),
+          .where(scan)
+          .orderBy(...page.orderBy)
+          // One row more than fits, which separates "there is another batch"
+          // from "that was the last one" without a second query.
+          .limit(query.pageSize + 1)
+          .offset(query.cursor ? 0 : (query.page - 1) * query.pageSize),
+
+        // Counted on the first batch only: the scroll shows the figure once, and
+        // the count is the half of a list read that cannot stop at `pageSize`.
+        query.cursor ? undefined : store.db.select({ total: count() }).from(coupons).where(where),
       ]);
 
-      return paginated(
+      const batch = page.batch(rows, query.pageSize);
+
+      return listed(
         reply,
-        rows.map((row) => ({
+        batch.rows.map((row) => ({
           ...row,
           startsAt: row.startsAt?.toISOString() ?? null,
           endsAt: row.endsAt?.toISOString() ?? null,
           createdAt: row.createdAt.toISOString(),
         })),
-        buildMeta(query.page, query.pageSize, Number(tally[0]?.total ?? 0)),
+        {
+          pageSize: query.pageSize,
+          nextCursor: batch.nextCursor,
+          hasMore: batch.hasMore,
+          total: tally ? Number(tally[0]?.total ?? 0) : undefined,
+        },
       );
+    },
+  );
+
+  /**
+   * One coupon, whole — every column of the row plus the ledger behind
+   * `used_count`.
+   *
+   * The count on the row is the figure checkout enforces the limit against; the
+   * redemptions are what it is made of, and the two are worth showing together
+   * because they are the only way to tell a code that was used a hundred times
+   * by a hundred people from one used a hundred times by one. `targetIds` is
+   * resolved to nothing here on purpose — it names products *or* categories
+   * depending on `scope`, and the panel knows which.
+   */
+  app.get(
+    '/coupons/:id',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('marketing.view')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+
+      const [coupon] = await store.db.select().from(coupons).where(eq(coupons.id, id)).limit(1);
+      if (!coupon) throw notFound('That coupon does not exist.');
+
+      const [redemptions, tally] = await Promise.all([
+        store.db
+          .select({
+            id: couponRedemptions.id,
+            orderId: couponRedemptions.orderId,
+            orderNumber: orders.orderNumber,
+            orderStatus: orders.status,
+            customerId: couponRedemptions.customerId,
+            customerName: customers.fullName,
+            email: couponRedemptions.email,
+            discountAmount: couponRedemptions.discountAmount,
+            createdAt: couponRedemptions.createdAt,
+          })
+          .from(couponRedemptions)
+          .leftJoin(orders, eq(orders.id, couponRedemptions.orderId))
+          .leftJoin(customers, eq(customers.id, couponRedemptions.customerId))
+          .where(eq(couponRedemptions.couponId, id))
+          .orderBy(desc(couponRedemptions.createdAt))
+          .limit(50),
+
+        store.db
+          .select({
+            total: count(),
+            discounted: sql<string>`coalesce(sum(${couponRedemptions.discountAmount}), 0)::text`,
+          })
+          .from(couponRedemptions)
+          .where(eq(couponRedemptions.couponId, id)),
+      ]);
+
+      return ok(reply, {
+        ...coupon,
+        startsAt: coupon.startsAt?.toISOString() ?? null,
+        endsAt: coupon.endsAt?.toISOString() ?? null,
+        createdAt: coupon.createdAt.toISOString(),
+        updatedAt: coupon.updatedAt.toISOString(),
+        /** How much this code has actually given away, and over how many orders. */
+        redemptionCount: Number(tally[0]?.total ?? 0),
+        totalDiscounted: tally[0]?.discounted ?? '0',
+        redemptions: redemptions.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+      });
     },
   );
 
@@ -234,12 +366,51 @@ export default async function marketingRoutes(app: FastifyInstance) {
     },
   );
 
+  /**
+   * One banner, whole. `categoryId` is resolved to the category's name and slug
+   * because a `category_top` banner that names a raw uuid tells the reader
+   * nothing about where it is actually appearing.
+   */
+  app.get(
+    '/banners/:id',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('marketing.view')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+
+      const [row] = await store.db
+        .select({
+          banner: banners,
+          categoryName: categories.name,
+          categorySlug: categories.slug,
+        })
+        .from(banners)
+        .leftJoin(categories, eq(categories.id, banners.categoryId))
+        .where(eq(banners.id, id))
+        .limit(1);
+
+      if (!row) throw notFound('That banner does not exist.');
+
+      return ok(reply, {
+        ...row.banner,
+        startsAt: row.banner.startsAt?.toISOString() ?? null,
+        endsAt: row.banner.endsAt?.toISOString() ?? null,
+        createdAt: row.banner.createdAt.toISOString(),
+        updatedAt: row.banner.updatedAt.toISOString(),
+        categoryName: row.categoryName,
+        categorySlug: row.categorySlug,
+      });
+    },
+  );
+
   app.post(
     '/banners',
     { preHandler: [app.requireStoreAdmin, app.requirePermission('marketing.manage')] },
     async (request, reply) => {
       const store = storeOf(request);
       const body = parseBody(bannerSchema, request.body);
+      await assertCategoryExists(store.db, body.categoryId);
+
       const [created] = await store.db.insert(banners).values(body).returning();
 
       await audit(store.db, request, {
@@ -262,6 +433,7 @@ export default async function marketingRoutes(app: FastifyInstance) {
       const store = storeOf(request);
       const { id } = parseParams(uuidParamSchema, request.params);
       const body = parseBody(bannerSchema, request.body);
+      await assertCategoryExists(store.db, body.categoryId);
 
       const [updated] = await store.db
         .update(banners)
@@ -319,6 +491,17 @@ export default async function marketingRoutes(app: FastifyInstance) {
 
       const where = filters.length ? and(...filters) : undefined;
 
+      // Newest first, then the id — the id is what makes the order total, and a
+      // cursor into a list with ties names no position. A bulk import stamps
+      // hundreds of subscribers with the same second, so the ties are real here.
+      const page = keyset<{ id: string; subscribedAt: Date }>([
+        { expr: newsletterSubscribers.subscribedAt, order: 'desc', of: (row) => row.subscribedAt },
+        { expr: newsletterSubscribers.id, order: 'desc', of: (row) => row.id },
+      ]);
+
+      const seek = page.after(query.cursor);
+      const scan = seek ? and(seek, ...filters) : where;
+
       const [rows, tally] = await Promise.all([
         store.db
           .select({
@@ -330,22 +513,86 @@ export default async function marketingRoutes(app: FastifyInstance) {
             unsubscribedAt: newsletterSubscribers.unsubscribedAt,
           })
           .from(newsletterSubscribers)
-          .where(where)
-          .orderBy(desc(newsletterSubscribers.subscribedAt))
-          .limit(query.pageSize)
-          .offset((query.page - 1) * query.pageSize),
-        store.db.select({ total: count() }).from(newsletterSubscribers).where(where),
+          .where(scan)
+          .orderBy(...page.orderBy)
+          // One row more than fits, which separates "there is another batch"
+          // from "that was the last one" without a second query.
+          .limit(query.pageSize + 1)
+          .offset(query.cursor ? 0 : (query.page - 1) * query.pageSize),
+
+        // Counted on the first batch only: the scroll shows the figure once, and
+        // the count is the half of a list read that cannot stop at `pageSize`.
+        query.cursor
+          ? undefined
+          : store.db.select({ total: count() }).from(newsletterSubscribers).where(where),
       ]);
 
-      return paginated(
+      const batch = page.batch(rows, query.pageSize);
+
+      return listed(
         reply,
-        rows.map((row) => ({
+        batch.rows.map((row) => ({
           ...row,
           subscribedAt: row.subscribedAt.toISOString(),
           unsubscribedAt: row.unsubscribedAt?.toISOString() ?? null,
         })),
-        buildMeta(query.page, query.pageSize, Number(tally[0]?.total ?? 0)),
+        {
+          pageSize: query.pageSize,
+          nextCursor: batch.nextCursor,
+          hasMore: batch.hasMore,
+          total: tally ? Number(tally[0]?.total ?? 0) : undefined,
+        },
       );
+    },
+  );
+
+  /**
+   * One subscriber, whole.
+   *
+   * Every column bar `unsubscribe_token_hash`, which is a credential: it is the
+   * single-use secret in the unsubscribe link, and a panel that displays it
+   * hands whoever is reading the screen the ability to unsubscribe that address
+   * without ever seeing the mailbox. Whether one *exists* is worth knowing, so
+   * that is reported as a flag instead.
+   *
+   * The linked account is joined in because a subscriber row that names a
+   * `customer_id` is a shopper, not just an address, and the difference decides
+   * what may be sent to them.
+   */
+  app.get(
+    '/newsletter/:id',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('marketing.view')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+
+      const [row] = await store.db
+        .select({
+          id: newsletterSubscribers.id,
+          email: newsletterSubscribers.email,
+          status: newsletterSubscribers.status,
+          customerId: newsletterSubscribers.customerId,
+          source: newsletterSubscribers.source,
+          subscribedAt: newsletterSubscribers.subscribedAt,
+          unsubscribedAt: newsletterSubscribers.unsubscribedAt,
+          hasUnsubscribeToken: sql<boolean>`${newsletterSubscribers.unsubscribeTokenHash} is not null`,
+          customerName: customers.fullName,
+          customerEmail: customers.email,
+          customerStatus: customers.status,
+          acceptsMarketing: customers.acceptsMarketing,
+        })
+        .from(newsletterSubscribers)
+        .leftJoin(customers, eq(customers.id, newsletterSubscribers.customerId))
+        .where(eq(newsletterSubscribers.id, id))
+        .limit(1);
+
+      if (!row) throw notFound('That subscriber does not exist.');
+
+      return ok(reply, {
+        ...row,
+        subscribedAt: row.subscribedAt.toISOString(),
+        unsubscribedAt: row.unsubscribedAt?.toISOString() ?? null,
+      });
     },
   );
 
@@ -396,22 +643,97 @@ export default async function marketingRoutes(app: FastifyInstance) {
           ? eq(contactMessages.status, query.status as 'new')
           : undefined;
 
+      // Newest first, then the id — the id is what makes the order total, and a
+      // cursor into a list with ties names no position.
+      const page = keyset<{ id: string; createdAt: Date }>([
+        { expr: contactMessages.createdAt, order: 'desc', of: (row) => row.createdAt },
+        { expr: contactMessages.id, order: 'desc', of: (row) => row.id },
+      ]);
+
+      const seek = page.after(query.cursor);
+      const scan = where && seek ? and(where, seek) : (seek ?? where);
+
       const [rows, tally] = await Promise.all([
         store.db
           .select()
           .from(contactMessages)
-          .where(where)
-          .orderBy(desc(contactMessages.createdAt))
-          .limit(query.pageSize)
-          .offset((query.page - 1) * query.pageSize),
-        store.db.select({ total: count() }).from(contactMessages).where(where),
+          .where(scan)
+          .orderBy(...page.orderBy)
+          // One row more than fits, which separates "there is another batch"
+          // from "that was the last one" without a second query.
+          .limit(query.pageSize + 1)
+          .offset(query.cursor ? 0 : (query.page - 1) * query.pageSize),
+
+        // Counted on the first batch only: the scroll shows the figure once, and
+        // the count is the half of a list read that cannot stop at `pageSize`.
+        query.cursor ? undefined : store.db.select({ total: count() }).from(contactMessages).where(where),
       ]);
 
-      return paginated(
+      const batch = page.batch(rows, query.pageSize);
+
+      return listed(
         reply,
-        rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
-        buildMeta(query.page, query.pageSize, Number(tally[0]?.total ?? 0)),
+        batch.rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+        {
+          pageSize: query.pageSize,
+          nextCursor: batch.nextCursor,
+          hasMore: batch.hasMore,
+          total: tally ? Number(tally[0]?.total ?? 0) : undefined,
+        },
       );
+    },
+  );
+
+  /**
+   * One message, whole.
+   *
+   * The row already holds everything the form captured, `ipAddress` included —
+   * which the list deliberately does not show and this does, because it is what
+   * separates one person writing twice from a form being scripted.
+   *
+   * The contact form does not require an account, so the sender is matched to
+   * one by email if there is one. That is a lookup, not a link: the message
+   * stores no `customer_id`, and an address that matches today may not have when
+   * the message was sent.
+   */
+  app.get(
+    '/contact-messages/:id',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('marketing.view')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+
+      const [message] = await store.db
+        .select()
+        .from(contactMessages)
+        .where(eq(contactMessages.id, id))
+        .limit(1);
+
+      if (!message) throw notFound('That message does not exist.');
+
+      const [account] = await store.db
+        .select({
+          id: customers.id,
+          fullName: customers.fullName,
+          email: customers.email,
+          status: customers.status,
+          createdAt: customers.createdAt,
+          orderCount: sql<number>`(
+            select count(*)::int from ${orders} o where o.customer_id = ${customers.id}
+          )`,
+        })
+        .from(customers)
+        .where(eq(customers.email, message.email))
+        .limit(1);
+
+      return ok(reply, {
+        ...message,
+        createdAt: message.createdAt.toISOString(),
+        repliedAt: message.repliedAt?.toISOString() ?? null,
+        account: account
+          ? { ...account, createdAt: account.createdAt.toISOString(), orderCount: Number(account.orderCount) }
+          : null,
+      });
     },
   );
 }

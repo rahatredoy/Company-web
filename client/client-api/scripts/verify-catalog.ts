@@ -265,7 +265,15 @@ async function main(): Promise<void> {
     check('the list joins the category and brand names',
       list.body?.data?.[0]?.categoryName != null && list.body?.data?.[0]?.brandName != null,
       list.body?.data?.[0]);
-    check('the list carries pagination meta', typeof list.body?.meta?.totalPages === 'number', list.body?.meta);
+    check(
+      'the list carries its cursor meta',
+      typeof list.body?.meta?.pageSize === 'number' &&
+        typeof list.body?.meta?.hasMore === 'boolean' &&
+        list.body?.meta?.nextCursor !== undefined,
+      list.body?.meta,
+    );
+    // The count is on the uncursored read only, which is the one just made.
+    check('an uncursored read counts the filtered list', typeof list.body?.meta?.total === 'number', list.body?.meta);
 
     const byStatus = await call('/products?status=draft');
     check('filtering by a status it is not in excludes it',

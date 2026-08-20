@@ -165,10 +165,33 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   return (envelope && 'data' in envelope ? (envelope.data as T) : (payload as T));
 }
 
-export async function apiFetchPaginated<T>(
+/**
+ * The envelope every admin list answers with (`lib/http.ts#listed` on the API
+ * side). It replaced the numbered `{ page, totalPages }` one when the panel
+ * moved from paging to scrolling.
+ *
+ * `total` is counted on the first batch only — the count is the half of a list
+ * read that cannot stop at `pageSize`, so a cursor batch omits it rather than
+ * paying for it again. A caller therefore has to *keep* the first answer rather
+ * than read it off the batch in hand; `useInfiniteList` does.
+ */
+export interface ListMeta {
+  pageSize: number;
+  /** Opaque marker for the row after the last one sent; null when the list ends. */
+  nextCursor: string | null;
+  hasMore: boolean;
+  total?: number;
+}
+
+/**
+ * Its own fetch rather than a call to `apiFetch`: `apiFetch` unwraps `data` and
+ * throws the envelope away, and `meta` is the half of a list response that says
+ * whether there is another batch and where it starts.
+ */
+export async function apiFetchListed<T>(
   path: string,
   options: RequestOptions = {},
-): Promise<{ data: T[]; meta: { page: number; pageSize: number; total: number; totalPages: number } }> {
+): Promise<{ data: T[]; meta: ListMeta }> {
   const { method = 'GET', body, query, cookieHeader, baseUrl, headers, ...rest } = options;
 
   const requestHeaders = new Headers(headers);
@@ -189,28 +212,24 @@ export async function apiFetchPaginated<T>(
   });
 
   const payload = (await response.json().catch(() => null)) as
-    | { data?: T[]; meta?: { page: number; pageSize: number; total: number; totalPages: number } }
+    | { data?: T[]; meta?: ListMeta }
     | (ApiErrorBody & { data?: undefined })
     | null;
 
   if (!response.ok) {
-    const body = (payload ?? {}) as Partial<ApiErrorBody>;
+    const failure = (payload ?? {}) as Partial<ApiErrorBody>;
     throw new ApiError(response.status, {
-      code: body.code ?? 'INTERNAL_ERROR',
-      message: body.message ?? 'Something went wrong. Please try again.',
-      requestId: body.requestId,
-      details: body.details,
+      code: failure.code ?? 'INTERNAL_ERROR',
+      message: failure.message ?? 'Something went wrong. Please try again.',
+      requestId: failure.requestId,
+      details: failure.details,
     });
   }
 
   return {
-    data: (payload?.data as T[]) ?? [],
-    meta: (payload as { meta?: { page: number; pageSize: number; total: number; totalPages: number } })?.meta ?? {
-      page: 1,
-      pageSize: 20,
-      total: 0,
-      totalPages: 0,
-    },
+    data: (payload as { data?: T[] })?.data ?? [],
+    meta:
+      (payload as { meta?: ListMeta })?.meta ?? { pageSize: 0, nextCursor: null, hasMore: false, total: 0 },
   };
 }
 

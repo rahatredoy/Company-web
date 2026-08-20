@@ -1,15 +1,17 @@
-import { and, asc, avg, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, asc, avg, count, eq, ilike, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { products, reviewImages, reviews } from '../../db/schema/index';
+import { customers, orders, products, reviewImages, reviews } from '../../db/schema/index';
 import type { TenantExecutor } from '../../db/tenant-manager';
 import { audit } from '../../lib/audit';
 import { invalidateStorefrontOnWrite } from '../../lib/cache';
 import { notFound } from '../../lib/errors';
-import { buildMeta, noContent, ok, paginated, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { cursorField, listed, noContent, ok, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { keyset } from '../../lib/keyset';
 import { storeOf } from '../../plugins/tenant';
 
 const listQuerySchema = z.object({
+  ...cursorField,
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().trim().max(120).optional(),
@@ -61,7 +63,19 @@ export default async function adminReviewRoutes(app: FastifyInstance) {
       ].filter(Boolean);
 
       const where = filters.length ? and(...filters) : undefined;
-      const direction = query.order === 'asc' ? asc : desc;
+
+      /*
+       * The chosen column, then the id — the id is what makes the order total.
+       * Sorting by rating alone puts thousands of rows in an arbitrary order
+       * within each star, and a cursor into a list with ties names no position.
+       */
+      const page = keyset<{ id: string; createdAt: Date; rating: number }>([
+        { expr: reviews[query.sort], order: query.order, of: (row) => row[query.sort] },
+        { expr: reviews.id, order: query.order, of: (row) => row.id },
+      ]);
+
+      const seek = page.after(query.cursor);
+      const scan = seek ? and(seek, ...filters) : where;
 
       const [rows, tally] = await Promise.all([
         store.db
@@ -80,26 +94,104 @@ export default async function adminReviewRoutes(app: FastifyInstance) {
           })
           .from(reviews)
           .innerJoin(products, eq(products.id, reviews.productId))
-          .where(where)
-          .orderBy(direction(reviews[query.sort]))
-          .limit(query.pageSize)
-          .offset((query.page - 1) * query.pageSize),
+          .where(scan)
+          .orderBy(...page.orderBy)
+          // One row more than fits, which separates "there is another batch"
+          // from "that was the last one" without a second query.
+          .limit(query.pageSize + 1)
+          .offset(query.cursor ? 0 : (query.page - 1) * query.pageSize),
 
-        store.db
-          .select({ total: count() })
-          .from(reviews)
-          .innerJoin(products, eq(products.id, reviews.productId))
-          .where(where),
+        // Counted on the first batch only: the scroll shows the figure once, and
+        // the count is the half of a list read that cannot stop at `pageSize`.
+        query.cursor
+          ? undefined
+          : store.db
+              .select({ total: count() })
+              .from(reviews)
+              .innerJoin(products, eq(products.id, reviews.productId))
+              .where(where),
       ]);
+
+      const batch = page.batch(rows, query.pageSize);
 
       // A pending count for the queue badge comes from this same endpoint with
       // `?status=pending&pageSize=1` and `meta.total` — one cheap query rather
-      // than a second shape bolted onto the pagination envelope.
-      return paginated(
+      // than a second shape bolted onto the list envelope. It asks without a
+      // cursor, which is what makes the count present.
+      return listed(
         reply,
-        rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
-        buildMeta(query.page, query.pageSize, Number(tally[0]?.total ?? 0)),
+        batch.rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+        {
+          pageSize: query.pageSize,
+          nextCursor: batch.nextCursor,
+          hasMore: batch.hasMore,
+          total: tally ? Number(tally[0]?.total ?? 0) : undefined,
+        },
       );
+    },
+  );
+
+  /**
+   * One review, whole.
+   *
+   * The list is what a moderator scans; this is what they read before deciding,
+   * so it holds every column of the row rather than the eight the table shows —
+   * the moderation trail (`moderatedBy`, `moderatedAt`), the reply and when it
+   * was sent, `helpfulCount`, and the ids linking it to a product, an account
+   * and the order that made it a verified purchase. The images come with it
+   * because a photograph is usually the reason a review is being looked at.
+   *
+   * `customerName` on the row is a snapshot taken when the review was written;
+   * the joined `customer` is the account as it stands now, and the two are
+   * allowed to disagree — a renamed or deleted account must not rewrite what a
+   * review was signed with.
+   */
+  app.get(
+    '/reviews/:id',
+    { preHandler: [app.requireStoreAdmin, app.requirePermission('reviews.view')] },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+
+      const [row] = await store.db
+        .select({
+          review: reviews,
+          productName: products.name,
+          productSlug: products.slug,
+          productStatus: products.status,
+          orderNumber: orders.orderNumber,
+          customerEmail: customers.email,
+          customerStatus: customers.status,
+        })
+        .from(reviews)
+        .innerJoin(products, eq(products.id, reviews.productId))
+        .leftJoin(orders, eq(orders.id, reviews.orderId))
+        .leftJoin(customers, eq(customers.id, reviews.customerId))
+        .where(eq(reviews.id, id))
+        .limit(1);
+
+      if (!row) throw notFound('That review does not exist.');
+
+      const images = await store.db
+        .select()
+        .from(reviewImages)
+        .where(eq(reviewImages.reviewId, id))
+        .orderBy(asc(reviewImages.createdAt));
+
+      return ok(reply, {
+        ...row.review,
+        createdAt: row.review.createdAt.toISOString(),
+        updatedAt: row.review.updatedAt.toISOString(),
+        adminRepliedAt: row.review.adminRepliedAt?.toISOString() ?? null,
+        moderatedAt: row.review.moderatedAt?.toISOString() ?? null,
+        productName: row.productName,
+        productSlug: row.productSlug,
+        productStatus: row.productStatus,
+        orderNumber: row.orderNumber,
+        customerEmail: row.customerEmail,
+        customerStatus: row.customerStatus,
+        images: images.map((image) => ({ ...image, createdAt: image.createdAt.toISOString() })),
+      });
     },
   );
 

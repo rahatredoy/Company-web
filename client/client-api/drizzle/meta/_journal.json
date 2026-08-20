@@ -50,6 +50,34 @@
       "when": 1786728000000,
       "tag": "0006_storefront_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786814000000,
+      "tag": "0007_category_featured",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786900000000,
+      "tag": "0008_product_video_and_tracking",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786986000000,
+      "tag": "0009_banner_category_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787072400000,
+      "tag": "0010_measure_selling",
+      "breakpoints": true
     }
   ]
 }

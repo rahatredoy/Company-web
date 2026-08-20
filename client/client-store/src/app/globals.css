@@ -396,3 +396,63 @@ input[type='search']::-webkit-search-results-decoration {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* ---------------------------------------------------------------------------
+   Product rails, for a phone reading the desktop layout.
+
+   `NEXT_PUBLIC_MOBILE_LAYOUT=desktop` hands a phone the same 1280px layout a
+   monitor gets and lets the browser scale it down — about 31% on a 400px screen.
+   Every part of the design survives that except the product grid: six cards
+   across 1280px is roughly 60px a card on the screen, which is a coloured smudge
+   with an unreadable price under it.
+
+   So the grid, and only the grid, stops being a grid there. Two cards fill the
+   width — 640px of layout, half the phone's screen — and the rest are reached by
+   scrolling sideways, which is the one gesture a phone has and a monitor does
+   not. Everything around them is still the desktop layout, unchanged.
+
+   `data-phone-layout` is set by the script in `app/layout.tsx`. A width media
+   query cannot stand in for it: in this mode the phone's layout viewport is
+   1280px too, so a phone and a monitor answer every width query identically.
+
+   These rules are deliberately **unlayered**. Tailwind's utilities live in
+   `@layer utilities`, and unlayered CSS beats every layer whatever its
+   specificity — which is what lets one rule here override six different
+   per-template `grid-cols-*` strings without naming any of them.
+--------------------------------------------------------------------------- */
+
+html[data-phone-layout] .product-grid {
+  display: flex;
+  flex-wrap: nowrap;
+  /* Normalised, because the six templates set four different grid gaps and the
+     card width below has to subtract the one actually in force. */
+  gap: 1rem;
+  overflow-x: auto;
+  /* A swipe that runs off the end of the rail must not then drag the page. */
+  overscroll-behavior-x: contain;
+  /* `proximity`, not `mandatory`: mandatory fights momentum on a long rail and
+     yanks the cards back to a boundary the finger had already left. */
+  scroll-snap-type: x proximity;
+  /* The row grew a scrollbar; leave it somewhere to sit. */
+  padding-bottom: 0.5rem;
+}
+
+html[data-phone-layout] .product-grid > * {
+  /* Exactly two across, with the gap taken out of the cards rather than off the
+     edge of the screen. */
+  flex: 0 0 calc((100% - 1rem) / 2);
+  /* A flex item's default `min-width: auto` lets a long product name push the
+     card wider than its basis, which would put 1.7 cards on screen. */
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+/*
+  The homepage rails are already scroll containers, so what changes is only how
+  many cards they show: from the template's `carouselPerView` — up to six at this
+  width — down to the same two. Scoped to `.product-rail` on purpose, since a
+  lookbook or a logo strip is not a product grid and keeps its own count.
+*/
+html[data-phone-layout] .product-rail [data-carousel-item] {
+  flex: 0 0 calc((100% - 1rem) / 2);
+}

@@ -34,20 +34,28 @@ export const publicConfig = {
    *
    * `desktop` — the phone is handed the **same layout a monitor gets**, laid
    * out at `DESKTOP_LAYOUT_WIDTH` and scaled down by the browser to fit the
-   * screen. The category sidebar, the eight-across icon row and the six-across
-   * product grid all survive; everything is simply smaller. This is done with
+   * screen. The category sidebar, the eight-across icon row and the full
+   * navigation all survive; everything is simply smaller. This is done with
    * the viewport meta tag rather than with CSS, because breakpoints answer to
    * the layout viewport and this is what changes that viewport.
+   *
+   * **Product grids are the one exception, and they are what makes the mode
+   * usable.** Six cards across 1280px is about 60px a card once the page is
+   * scaled onto a 400px screen — a product photograph that small is a coloured
+   * smudge and the price under it is unreadable. So on a phone-sized screen the
+   * grids and the homepage rails both show exactly **two** cards, half the
+   * screen each, and the rest are reached by scrolling sideways: the one gesture
+   * a phone has and a monitor does not. `globals.css` holds those rules and
+   * `PHONE_SCREEN_MAX_WIDTH` decides who gets them.
    *
    * `responsive` — the mobile-first layout: chrome re-flows, grids drop to two
    * columns, the bottom bar appears.
    *
-   * The trade-off is legibility, and it is not small. On a 400px-wide phone a
-   * 1280px layout scales to about 31%, rendering 14px body text at roughly 4px.
-   * Pinch-zoom still works — zoom is never disabled — but little is comfortably
-   * readable until the visitor uses it.
+   * What `desktop` still costs is type: body copy is laid out at 1280px and
+   * scaled with everything else, so a shopper reading the fine print will
+   * pinch-zoom to do it. Zoom is deliberately never disabled either way.
    */
-  mobileLayout: (process.env.NEXT_PUBLIC_MOBILE_LAYOUT ?? 'desktop') as 'desktop' | 'responsive',
+  mobileLayout: (process.env.NEXT_PUBLIC_MOBILE_LAYOUT ?? 'responsive') as 'desktop' | 'responsive',
 
   /** Loaded only when the store has configured them. */
   analytics: {
@@ -66,9 +74,27 @@ export const publicConfig = {
  */
 export const DESKTOP_LAYOUT_WIDTH = 1280;
 
+/**
+ * The widest screen that is treated as a phone in `desktop` mobile mode.
+ *
+ * It is applied by the one-line script in `app/layout.tsx`, not by a media
+ * query, and it has to be: in this mode the phone's layout viewport is 1280px
+ * as well, so every width query answers the same on a phone as on a monitor and
+ * CSS alone cannot tell the two apart. `screen` describes the device rather than
+ * the viewport, so it still can.
+ *
+ * Measured on the **short** edge, so turning the phone does not change the
+ * answer. 600 sits in the gap between the widest phones (about 440) and the
+ * narrowest tablets (about 740) — a tablet reading a 1280px layout at 60% is
+ * legible already and keeps the desktop grid.
+ */
+export const PHONE_SCREEN_MAX_WIDTH = 600;
+
 /** Product grids and listings. Kept here so every caller agrees. */
 export const PAGE_SIZE = {
   shop: 24,
+  /** One batch of the homepage's whole-catalogue feed — see `catalog-feed.tsx`. */
+  home: 24,
   category: 24,
   search: 24,
   reviews: 10,

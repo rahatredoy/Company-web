@@ -215,8 +215,19 @@ export const banners = pgTable(
     linkUrl: text('link_url'),
     buttonLabel: varchar('button_label', { length: 60 }),
     position: bannerPosition('position').notNull().default('home_hero'),
-    /** Restricts a `category_top` banner to one category. */
-    categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'cascade' }),
+    /**
+     * Where the banner goes when it is clicked.
+     *
+     * A category or a subcategory — the two are one table, so a picker over it
+     * offers both without the schema knowing the difference. It is the
+     * destination rather than a placement restriction: `resolveBanners` turns it
+     * into `/category/<slug>`, and it outranks `linkUrl`, which stays for the
+     * addresses that are not a category (`/sale`, a landing page).
+     *
+     * `set null`, not cascade: reorganising the catalogue must cost a banner its
+     * link and never its artwork. See `drizzle/0009_banner_category_link.sql`.
+     */
+    categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'set null' }),
     startsAt: timestamp('starts_at', { withTimezone: true }),
     endsAt: timestamp('ends_at', { withTimezone: true }),
     isActive: boolean('is_active').notNull().default(true),

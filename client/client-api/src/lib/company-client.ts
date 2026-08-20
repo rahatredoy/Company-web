@@ -157,9 +157,28 @@ export function subscribeToInvalidations(): void {
   });
 }
 
-/** Drops this process's copy — for the verification scripts, which poison it. */
+/** Drops this process's copy. */
 export function clearTenantMemo(): void {
   memo.clear();
+}
+
+/**
+ * Tells **every** process to drop its copy of these keys.
+ *
+ * The verification scripts run out-of-process: they poison the Redis record to
+ * exercise the suspended/expired/not-ready paths and then make a real request
+ * against the running API. Writing to Redis alone no longer reaches that API,
+ * because it holds the record in memory for a few seconds — so a script that
+ * only wrote the key would be testing a store the server still believes is
+ * healthy, and the check would fail for a reason that has nothing to do with
+ * what it is testing.
+ *
+ * Exported rather than inlined into the scripts so the channel name lives in one
+ * place, next to the subscriber that reads it.
+ */
+export async function publishTenantInvalidation(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  await redis.publish(INVALIDATION_CHANNEL, JSON.stringify(keys)).catch(() => undefined);
 }
 
 async function callCompany<T>(path: string, init?: RequestInit): Promise<T | null> {

@@ -14,6 +14,7 @@ import healthRoutes from './modules/health/routes';
 import authRoutes from './modules/auth/routes';
 import catalogRoutes from './modules/catalog/routes';
 import customerRoutes from './modules/customers/routes';
+import dashboardRoutes from './modules/dashboard/routes';
 import fulfilmentRoutes from './modules/fulfilment/routes';
 import inventoryRoutes from './modules/inventory/routes';
 import marketingRoutes from './modules/marketing/routes';
@@ -100,6 +101,7 @@ export async function buildApp() {
   await app.register(
     async (instance) => {
       await instance.register(authRoutes);
+      await instance.register(dashboardRoutes);
       await instance.register(catalogRoutes);
       await instance.register(orderRoutes);
       await instance.register(customerRoutes);

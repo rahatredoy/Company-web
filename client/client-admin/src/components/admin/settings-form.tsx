@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
+import { Plus, Trash2 } from 'lucide-react';
 import type { PaymentMethodRow, StoreSettingsRow } from '@/lib/types';
 import { api, ApiError, errorMessage } from '@/lib/api';
 import { Alert } from '@/components/ui/alert';
@@ -11,6 +12,7 @@ import { Field } from '@/components/ui/field';
 import { Input, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
+import { DEFAULT_MEASURE_OPTIONS, MAX_MEASURE_OPTIONS, type MeasureOption } from '@/lib/measure';
 
 /**
  * Store settings.
@@ -36,6 +38,17 @@ export function SettingsForm({
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
 
   const currencyLocked = settings.orderCount > 0;
+
+  /*
+   * The shop's default size picker, held in state rather than read off the form:
+   * it is a list with rows that are added and removed, and numbered field names
+   * would leave a hole in the sequence on every removal.
+   */
+  const [measureOptions, setMeasureOptions] = React.useState<MeasureOption[]>(
+    settings.measureOptions.length > 0
+      ? settings.measureOptions
+      : (settings.defaultMeasureOptions ?? DEFAULT_MEASURE_OPTIONS),
+  );
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -66,6 +79,10 @@ export function SettingsForm({
         whatsappNumber: optional('whatsappNumber'),
         whatsappEnabled: data.get('whatsappEnabled') === 'on',
         lowStockThreshold: Number(data.get('lowStockThreshold') ?? 5),
+        // Half-typed rows are dropped rather than refused: the owner is mid-
+        // thought, and a validation error on a row they are still filling in
+        // would block a save that has nothing to do with it.
+        measureOptions: measureOptions.filter((option) => option.measure > 0 && option.label.trim() !== ''),
       });
 
       toast.success('Settings saved.');
@@ -151,6 +168,80 @@ export function SettingsForm({
               disabled={!canUpdate}
             />
           </Field>
+
+          {/*
+            Set once for the whole shop, because a greengrocer sells most of its
+            catalogue the same four ways. A product may still name its own list
+            on its Details tab; this is what every other one uses.
+          */}
+          <div className="space-y-2 border-t border-border/60 pt-4">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium">Default sizes for products sold by weight</p>
+              <p className="text-xs text-muted-foreground">
+                The picker a shopper sees on the card — 1kg, 500gm, 250gm. The amount is in the
+                product&apos;s own base unit: grams for weight, millilitres for volume.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              {measureOptions.map((option, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    value={option.label}
+                    onChange={(event) =>
+                      setMeasureOptions((rows) =>
+                        rows.map((row, i) => (i === index ? { ...row, label: event.target.value } : row)),
+                      )
+                    }
+                    placeholder="500gm"
+                    maxLength={24}
+                    disabled={!canUpdate}
+                    aria-label={'Size ' + (index + 1) + ' label'}
+                    className="flex-1"
+                  />
+                  <Input
+                    value={option.measure > 0 ? String(option.measure) : ''}
+                    onChange={(event) =>
+                      setMeasureOptions((rows) =>
+                        rows.map((row, i) =>
+                          i === index
+                            ? { ...row, measure: Number(event.target.value.replace(/[^0-9]/g, '')) || 0 }
+                            : row,
+                        ),
+                      )
+                    }
+                    placeholder="500"
+                    inputMode="numeric"
+                    disabled={!canUpdate}
+                    aria-label={'Size ' + (index + 1) + ' amount'}
+                    className="w-28"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-9 shrink-0 text-muted-foreground"
+                    disabled={!canUpdate}
+                    onClick={() => setMeasureOptions((rows) => rows.filter((_, i) => i !== index))}
+                    aria-label={'Remove size ' + (index + 1)}
+                  >
+                    <Trash2 className="size-4" aria-hidden />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            {canUpdate && measureOptions.length < MAX_MEASURE_OPTIONS ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setMeasureOptions((rows) => [...rows, { label: '', measure: 0 }])}
+              >
+                <Plus className="mr-1 size-4" aria-hidden /> Add a size
+              </Button>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 

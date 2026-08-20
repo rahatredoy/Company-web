@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import type { CouponRow, SessionResponse } from '@/lib/types';
 import { can } from '@/lib/types';
-import { serverGet, serverGetPaginated } from '@/lib/server-api';
+import { serverGet, serverGetListed } from '@/lib/server-api';
+import { BATCH_SIZE } from '@/lib/list';
 import { PageHeader } from '@/components/admin/page-header';
-import { Pagination } from '@/components/admin/pagination';
 import { TableFilters } from '@/components/admin/table-filters';
 import { CouponManager } from '@/components/admin/coupon-manager';
 
@@ -32,10 +32,13 @@ export default async function DiscountsPage({
   const currency = session.authenticated ? session.store.currency : 'USD';
   const canManage = session.authenticated && can(session.admin, 'marketing.manage');
 
-  const { data, meta } = await serverGetPaginated<CouponRow>('/api/v1/admin/coupons', {
-    page: single('page') ?? 1,
-    search: single('search'),
-    status: single('status'),
+  // One object, so the first batch here and every batch the browser asks for
+  // afterwards read the same filtered list. No cursor on this one, which is what
+  // makes the API count it.
+  const query = { search: single('search'), status: single('status') };
+  const first = await serverGetListed<CouponRow>('/api/v1/admin/coupons', {
+    ...query,
+    pageSize: BATCH_SIZE,
   });
 
   return (
@@ -47,8 +50,12 @@ export default async function DiscountsPage({
 
       <TableFilters searchPlaceholder="Code or description" statusOptions={STATUS_OPTIONS} />
 
-      <CouponManager rows={data} currency={currency} canManage={canManage} />
-      <Pagination {...meta} />
+      <CouponManager
+        initial={{ rows: first.data, meta: first.meta }}
+        query={query}
+        currency={currency}
+        canManage={canManage}
+      />
     </div>
   );
 }

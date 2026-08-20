@@ -6,6 +6,7 @@ import { can } from '@/lib/types';
 import { serverGet, serverGetOptional } from '@/lib/server-api';
 import { formatDateTime, formatMoney, titleCase } from '@/lib/format';
 import { PageHeader } from '@/components/admin/page-header';
+import { OrderNote } from '@/components/admin/order-note';
 import { OrderWorkflow } from '@/components/admin/order-workflow';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -98,13 +99,31 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                         <TableCell>
                           <span className="block font-medium">{line.productName}</span>
                           <span className="block text-xs text-muted-foreground">
-                            {[line.variantTitle, line.sku].filter(Boolean).join(' · ') || '—'}
+                            {[line.measureLabel ?? line.variantTitle, line.sku].filter(Boolean).join(' · ') || '—'}
                             {line.returnedQuantity > 0
                               ? ` · ${line.returnedQuantity} returned`
                               : ''}
                           </span>
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">{line.quantity}</TableCell>
+                        {/*
+                          What to weigh out, not just how many. A line reading
+                          "2" against a product sold by the kilo is the one
+                          number that gets a parcel packed wrong.
+
+                          Printed as "x 500gm" rather than as a total, because
+                          the size is a frozen label and the line does not carry
+                          the base unit it was measured in — multiplying it into
+                          "1kg" here would mean guessing at a unit the receipt
+                          never recorded.
+                        */}
+                        <TableCell className="text-right tabular-nums">
+                          {line.quantity}
+                          {line.measureLabel ? (
+                            <span className="block text-xs text-muted-foreground">
+                              &times; {line.measureLabel}
+                            </span>
+                          ) : null}
+                        </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {money(line.unitSalePrice ?? line.unitPrice)}
                         </TableCell>
@@ -207,6 +226,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               </CardContent>
             </Card>
           ) : null}
+
+          <OrderNote orderId={order.id} note={order.adminNote} canUpdate={canUpdate} />
         </div>
       </div>
     </div>

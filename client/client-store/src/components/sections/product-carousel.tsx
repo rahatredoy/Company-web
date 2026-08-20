@@ -18,6 +18,10 @@ import { cn } from '@/lib/utils';
  * wide screen, two on a phone" is a number in a preset rather than a grid class
  * every template re-derives and one of them gets wrong.
  *
+ * `product-rail` on the root is not styling either — it is what `globals.css`
+ * narrows the two-across phone override to, so a rail of products answers to it
+ * and `GenericCarousel`'s lookbook tiles and logo strips do not.
+ *
  * Because it is a scroll container, the cards a visitor cannot currently see are
  * still in the document — reachable by keyboard, readable by a screen reader,
  * and indexable. A transform track with `overflow: hidden` hides them from all
@@ -101,7 +105,7 @@ export function ProductCarousel({
   const itemClass = railItemClass(perView);
 
   return (
-    <Carousel label={label} loop={false} className={cn('group/rail', className)}>
+    <Carousel label={label} loop={false} className={cn('product-rail group/rail', className)}>
       <div className="relative">
         <CarouselViewport gap="gap-4" className="pb-1">
           {products.map((product) => (

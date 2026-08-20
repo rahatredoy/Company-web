@@ -15,7 +15,17 @@ import {
   normaliseThemeKey,
 } from '../../lib/constants';
 import { ERROR_CODES, conflict, notFound } from '../../lib/errors';
-import { buildMeta, noContent, ok, paginated, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import {
+  cursorField,
+  listed,
+  noContent,
+  ok,
+  parseBody,
+  parseParams,
+  parseQuery,
+  uuidParamSchema,
+} from '../../lib/http';
+import { keyset } from '../../lib/keyset';
 import { sanitiseHtml } from '../../lib/sanitise';
 import { slugify } from '../../lib/utils';
 import { storeOf } from '../../plugins/tenant';
@@ -271,6 +281,7 @@ export default async function websiteRoutes(app: FastifyInstance) {
       const store = storeOf(request);
       const query = parseQuery(
         z.object({
+          ...cursorField,
           page: z.coerce.number().int().min(1).default(1),
           pageSize: z.coerce.number().int().min(1).max(100).default(20),
           search: z.string().trim().max(120).optional(),
@@ -286,6 +297,21 @@ export default async function websiteRoutes(app: FastifyInstance) {
 
       const where = filters.length ? and(...filters) : undefined;
 
+      /*
+       * Author's order, then title, then the id. The id is what makes the order
+       * total — every seeded page shares `sort_order = 0`, so without it a cursor
+       * would be pointing into a set of rows the database may return in any
+       * order, and a batch boundary would drop one page and repeat another.
+       */
+      const page = keyset<{ id: string; sortOrder: number; title: string }>([
+        { expr: pages.sortOrder, order: 'asc', of: (row) => row.sortOrder },
+        { expr: pages.title, order: 'asc', of: (row) => row.title },
+        { expr: pages.id, order: 'asc', of: (row) => row.id },
+      ]);
+
+      const seek = page.after(query.cursor);
+      const scan = seek ? and(seek, ...filters) : where;
+
       const [rows, tally] = await Promise.all([
         store.db
           .select({
@@ -299,17 +325,29 @@ export default async function websiteRoutes(app: FastifyInstance) {
             updatedAt: pages.updatedAt,
           })
           .from(pages)
-          .where(where)
-          .orderBy(asc(pages.sortOrder), asc(pages.title))
-          .limit(query.pageSize)
-          .offset((query.page - 1) * query.pageSize),
-        store.db.select({ total: count() }).from(pages).where(where),
+          .where(scan)
+          .orderBy(...page.orderBy)
+          // One row more than fits, which separates "there is another batch"
+          // from "that was the last one" without a second query.
+          .limit(query.pageSize + 1)
+          .offset(query.cursor ? 0 : (query.page - 1) * query.pageSize),
+
+        // Counted on the first batch only: the scroll shows the figure once, and
+        // the count is the half of a list read that cannot stop at `pageSize`.
+        query.cursor ? undefined : store.db.select({ total: count() }).from(pages).where(where),
       ]);
 
-      return paginated(
+      const batch = page.batch(rows, query.pageSize);
+
+      return listed(
         reply,
-        rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() })),
-        buildMeta(query.page, query.pageSize, Number(tally[0]?.total ?? 0)),
+        batch.rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() })),
+        {
+          pageSize: query.pageSize,
+          nextCursor: batch.nextCursor,
+          hasMore: batch.hasMore,
+          total: tally ? Number(tally[0]?.total ?? 0) : undefined,
+        },
       );
     },
   );

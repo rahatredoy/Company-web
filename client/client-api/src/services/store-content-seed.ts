@@ -118,6 +118,14 @@ const DEFAULT_FAQS = [
  * There is no `hero` block: a hero needs an image, and one shipped from here
  * would be a stock photo of somebody else's shop on the front page of theirs.
  * The first thing the owner is asked to add is the first thing a visitor sees.
+ *
+ * The two `banner` blocks are the advertising breaks between the product rows,
+ * and they are seeded **empty on purpose**. They name a placement rather than
+ * carrying artwork, so each is invisible until the owner adds a banner at
+ * `/banners` and becomes a full-width strip the moment they do — no second trip
+ * to the homepage screen to make room for it. That is the same reason there is
+ * no hero here, arrived at from the other side: a block that needs a picture
+ * ships without one, rather than with somebody else's.
  */
 const DEFAULT_SECTIONS = [
   {
@@ -127,12 +135,70 @@ const DEFAULT_SECTIONS = [
     config: {},
     sortOrder: 10,
   },
+  /*
+   * The shop itself, one department at a time, spread down the page.
+   *
+   * The rail above lists departments and stops there, so every aisle in the shop
+   * — and on a broad catalogue that is most of it — is reachable only by opening
+   * a department first and reading a second menu. A `showProducts` block draws
+   * one department as a panel instead: a row of products per aisle, three of them
+   * stacked, with every aisle in the department offered as a chip above.
+   *
+   * `showProducts` rather than `showSubcategories`, which is the same block
+   * printing those aisles as a tree of links. The tree answers "how is this shop
+   * filed" when the question a visitor arrives with is "what do you sell" — a
+   * shopper recognises a phone on sight and has to *read* the word Smartphones.
+   * The directory is still rendered for a store that asks for it, and
+   * `scripts/show-products-under-categories.ts` moved the stores seeded before
+   * this existed.
+   *
+   * **Four blocks rather than one drawing four departments**, because stacking
+   * them puts the whole shop in one place: four panels between two banners reads
+   * as a catalogue dump and buries whatever follows. Spread instead — a
+   * department, then a promo, then a rail, then the next department — so every
+   * product on the page arrives beside something unlike it.
+   *
+   * `offset` is what keeps two of them from drawing the same department, and it
+   * is an offset rather than a category id because **this store has no
+   * categories yet**: an id would have to be filled in by hand later, an offset
+   * fills itself in as the owner builds the shop. A block whose department does
+   * not exist renders nothing at all, so a shop with two departments simply shows
+   * two panels.
+   *
+   * `scripts/drop-duplicate-category-blocks.ts` knows these are not the rail
+   * again and leaves them alone; `scripts/distribute-category-blocks.ts` is what
+   * gives the same shape to a homepage that was built before it.
+   */
+  {
+    type: 'category_grid' as const,
+    title: null,
+    subtitle: null,
+    config: { showProducts: true, limit: 1, offset: 0 },
+    sortOrder: 15,
+  },
   {
     type: 'product_grid' as const,
     title: 'New Arrivals',
     subtitle: 'The latest additions to the store',
     config: { source: 'new_arrivals', limit: 8 },
     sortOrder: 20,
+  },
+  {
+    /*
+     * The advertising break between two rows of products.
+     *
+     * `bannerPosition` rather than embedded artwork, so `/banners` is the one
+     * screen that edits it — and `home.routes.ts#resolveBanners` sends whatever
+     * is live and in date, which is what lets a campaign start and finish
+     * without anyone opening this page. One wide strip rather than a row of
+     * panels: a break in a scrolling page has to read as a break, and three
+     * cards side by side read as another row of things to consider.
+     */
+    type: 'banner' as const,
+    title: null,
+    subtitle: null,
+    config: { bannerPosition: 'home_promo', columns: 1, ratio: 'strip' },
+    sortOrder: 25,
   },
   {
     type: 'benefits' as const,
@@ -149,6 +215,13 @@ const DEFAULT_SECTIONS = [
     sortOrder: 30,
   },
   {
+    type: 'category_grid' as const,
+    title: null,
+    subtitle: null,
+    config: { showProducts: true, limit: 1, offset: 1 },
+    sortOrder: 35,
+  },
+  {
     type: 'product_carousel' as const,
     title: 'Best Sellers',
     subtitle: 'What other customers are buying',
@@ -156,11 +229,65 @@ const DEFAULT_SECTIONS = [
     sortOrder: 40,
   },
   {
+    // The block that shows the rest of the shop. Every other product block
+    // answers a question — newest, best selling — and a product that answers
+    // none of them would otherwise never reach the homepage at all. `discover`
+    // walks the whole published catalogue an hour at a time, so each of them
+    // gets its turn in front of a visitor. See `home.routes.ts#resolveSource`.
+    type: 'product_grid' as const,
+    title: 'More to Explore',
+    subtitle: 'A different part of the shop every hour',
+    config: { source: 'discover', limit: 12 },
+    sortOrder: 45,
+  },
+  {
+    /*
+     * The advertising break between two rows of products.
+     *
+     * `bannerPosition` rather than embedded artwork, so `/banners` is the one
+     * screen that edits it — and `home.routes.ts#resolveBanners` sends whatever
+     * is live and in date, which is what lets a campaign start and finish
+     * without anyone opening this page. One wide strip rather than a row of
+     * panels: a break in a scrolling page has to read as a break, and three
+     * cards side by side read as another row of things to consider.
+     */
+    type: 'banner' as const,
+    title: null,
+    subtitle: null,
+    config: { bannerPosition: 'home_promo', columns: 1, ratio: 'strip' },
+    sortOrder: 47,
+  },
+  /*
+   * Where "All Products" used to be — the whole catalogue behind a Load more
+   * button, and the longest thing on the page.
+   *
+   * It existed because nothing else here showed the shop rather than answering a
+   * question about it, so a visitor who simply wanted to see what was for sale
+   * had to work out that `/shop` exists. The department panels are that answer
+   * now, and they give it aisle by aisle instead of as one undifferentiated wall
+   * of products. The storefront still renders a `feed` block for a store that
+   * adds one from the panel — it is only no longer what a new store opens with.
+   */
+  {
+    type: 'category_grid' as const,
+    title: null,
+    subtitle: null,
+    config: { showProducts: true, limit: 1, offset: 2 },
+    sortOrder: 48,
+  },
+  {
     type: 'brands' as const,
     title: 'Brands We Carry',
     subtitle: null,
     config: {},
     sortOrder: 50,
+  },
+  {
+    type: 'category_grid' as const,
+    title: null,
+    subtitle: null,
+    config: { showProducts: true, limit: 1, offset: 3 },
+    sortOrder: 55,
   },
   {
     type: 'newsletter' as const,
@@ -268,10 +395,16 @@ async function seedNavigation(db: TenantDb, storeName: string): Promise<void> {
     .values({ name: `${storeName} footer`, location: 'footer', isActive: true })
     .returning({ id: navigationMenus.id });
 
+  /*
+   * No "Shop" entry. It pointed at `/shop`, which is the same catalogue
+   * "Categories" opens onto, so the header offered one destination twice —
+   * and only the categories entry says anything about what is inside it. The
+   * `/shop` page itself stays: the empty cart, the order receipt and the 404
+   * all send a shopper to it.
+   */
   if (header) {
     await db.insert(navigationItems).values([
       { menuId: header.id, label: 'Home', targetType: 'url', targetValue: '/', sortOrder: 10 },
-      { menuId: header.id, label: 'Shop', targetType: 'url', targetValue: '/shop', sortOrder: 20 },
       { menuId: header.id, label: 'Categories', targetType: 'url', targetValue: '/categories', sortOrder: 30 },
       { menuId: header.id, label: 'Brands', targetType: 'url', targetValue: '/brands', sortOrder: 40 },
       { menuId: header.id, label: 'Contact', targetType: 'url', targetValue: '/contact', sortOrder: 50 },

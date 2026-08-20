@@ -1,51 +1,68 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { LayoutGrid } from 'lucide-react';
 import type { Category } from '@/types';
 import { cn } from '@/lib/utils';
 
 /**
- * The circular category rail — eight to ten round tiles under the hero.
+ * The category rail — square tiles under the hero.
  *
- * On a phone it becomes a horizontal scroller rather than wrapping into four
- * cramped rows: the rail is a way to skim a catalogue, and skimming works
- * better sideways than in a grid that pushes everything else off the screen.
+ * The tiles were circles and are squares now: a circle crops a product picture
+ * from four sides at once, which is what a category image almost always is, and
+ * the corners it throws away are where the thing being sold usually sits. The
+ * radius is the theme's own `--radius-card`, so the tile matches the product
+ * cards below it rather than introducing a shape nothing else on the page uses
+ * — and a theme that asks for square corners gets square corners here too.
  *
- * The final "More" tile appears only when there are categories the rail did not
- * show, so it never sends someone to a page identical to the one they are on.
+ * The component and its `category_circle` section type keep their names: that
+ * key is stored in every tenant's homepage rows, so it is the arrangement's
+ * name — one row of small tiles, scrolled — rather than a description of the
+ * corner radius.
+ *
+ * It scrolls sideways at every width, and it is one row however many
+ * departments the store has. It used to become a grid from `sm` up, which
+ * forced a count on it: whatever did not fit the row was dropped, and a final
+ * "More" tile stood in for the remainder.
+ *
+ * Both are gone. A rail that scrolls has no row to fill, so there is nothing to
+ * truncate and nothing for a "More" tile to stand in for — every department is
+ * on it, and reaching the far ones is a swipe rather than a page. Skimming a
+ * catalogue works better sideways than in a grid that pushes the rest of the
+ * homepage off the screen, which was already the reason for the phone layout.
+ *
+ * `limit` still caps it, but nothing passes one by default: a cap now hides
+ * departments with no link left to reach them by.
  */
 export function CategoryCircles({
   categories,
-  limit = 10,
-  moreHref = '/categories',
+  limit,
   className,
 }: {
   categories: Category[];
   limit?: number;
-  moreHref?: string;
   className?: string;
 }) {
   if (categories.length === 0) return null;
 
-  const shown = categories.slice(0, limit);
-  const hasMore = categories.length > shown.length;
+  const shown = limit === undefined ? categories : categories.slice(0, limit);
 
   return (
     <ul
       className={cn(
-        'no-scrollbar -mx-4 flex snap-x gap-4 overflow-x-auto px-4 sm:mx-0 sm:grid sm:gap-5 sm:overflow-visible sm:px-0',
-        'sm:grid-cols-5',
-        hasMore ? 'lg:grid-cols-9' : 'lg:grid-cols-8',
+        // The negative margin is kept at every width now that the rail scrolls
+        // at every width: it lets the tiles run to the edge of the section
+        // rather than stopping short of it, so a half-tile at the boundary
+        // reads as "there is more this way".
+        'no-scrollbar -mx-4 flex snap-x gap-4 overflow-x-auto px-4 sm:gap-5',
         className,
       )}
     >
       {shown.map((category) => (
-        <li key={category.id} className="w-20 shrink-0 snap-start sm:w-auto">
+        <li key={category.id} className="w-20 shrink-0 snap-start sm:w-[5.5rem]">
           <Link
             href={`/category/${category.slug}`}
             className="group flex flex-col items-center gap-2 text-center"
           >
-            <span className="relative grid size-20 place-items-center overflow-hidden rounded-full bg-surface-alt ring-1 ring-border transition-all group-hover:ring-2 group-hover:ring-primary sm:size-[5.5rem]">
+            <span className="relative grid size-20 place-items-center overflow-hidden rounded-(--radius-card) bg-surface-alt ring-1 ring-border transition-all group-hover:ring-2 group-hover:ring-primary sm:size-[5.5rem]">
               {category.imageUrl ? (
                 <Image
                   src={category.imageUrl}
@@ -66,19 +83,6 @@ export function CategoryCircles({
           </Link>
         </li>
       ))}
-
-      {hasMore ? (
-        <li className="w-20 shrink-0 snap-start sm:w-auto">
-          <Link href={moreHref} className="group flex flex-col items-center gap-2 text-center">
-            <span className="grid size-20 place-items-center rounded-full bg-surface-alt text-subtle ring-1 ring-border transition-all group-hover:text-primary group-hover:ring-2 group-hover:ring-primary sm:size-[5.5rem]">
-              <LayoutGrid className="size-6" aria-hidden />
-            </span>
-            <span className="text-xs font-medium leading-snug group-hover:text-primary sm:text-[13px]">
-              More
-            </span>
-          </Link>
-        </li>
-      ) : null}
     </ul>
   );
 }
