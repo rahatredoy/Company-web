@@ -14,7 +14,7 @@ const migrationsFolder = resolve(dirname(fileURLToPath(import.meta.url)), '../..
  * skipped without opening the migrator at all, so forgetting to bump it means
  * existing stores silently never receive the new tables.
  */
-export const COMMERCE_SCHEMA_VERSION = '1.9.0';
+export const COMMERCE_SCHEMA_VERSION = '1.18.0';
 
 /**
  * A stable 64-bit key for `pg_advisory_lock`. Postgres advisory locks are

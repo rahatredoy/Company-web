@@ -83,8 +83,24 @@ const nextConfig: NextConfig = {
             key: 'Permissions-Policy',
             value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()',
           },
+          /*
+           * Two years, every subdomain, preload-eligible.
+           *
+           * **Production only.** The header is ignored by browsers when it
+           * arrives over plain http, so sending it in development achieves
+           * nothing — but a developer who puts `next dev` behind an https tunnel
+           * on localhost would have `includeSubDomains` applied to `localhost`
+           * itself, and every other app on a localhost port would stop being
+           * reachable over http until the pin expired. There is no way to clear
+           * that but to wait or to wipe the browser's HSTS store.
+           */
           ...(isProduction
-            ? [{ key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' }]
+            ? [
+                {
+                  key: 'Strict-Transport-Security',
+                  value: 'max-age=63072000; includeSubDomains; preload',
+                },
+              ]
             : []),
         ],
       },

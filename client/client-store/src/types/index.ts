@@ -42,7 +42,6 @@ export interface CategoryMenuEntry {
   id: string;
   name: string;
   slug: string;
-  iconUrl: string | null;
   /**
    * Glyph key from a closed set the storefront owns, chosen by the store.
    *
@@ -153,6 +152,12 @@ export interface StoreConfig {
   categoryMenu: CategoryMenuEntry[];
   policyPages: { slug: string; title: string; systemKey: string | null }[];
   payment: { providers: { provider: string; label: string; description: string | null }[] };
+  /**
+   * Which ways in the sign-in page offers. Platform capability rather than store
+   * preference, but it arrives here because the shell already reads this config
+   * on every render.
+   */
+  auth: { password: boolean; phone: boolean; google: boolean };
   seo: { title: string | null; description: string | null; socialImageUrl: string | null };
   /** Anything other than a trading status renders the unavailable page. */
   status: 'pending' | 'provisioning' | 'trial' | 'active' | 'expired' | 'suspended' | 'cancelled';
@@ -238,7 +243,6 @@ export interface ProductVariant {
 }
 
 export interface ProductDetail extends Omit<ProductSummary, 'primaryImage' | 'secondaryImage'> {
-  shortDescription: string | null;
   description: string | null;
   images: ProductImage[];
   videoUrl: string | null;
@@ -248,7 +252,6 @@ export interface ProductDetail extends Omit<ProductSummary, 'primaryImage' | 'se
   variants: ProductVariant[];
   defaultVariantId: string | null;
   specifications: { groupName: string | null; label: string; value: string; isKeySpec: boolean }[];
-  shippingInfo: string | null;
   returnInfo: string | null;
   isReturnable: boolean;
   minOrderQuantity: number;
@@ -261,9 +264,7 @@ export interface Category {
   id: string;
   name: string;
   slug: string;
-  description: string | null;
   imageUrl: string | null;
-  bannerUrl: string | null;
   productCount: number;
   children: Category[];
   breadcrumb: { name: string; slug: string }[];
@@ -297,7 +298,6 @@ export interface Brand {
   description: string | null;
   logoUrl: string | null;
   productCount: number;
-  seo: { title: string | null; description: string | null };
 }
 
 // -------------------------------------------------- listing, filters, sort --
@@ -313,14 +313,19 @@ export const SORT_OPTIONS = [
 
 export type SortValue = (typeof SORT_OPTIONS)[number]['value'];
 
+/**
+ * One block of the filter sidebar, exactly as the Commerce API sends it.
+ *
+ * `price` is the only type that is not a plain list of names: its options carry
+ * the band's bounds as numbers, because the label has to be written in the
+ * store's currency and the visitor's locale — which is this app's knowledge, not
+ * the API's. `label` is the bare-number fallback.
+ */
 export interface FilterGroup {
   key: string;
   label: string;
-  type: 'checkbox' | 'color' | 'range' | 'rating';
-  options: { value: string; label: string; count: number; colorHex?: string | null }[];
-  /** Present for `range` groups. */
-  min?: number;
-  max?: number;
+  type: 'checkbox' | 'price';
+  options: { value: string; label: string; count: number; min?: number; max?: number | null }[];
 }
 
 export interface ProductListResult {
@@ -358,7 +363,6 @@ export type HomepageSectionType =
   | 'lookbook'
   | 'testimonial'
   | 'brands'
-  | 'newsletter'
   | 'text'
   /** A curated `collections` row: its own name, blurb, cover and products. */
   | 'collection'
@@ -509,7 +513,6 @@ export interface CartLine {
 export interface CartTotals {
   subtotal: string;
   discount: string;
-  shipping: string | null;
   tax: string;
   total: string;
   currency: string;
@@ -528,9 +531,22 @@ export interface Cart {
 export interface Customer {
   id: string;
   fullName: string;
-  email: string;
+  /**
+   * Null on an account created from a phone number that has not added one.
+   * Every screen that prints it has to say what it shows instead.
+   */
+  email: string | null;
   phone: string | null;
   emailVerified: boolean;
+  /** The number a phone sign-in matches, in E.164 — null unless one was proved. */
+  phoneE164: string | null;
+  phoneVerified: boolean;
+  /**
+   * Whether a password exists at all. False for an account made by phone or by
+   * Google, which is what lets a screen offer "set a password" rather than a
+   * change form with nothing to change.
+   */
+  hasPassword: boolean;
   acceptsMarketing: boolean;
 }
 
@@ -582,11 +598,7 @@ export interface OrderDetail extends OrderSummary {
   shippingAddress: Omit<Address, 'id' | 'isDefault' | 'label'> | null;
   billingAddress: Omit<Address, 'id' | 'isDefault' | 'label'> | null;
   paymentMethodLabel: string | null;
-  shippingMethodLabel: string | null;
-  shippingStatus: string;
-  tracking: { carrier: string | null; number: string | null; url: string | null } | null;
   timeline: OrderTimelineEntry[];
-  estimatedDeliveryAt: string | null;
   /** The server decides; the UI only renders what it is told is possible. */
   canCancel: boolean;
   canRequestReturn: boolean;
@@ -632,15 +644,6 @@ export interface ReviewSummary {
   count: number;
   /** Index 0 is one star. */
   distribution: [number, number, number, number, number];
-}
-
-export interface ShippingMethodOption {
-  id: string;
-  name: string;
-  description: string | null;
-  price: string;
-  estimatedDaysMin: number | null;
-  estimatedDaysMax: number | null;
 }
 
 export interface PaymentMethodOption {

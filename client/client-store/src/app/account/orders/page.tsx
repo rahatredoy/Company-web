@@ -7,10 +7,15 @@ import { readLocalePreference } from '@/lib/locale/preference';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { formatDate, formatMoney, pluralise } from '@/lib/utils';
+import type { MessageKey } from '@/lib/i18n';
+import { getT } from '@/lib/i18n/server';
+import { formatDate, formatMoney } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
-export const metadata: Metadata = { title: 'My orders', robots: { index: false, follow: false } };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('My orders'), robots: { index: false, follow: false } };
+}
 
 /**
  * Order history.
@@ -19,7 +24,7 @@ export const metadata: Metadata = { title: 'My orders', robots: { index: false, 
  * ends up in the URL, so it can be bookmarked, shared with support, and
  * survives a refresh.
  */
-const FILTERS = [
+const FILTERS: { value: string; label: MessageKey }[] = [
   { value: 'all', label: 'All' },
   { value: 'processing', label: 'Active' },
   { value: 'delivered', label: 'Delivered' },
@@ -35,16 +40,17 @@ export default async function OrdersPage({
   const { status = 'all', page } = await searchParams;
   const config = await getStoreConfig();
 
-  const [orders, locale] = await Promise.all([
+  const [orders, locale, t] = await Promise.all([
     getOrders({ status, page: Number.parseInt(page ?? '1', 10) || 1 }),
     readLocalePreference(config),
+    getT(),
   ]);
 
   return (
     <>
-      <h1 className="text-2xl font-semibold sm:text-3xl">My orders</h1>
+      <h1 className="sr-only">{t('My orders')}</h1>
 
-      <nav aria-label="Filter orders" className="mt-6">
+      <nav aria-label={t('Filter orders')}>
         <ul className="no-scrollbar flex gap-1 overflow-x-auto border-b border-border">
           {FILTERS.map((filter) => {
             const active = status === filter.value;
@@ -60,7 +66,7 @@ export default async function OrdersPage({
                       : 'border-transparent text-muted hover:text-foreground',
                   )}
                 >
-                  {filter.label}
+                  {t(filter.label)}
                 </Link>
               </li>
             );
@@ -71,16 +77,16 @@ export default async function OrdersPage({
       {orders.items.length === 0 ? (
         <EmptyState
           icon={Package}
-          title={status === 'all' ? 'You have not placed any orders yet' : 'Nothing here'}
+          title={status === 'all' ? t('You have not placed any orders yet') : t('Nothing here')}
           description={
             status === 'all'
-              ? 'Once you order something it will show up here with its tracking.'
-              : 'No orders match this filter.'
+              ? t('Once you order something it will show up here with its status.')
+              : t('No orders match this filter.')
           }
           action={
             <Button asChild>
               <Link href={status === 'all' ? '/shop' : '/account/orders'}>
-                {status === 'all' ? 'Start shopping' : 'Show all orders'}
+                {status === 'all' ? t('Start shopping') : t('Show all orders')}
               </Link>
             </Button>
           }
@@ -97,8 +103,9 @@ export default async function OrdersPage({
                 <div>
                   <p className="font-mono font-semibold">{order.orderNumber}</p>
                   <p className="mt-0.5 text-sm text-muted">
-                    Placed {formatDate(order.placedAt, locale.language)} · {order.itemCount}{' '}
-                    {pluralise(order.itemCount, 'item')}
+                    {t.plural(order.itemCount, 'Placed {date} · {count} item', 'Placed {date} · {count} items', {
+                      date: formatDate(order.placedAt, locale.language),
+                    })}
                   </p>
                   <p className="mt-1 text-sm font-semibold tabular-nums">
                     {formatMoney(order.total, order.currency, locale.language)}
@@ -112,7 +119,7 @@ export default async function OrdersPage({
                   </div>
 
                   <Button asChild size="sm" variant="outline">
-                    <Link href={`/account/orders/${order.orderNumber}`}>View order</Link>
+                    <Link href={`/account/orders/${order.orderNumber}`}>{t('View order')}</Link>
                   </Button>
                 </div>
               </div>
@@ -122,7 +129,7 @@ export default async function OrdersPage({
       )}
 
       {orders.meta.totalPages > 1 ? (
-        <nav aria-label="Pagination" className="mt-8 flex justify-center gap-2">
+        <nav aria-label={t('Pagination')} className="mt-8 flex justify-center gap-2">
           {Array.from({ length: orders.meta.totalPages }, (_, index) => index + 1).map((number) => (
             <Link
               key={number}
@@ -135,7 +142,7 @@ export default async function OrdersPage({
                   : 'border border-border hover:bg-surface-alt',
               )}
             >
-              {number}
+              {t.number(number)}
             </Link>
           ))}
         </nav>

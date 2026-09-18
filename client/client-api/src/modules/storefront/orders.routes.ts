@@ -19,6 +19,7 @@ import { storeOf, type StoreContext } from '../../plugins/tenant';
 import { releaseStock } from './checkout.service';
 import { guestOwnsOrder } from './guest-orders';
 import { canCustomerCancel, loadOrderDetail } from './orders.service';
+import { voidOrderDiscounts } from '../discounts/service';
 
 const numberParamSchema = z.object({ orderNumber: z.string().trim().min(1).max(32) });
 
@@ -214,6 +215,7 @@ export default async function storefrontOrderRoutes(app: FastifyInstance) {
         });
 
         if (!order.released) await releaseOrderStock(tx, order.id);
+        await voidOrderDiscounts(tx, order.id);
 
         // A cancelled order that was never paid should not sit as "pending" for
         // ever in the payments list.

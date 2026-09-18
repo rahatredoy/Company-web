@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { CUSTOMER_SESSION_COOKIE, CUSTOMER_SESSION_MAX_AGE } from '@/lib/api/account';
+import { CUSTOMER_SESSION_COOKIE } from '@/lib/api/account';
+import { COOKIE_OPTIONS, forwardToApi } from '@/lib/auth-proxy';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
 
 /**
@@ -19,15 +20,6 @@ import { clientIp, rateLimit } from '@/lib/rate-limit';
  *    single machine from being used as a battering ram.
  */
 
-const isProduction = process.env.NODE_ENV === 'production';
-
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  sameSite: 'lax' as const,
-  path: '/',
-  secure: isProduction,
-};
-
 const loginSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(1).max(200),
@@ -43,6 +35,26 @@ const registerSchema = z.object({
 
 const emailSchema = z.object({ email: z.string().trim().email().max(254) });
 
+/*
+ * The number is passed through as typed. Normalising it to E.164 is the API's
+ * job and has to stay there: the shape that ends up in the database is the one
+ * a later sign-in must reproduce exactly, and two normalisers — one here, one
+ * there — is two chances for them to drift and for a customer to be locked out
+ * of their own account by a spelling.
+ */
+const phoneRequestSchema = z.object({ phone: z.string().trim().min(6).max(32) });
+
+const phoneVerifySchema = z.object({
+  phone: z.string().trim().min(6).max(32),
+  code: z.string().trim().min(4).max(8),
+});
+
+const phoneRegisterSchema = z.object({
+  ticket: z.string().trim().min(20).max(200),
+  fullName: z.string().trim().min(2).max(120),
+  acceptsTerms: z.literal(true),
+});
+
 /**
  * The reset form posts a token and a new password.
  *
@@ -56,7 +68,16 @@ const resetSchema = z.object({
   password: z.string().min(8).max(200),
 });
 
-const ACTIONS = new Set(['login', 'register', 'logout', 'forgot-password', 'reset-password']);
+const ACTIONS = new Set([
+  'login',
+  'register',
+  'logout',
+  'forgot-password',
+  'reset-password',
+  'phone-request',
+  'phone-verify',
+  'phone-register',
+]);
 
 export async function POST(
   request: Request,
@@ -144,105 +165,44 @@ export async function POST(
     return forwardToApi('/api/v1/storefront/auth/register', parsed.data, 201);
   }
 
+  if (action === 'phone-request') {
+    const parsed = phoneRequestSchema.safeParse(payload);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Enter your mobile number.' }, { status: 400 });
+    }
+
+    return forwardToApi('/api/v1/storefront/auth/phone/request', parsed.data, 200);
+  }
+
+  if (action === 'phone-verify') {
+    const parsed = phoneVerifySchema.safeParse(payload);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Enter the code we sent you.' }, { status: 400 });
+    }
+
+    return forwardToApi('/api/v1/storefront/auth/phone/verify', parsed.data, 200);
+  }
+
+  if (action === 'phone-register') {
+    const parsed = phoneRegisterSchema.safeParse(payload);
+    if (!parsed.success) {
+      const details: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = issue.path.join('.');
+        if (!key || details[key]) continue;
+        details[key] =
+          key === 'acceptsTerms' ? 'Please accept the terms to continue.' : 'Please check this field.';
+      }
+      return NextResponse.json({ error: 'Some details need your attention.', details }, { status: 422 });
+    }
+
+    return forwardToApi('/api/v1/storefront/auth/phone/register', parsed.data, 200);
+  }
+
   const parsed = loginSchema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json({ error: 'Enter your email address and password.' }, { status: 400 });
   }
 
   return forwardToApi('/api/v1/storefront/auth/login', parsed.data, 200);
-}
-
-/**
- * Whatever the Commerce API answered with, before this route has decided which
- * half of it to use. Both shapes are the documented envelope — `{ data }` on
- * success, `{ code, message, details }` on failure — but the body arrives as
- * text and may be neither, so every field is optional.
- */
-type UpstreamPayload = {
-  data?: unknown;
-  message?: string;
-  details?: unknown;
-} | null;
-
-/**
- * Passes the request to the Commerce API and re-issues whatever session cookie
- * it sets. The API is the authority on credentials; this route is a proxy that
- * keeps the token out of JavaScript's reach.
- *
- * It calls `fetch` directly rather than going through `lib/api/client`, and that
- * is the whole point of the function. `apiFetch` returns the parsed body and
- * drops the `Response` — so the `Set-Cookie` the API sends on a successful sign
- * in was being thrown away here. The symptom was not an error: login answered
- * `200`, the browser stored no session, `getCustomer()` came back null, and
- * `/account` bounced straight back to `/login`.
- */
-async function forwardToApi(path: string, body: unknown, okStatus: number): Promise<NextResponse> {
-  const { storeCall, cookieHeader } = await import('@/lib/tenant');
-  const { baseUrl, storeSlug } = await storeCall();
-
-  const headers = new Headers({ accept: 'application/json', 'content-type': 'application/json' });
-  const cookie = await cookieHeader();
-  if (cookie) headers.set('cookie', cookie);
-  if (storeSlug) headers.set('X-Store-Slug', storeSlug);
-
-  let upstream: Response;
-  try {
-    upstream = await fetch(new URL(path, baseUrl), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      cache: 'no-store',
-    });
-  } catch {
-    return NextResponse.json({ error: 'We could not reach the store. Please try again.' }, { status: 502 });
-  }
-
-  const text = await upstream.text();
-  let payload: UpstreamPayload = null;
-  try {
-    payload = text ? (JSON.parse(text) as UpstreamPayload) : null;
-  } catch {
-    payload = null;
-  }
-
-  if (!upstream.ok) {
-    const { flattenDetails } = await import('@/lib/api/client');
-    return NextResponse.json(
-      {
-        error: payload?.message ?? 'We could not complete that just now.',
-        // Flattened to one message per field: the API reports every message it
-        // has, and these forms each render one line under one input.
-        details: flattenDetails(payload?.details),
-      },
-      { status: upstream.status || 502 },
-    );
-  }
-
-  const response =
-    okStatus === 204
-      ? new NextResponse(null, { status: 204 })
-      : NextResponse.json({ data: payload?.data ?? payload }, { status: okStatus });
-
-  /*
-   * The API scopes its cookie to the store's own domain; re-issuing it from
-   * here re-scopes it to this origin, which is what the storefront's own
-   * `cookieHeader()` will read back on the next request.
-   */
-  for (const raw of upstream.headers.getSetCookie?.() ?? []) {
-    const [pair] = raw.split(';');
-    const index = (pair ?? '').indexOf('=');
-    if (index <= 0) continue;
-
-    const name = pair!.slice(0, index).trim();
-    const value = pair!.slice(index + 1);
-
-    if (name !== CUSTOMER_SESSION_COOKIE) continue;
-
-    response.cookies.set(name, value, {
-      ...COOKIE_OPTIONS,
-      maxAge: value ? CUSTOMER_SESSION_MAX_AGE : 0,
-    });
-  }
-
-  return response;
 }

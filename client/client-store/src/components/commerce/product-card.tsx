@@ -6,7 +6,7 @@ import { PriceDisplay } from './price-display';
 import { WishlistButton } from './wishlist-button';
 import { QuickAdd } from './quick-add';
 import { MeasureAdd } from './measure-add';
-import { minimumNote } from '@/lib/commerce/measure';
+import { CardText, MeasureRate } from './card-text';
 
 export type ProductCardVariant = 'compact' | 'standard' | 'editorial' | 'spec' | 'wide';
 
@@ -94,23 +94,25 @@ export function ProductCard({
             ) : null}
           </>
         ) : (
-          <div className="absolute inset-0 grid place-items-center text-xs text-subtle">No image</div>
+          <div className="absolute inset-0 grid place-items-center text-xs text-subtle">
+            <CardText text="No image" />
+          </div>
         )}
 
         <div className="absolute left-2 top-2 z-20 flex flex-col items-start gap-1">
           {product.discountPercent ? (
-            <span className="rounded-(--radius-button) bg-sale px-2 py-1 text-[11px] font-semibold leading-none text-white">
-              −{product.discountPercent}%
+            <span className="rounded-(--radius-button) bg-sale px-2 py-1 text-[10.5px] font-semibold leading-none text-white">
+              <CardText text="−{percent}%" vars={{ percent: product.discountPercent }} />
             </span>
           ) : null}
           {showAllBadges && product.isNewArrival ? (
-            <span className="rounded-(--radius-button) bg-primary px-2 py-1 text-[11px] font-semibold leading-none text-primary-foreground">
-              New
+            <span className="rounded-(--radius-button) bg-primary px-2 py-1 text-[10.5px] font-semibold leading-none text-primary-foreground">
+              <CardText text="New" />
             </span>
           ) : null}
           {showAllBadges && product.isBestSeller ? (
-            <span className="rounded-(--radius-button) bg-accent-soft px-2 py-1 text-[11px] font-semibold leading-none text-foreground">
-              Best seller
+            <span className="rounded-(--radius-button) bg-accent-soft px-2 py-1 text-[10.5px] font-semibold leading-none text-foreground">
+              <CardText text="Best seller" />
             </span>
           ) : null}
         </div>
@@ -118,7 +120,7 @@ export function ProductCard({
         {/* Stock is stated in words, never by colour alone. */}
         {!product.inStock ? (
           <div className="absolute inset-x-0 bottom-0 z-20 bg-foreground/75 py-1.5 text-center text-xs font-medium text-white">
-            Out of stock
+            <CardText text="Out of stock" />
           </div>
         ) : null}
 
@@ -140,7 +142,7 @@ export function ProductCard({
         )}
       >
         {product.brand && !isEditorial ? (
-          <p className="truncate text-[11px] font-medium uppercase leading-none tracking-wide text-subtle">
+          <p className="truncate text-[10.5px] font-medium uppercase leading-none tracking-wide text-subtle">
             {product.brand.name}
           </p>
         ) : null}
@@ -156,7 +158,7 @@ export function ProductCard({
         {/*
           Line height is pinned in pixels and the min-height is exactly twice
           it, so a one-line and a two-line name occupy an identical box.
-          `leading-snug` is a ratio, and `text-[13px]` carries no line-height of
+          `leading-snug` is a ratio, and `text-[12px]` carries no line-height of
           its own, so the pair resolved to a fractional height that rounded
           differently per card and put the prices a few pixels out of step down
           the row. Whole numbers remove the rounding entirely.
@@ -164,7 +166,7 @@ export function ProductCard({
         <h3
           className={cn(
             'line-clamp-2 font-medium',
-            isCompact ? 'min-h-9 text-[13px]/[18px]' : 'min-h-10 text-sm/[20px]',
+            isCompact ? 'min-h-9 text-[12px]/[18px]' : 'min-h-10 text-sm/[20px]',
           )}
         >
           <Link href={href} className="relative z-20 hover:text-primary">
@@ -194,9 +196,8 @@ export function ProductCard({
           />
 
           {product.measure ? (
-            <span className="text-[11px] text-subtle">
-              {product.measure.pricingLabel}
-              {minimumNote(product.measure) ? ' (' + minimumNote(product.measure) + ')' : ''}
+            <span className="text-[10.5px] text-subtle">
+              <MeasureRate measure={product.measure} />
             </span>
           ) : null}
         </div>
@@ -205,7 +206,7 @@ export function ProductCard({
 
         {isSpec && product.inStock ? (
           <p className={cn('text-xs font-medium', product.lowStock ? 'text-warning' : 'text-success')}>
-            {product.lowStock ? 'Low stock' : 'In stock'}
+            <CardText text={product.lowStock ? 'Low stock' : 'In stock'} />
           </p>
         ) : null}
       </div>

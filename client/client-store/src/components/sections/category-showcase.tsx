@@ -4,7 +4,8 @@ import { ArrowRight } from 'lucide-react';
 import type { Category, ProductSummary } from '@/types';
 import type { TemplatePreset } from '@/templates/meta';
 import type { ProductCardVariant } from '@/components/commerce/product-card';
-import { cn, pluralise } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
+import { cn } from '@/lib/utils';
 import { ProductCarousel } from './product-carousel';
 
 /**
@@ -61,7 +62,7 @@ export interface ShowcaseGroup {
   rows: ShowcaseRow[];
 }
 
-export function CategoryShowcase({
+export async function CategoryShowcase({
   groups,
   perView,
   cardVariant,
@@ -75,6 +76,8 @@ export function CategoryShowcase({
   className?: string;
 }) {
   if (groups.length === 0) return null;
+
+  const t = await getT();
 
   return (
     <div className={cn('space-y-12', className)}>
@@ -102,9 +105,7 @@ export function CategoryShowcase({
                 </Link>
               </h3>
               <p className="mt-0.5 truncate text-xs text-muted">
-                {group.category.description
-                  ? group.category.description
-                  : `${group.category.productCount} ${pluralise(group.category.productCount, 'product')}`}
+                {t.plural(group.category.productCount, '{count} product', '{count} products')}
               </p>
             </div>
 
@@ -112,7 +113,7 @@ export function CategoryShowcase({
               href={`/category/${group.category.slug}`}
               className="inline-flex items-center gap-1 whitespace-nowrap text-sm font-medium text-primary hover:underline"
             >
-              Shop all
+              {t('Shop all')}
               <ArrowRight className="size-4" aria-hidden />
             </Link>
 
@@ -124,7 +125,7 @@ export function CategoryShowcase({
             */}
             {group.chips.length > 0 ? (
               <ul
-                aria-label={`Inside ${group.category.name}`}
+                aria-label={t('Inside {name}', { name: group.category.name })}
                 className="no-scrollbar -mx-1 flex w-full min-w-0 gap-2 overflow-x-auto px-1 pb-0.5 lg:w-auto"
               >
                 {group.chips.map((chip) => (
@@ -157,7 +158,7 @@ export function CategoryShowcase({
                       href={`/category/${row.category.slug}`}
                       className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-primary hover:underline sm:text-sm"
                     >
-                      View all
+                      {t('View all')}
                       <ArrowRight className="size-3.5" aria-hidden />
                     </Link>
                   </div>
@@ -168,6 +169,7 @@ export function CategoryShowcase({
                   perView={perView}
                   cardVariant={cardVariant}
                   locale={locale}
+                  // i18n-ignore
                   label={`${group.category.name}: ${row.category.name}`}
                 />
               </section>

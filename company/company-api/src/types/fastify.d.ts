@@ -22,6 +22,8 @@ declare module 'fastify' {
       sessionId: string;
       otpVerified: boolean;
       authenticatedAt: Date;
+      /** As it was *before* this request touched it — drives the cookie refresh. */
+      lastSeenAt: Date;
     };
     /** Raw request body, captured only for webhook signature verification. */
     rawBody?: string;

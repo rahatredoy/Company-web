@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert } from '@/components/ui/alert';
 import { Spinner } from '@/components/ui/spinner';
+import { useT } from '@/lib/i18n';
 
 /**
  * Contact form.
@@ -17,6 +18,7 @@ import { Spinner } from '@/components/ui/spinner';
  * this is the one form where people genuinely worry whether it went through.
  */
 export function ContactForm() {
+  const t = useT();
   const [state, setState] = React.useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
 
@@ -60,8 +62,8 @@ export function ContactForm() {
 
   if (state === 'sent') {
     return (
-      <Alert tone="success" title="Message sent">
-        Thank you — we have your message and will reply within one working day.
+      <Alert tone="success" title={t('Message sent')}>
+        {t('Thank you — we have your message and will reply within one working day.')}
       </Alert>
     );
   }
@@ -69,38 +71,38 @@ export function ContactForm() {
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-5">
       <div className="grid gap-5 sm:grid-cols-2">
-        <Field name="name" label="Your name" required error={fieldErrors.name}>
+        <Field name="name" label={t('Your name')} required error={fieldErrors.name}>
           {(props) => <Input {...props} autoComplete="name" />}
         </Field>
 
-        <Field name="email" label="Email" required error={fieldErrors.email}>
+        <Field name="email" label={t('Email')} required error={fieldErrors.email}>
           {(props) => <Input {...props} type="email" autoComplete="email" />}
         </Field>
 
-        <Field name="phone" label="Phone" hint="Optional">
+        <Field name="phone" label={t('Phone')} hint={t('Optional')}>
           {(props) => <Input {...props} type="tel" autoComplete="tel" />}
         </Field>
 
-        <Field name="subject" label="Subject" required error={fieldErrors.subject}>
-          {(props) => <Input {...props} placeholder="What is this about?" />}
+        <Field name="subject" label={t('Subject')} required error={fieldErrors.subject}>
+          {(props) => <Input {...props} placeholder={t('What is this about?')} />}
         </Field>
       </div>
 
-      <Field name="message" label="Message" required error={fieldErrors.message}>
+      <Field name="message" label={t('Message')} required error={fieldErrors.message}>
         {(props) => (
-          <Textarea {...props} rows={6} placeholder="Tell us what you need. Include an order number if you have one." />
+          <Textarea {...props} rows={6} placeholder={t('Tell us what you need. Include an order number if you have one.')} />
         )}
       </Field>
 
       {state === 'error' && Object.keys(fieldErrors).length === 0 ? (
         <p role="alert" className="text-sm font-medium text-error">
-          We could not send your message. Please try again, or email us directly.
+          {t('We could not send your message. Please try again, or email us directly.')}
         </p>
       ) : null}
 
       <Button type="submit" size="lg" disabled={state === 'sending'}>
         {state === 'sending' ? <Spinner /> : <Send aria-hidden />}
-        Send message
+        {t('Send message')}
       </Button>
     </form>
   );

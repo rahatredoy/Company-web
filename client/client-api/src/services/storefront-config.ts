@@ -1,4 +1,5 @@
 import { and, asc, eq } from 'drizzle-orm';
+import { config } from '../config/index';
 import type { StoreContext } from '../plugins/tenant';
 import {
   categories,
@@ -19,6 +20,7 @@ import {
 } from '../lib/constants';
 import { CACHE_TTL, cached, invalidateTenantCache, tenantKey } from '../lib/cache';
 import { storeBaseUrl } from '../lib/urls';
+import { resolveLanguage } from '../lib/languages';
 
 /**
  * One line in the announcement strip.
@@ -134,13 +136,23 @@ export interface StorefrontConfig {
     id: string;
     name: string;
     slug: string;
-    iconUrl: string | null;
     /** Closed-set glyph key, chosen by the store; never a URL. */
     iconKey: string | null;
     children: { id: string; name: string; slug: string }[];
   }[];
   policyPages: { slug: string; title: string; systemKey: string | null }[];
   payment: { providers: { provider: string; label: string; description: string | null }[] };
+  /**
+   * Which ways in the sign-in page should offer.
+   *
+   * Platform capability rather than store preference — every store gets the same
+   * answer — but it rides along here because the storefront already reads this
+   * on every render and a second call to ask one boolean would be a round trip
+   * per page. It is cached with everything else, so switching Google on reaches
+   * a shop at the end of the config TTL rather than instantly; that is a
+   * deployment-time change and the wait is measured in seconds.
+   */
+  auth: { password: boolean; phone: boolean; google: boolean };
   seo: { title: string | null; description: string | null; socialImageUrl: string | null };
   /** Surfaced so the storefront can render its own "temporarily unavailable" state. */
   status: StoreContext['status'];
@@ -352,7 +364,6 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
         name: categories.name,
         slug: categories.slug,
         parentId: categories.parentId,
-        iconUrl: categories.iconUrl,
         sortOrder: categories.sortOrder,
       })
       .from(categories)
@@ -396,7 +407,9 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
 
     const preferences = settingsRow?.preferences ?? {};
     const currency = settingsRow?.currency ?? store.currency;
-    const language = settingsRow?.language ?? store.language;
+    // Resolved to a language the storefront has a dictionary for, so the code it
+    // is handed is always one it can draw the shop in — see `lib/languages.ts`.
+    const language = resolveLanguage(settingsRow?.language ?? store.language);
     const categoryIcons = readCategoryIcons(designRow?.headerConfiguration);
 
     return {
@@ -412,7 +425,7 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
         // A connected primary domain wins, so the same page is never indexed
         // under both the custom domain and the platform subdomain.
         canonicalOrigin: store.primaryDomain ? `https://${store.primaryDomain}` : storeBaseUrl(store.slug),
-        languages: localeList(preferences.languages, language),
+        languages: [...new Set(localeList(preferences.languages, language).map(resolveLanguage))],
         currencies: localeList(preferences.currencies, currency),
       },
       design: {
@@ -439,7 +452,6 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
           id: parent.id,
           name: parent.name,
           slug: parent.slug,
-          iconUrl: parent.iconUrl,
           iconKey: categoryIcons.get(parent.slug) ?? null,
           children: categoryRows
             .filter((child) => child.parentId === parent.id)
@@ -449,6 +461,14 @@ export async function loadStorefrontConfig(store: StoreContext): Promise<Storefr
         .filter((p) => p.showInFooter || p.systemKey)
         .map((p) => ({ slug: p.slug, title: p.title, systemKey: p.systemKey })),
       payment: { providers: methodRows },
+      auth: {
+        // Email and password have always been here and are not switchable.
+        password: true,
+        // The code is sent by whatever `SMS_DRIVER` names, and `log` — which
+        // writes it to the API log — is a working driver in development.
+        phone: true,
+        google: config.oauth.google !== null,
+      },
       seo: {
         title: settingsRow?.seoTitle ?? null,
         description: settingsRow?.seoDescription ?? null,

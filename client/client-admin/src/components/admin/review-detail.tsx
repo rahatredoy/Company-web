@@ -4,9 +4,10 @@ import Link from 'next/link';
 import { Star } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { useDetail } from '@/hooks/use-detail';
-import { formatDateTime, formatNumber } from '@/lib/format';
+import { titleCase } from '@/lib/format';
 import type { ReviewRow, ReviewView } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { useT, type MessageKey } from '@/lib/i18n';
 import {
   DetailBool,
   DetailEmpty,
@@ -16,9 +17,20 @@ import {
   DetailProse,
   DetailSection,
   DetailSheet,
-  DetailStorefrontLink,
 } from './detail-sheet';
 import { LazyImage } from './lazy-image';
+
+const STATUS_LABELS: Record<ReviewView['status'], MessageKey> = {
+  pending: 'Pending',
+  approved: 'Approved',
+  rejected: 'Rejected',
+};
+
+const PRODUCT_STATUS_LABELS: Record<ReviewView['productStatus'], MessageKey> = {
+  draft: 'Draft',
+  active: 'Active',
+  inactive: 'Inactive',
+};
 
 /**
  * One review, as the moderator needs to see it.
@@ -34,13 +46,12 @@ export function ReviewDetail({
   row,
   open,
   onOpenChange,
-  storefrontBase,
 }: {
   row: ReviewRow | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  storefrontBase: string | null;
 }) {
+  const t = useT();
   const detail = useDetail<ReviewView>({
     path: '/api/v1/admin/reviews',
     id: row?.id ?? null,
@@ -54,33 +65,28 @@ export function ReviewDetail({
     <DetailSheet
       open={open}
       onOpenChange={onOpenChange}
-      title={review?.customerName ?? row?.customerName ?? 'Review'}
+      title={review?.customerName ?? row?.customerName ?? t('Review')}
       subtitle={review?.productName ?? row?.productName}
       badge={
         <>
-          <StatusBadge status={review?.status ?? row?.status ?? 'pending'} />
+          <StatusBadge
+            status={review?.status ?? row?.status ?? 'pending'}
+            label={t(STATUS_LABELS[review?.status ?? row?.status ?? 'pending'])}
+          />
           {(review?.verifiedPurchase ?? row?.verifiedPurchase) ? (
-            <StatusBadge status="verified" label="Verified purchase" />
+            <StatusBadge status="verified" label={t('Verified purchase')} />
           ) : null}
         </>
       }
       loading={detail.loading}
       error={detail.error}
       onRetry={detail.reload}
-      footer={
-        storefrontBase && (review?.productSlug ?? row?.productSlug) ? (
-          <DetailStorefrontLink
-            href={`${storefrontBase}/product/${review?.productSlug ?? row?.productSlug}`}
-            label="View the product"
-          />
-        ) : null
-      }
     >
       {review ? (
         <div className="space-y-6">
-          <DetailSection title="Rating">
+          <DetailSection title={t('Rating')}>
             <div className="flex items-center gap-2">
-              <span className="flex" aria-label={`${rating} out of 5`}>
+              <span className="flex" aria-label={t('{rating} out of 5', { rating })}>
                 {[1, 2, 3, 4, 5].map((star) => (
                   <Star
                     key={star}
@@ -92,18 +98,18 @@ export function ReviewDetail({
                   />
                 ))}
               </span>
-              <span className="text-sm font-medium">{rating} / 5</span>
+              <span className="text-sm font-medium">{t('{rating} / 5', { rating })}</span>
             </div>
           </DetailSection>
 
-          <DetailSection title="What they wrote">
-            {review.body ? <DetailProse>{review.body}</DetailProse> : <DetailEmpty>Rating only.</DetailEmpty>}
+          <DetailSection title={t('What they wrote')}>
+            {review.body ? <DetailProse>{review.body}</DetailProse> : <DetailEmpty>{t('Rating only.')}</DetailEmpty>}
           </DetailSection>
 
           {review.images.length > 0 ? (
             <DetailSection
-              title="Photographs"
-              action={<span className="text-xs text-muted-foreground">{review.images.length}</span>}
+              title={t('Photographs')}
+              action={<span className="text-xs text-muted-foreground">{t.number(review.images.length)}</span>}
             >
               <div className="flex flex-wrap gap-2">
                 {review.images.map((image) => (
@@ -120,80 +126,92 @@ export function ReviewDetail({
             </DetailSection>
           ) : null}
 
-          <DetailSection title="Who wrote it">
+          <DetailSection title={t('Who wrote it')}>
             <DetailGrid>
               <DetailField
-                label="Signed as"
+                label={t('Signed as')}
                 value={review.customerName}
-                hint="A snapshot taken when it was written."
+                hint={t('A snapshot taken when it was written.')}
               />
               <DetailField
-                label="Account"
+                label={t('Account')}
                 value={
                   review.customerId ? (
-                    <Link href={`/customers/${review.customerId}`} className="hover:underline">
-                      {review.customerEmail ?? 'Open account'}
+                    <Link href={`/customers?view=${review.customerId}`} className="hover:underline">
+                      {review.customerEmail ?? t('Open account')}
                     </Link>
                   ) : null
                 }
-                hint={review.customerId ? undefined : 'The account has since been deleted.'}
+                hint={review.customerId ? undefined : t('The account has since been deleted.')}
               />
               <DetailField
-                label="Account status"
-                value={review.customerStatus ? <StatusBadge status={review.customerStatus} /> : null}
+                label={t('Account status')}
+                value={
+                  review.customerStatus ? (
+                    <StatusBadge status={review.customerStatus} label={t.loose(titleCase(review.customerStatus))} />
+                  ) : null
+                }
               />
-              <DetailField label="Verified purchase" value={<DetailBool value={review.verifiedPurchase} />} />
+              <DetailField label={t('Verified purchase')} value={<DetailBool value={review.verifiedPurchase} />} />
               <DetailField
-                label="From order"
+                label={t('From order')}
                 value={
                   review.orderId ? (
-                    <Link href={`/orders/${review.orderId}`} className="font-mono text-[13px] hover:underline">
-                      {review.orderNumber ?? 'Open order'}
+                    <Link href={`/orders?view=${review.orderId}`} className="font-mono text-[12px] hover:underline">
+                      {review.orderNumber ?? t('Open order')}
                     </Link>
                   ) : null
                 }
               />
-              <DetailField label="Found helpful by" value={formatNumber(review.helpfulCount)} />
+              <DetailField label={t('Found helpful by')} value={t.number(review.helpfulCount)} />
             </DetailGrid>
           </DetailSection>
 
-          <DetailSection title="Product">
+          <DetailSection title={t('Product')}>
             <DetailGrid>
               <DetailField
-                label="Name"
+                label={t('Name')}
                 value={
                   <Link href={`/products/${review.productId}`} className="hover:underline">
                     {review.productName}
                   </Link>
                 }
               />
-              <DetailField label="Address" value={review.productSlug} mono />
-              <DetailField label="Product status" value={<StatusBadge status={review.productStatus} />} />
-              <DetailField label="Product ID" value={<DetailId value={review.productId} />} />
+              <DetailField label={t('Address')} value={review.productSlug} mono />
+              <DetailField
+                label={t('Product status')}
+                value={
+                  <StatusBadge status={review.productStatus} label={t(PRODUCT_STATUS_LABELS[review.productStatus])} />
+                }
+              />
+              <DetailField label={t('Product ID')} value={<DetailId value={review.productId} />} />
             </DetailGrid>
           </DetailSection>
 
-          <DetailSection title="Shop's reply" description="Published under the review on the storefront.">
+          <DetailSection title={t("Shop's reply")} description={t('Published under the review on the storefront.')}>
             {review.adminReply ? (
               <div className="space-y-1">
                 <DetailProse>{review.adminReply}</DetailProse>
                 <p className="text-xs text-muted-foreground">
-                  Sent {formatDateTime(review.adminRepliedAt)}
+                  {t('Sent {date}', { date: t.dateTime(review.adminRepliedAt) })}
                 </p>
               </div>
             ) : (
-              <DetailEmpty>No reply.</DetailEmpty>
+              <DetailEmpty>{t('No reply.')}</DetailEmpty>
             )}
           </DetailSection>
 
-          <DetailSection title="Moderation">
+          <DetailSection title={t('Moderation')}>
             <DetailGrid>
-              <DetailField label="Status" value={<StatusBadge status={review.status} />} />
-              <DetailField label="Decided" value={formatDateTime(review.moderatedAt)} />
-              <DetailField label="Decided by" value={<DetailId value={review.moderatedBy} />} />
-              <DetailField label="Review ID" value={<DetailId value={review.id} />} />
-              <DetailField label="Written" value={formatDateTime(review.createdAt)} />
-              <DetailField label="Last changed" value={formatDateTime(review.updatedAt)} />
+              <DetailField
+                label={t('Status')}
+                value={<StatusBadge status={review.status} label={t(STATUS_LABELS[review.status])} />}
+              />
+              <DetailField label={t('Decided')} value={t.dateTime(review.moderatedAt)} />
+              <DetailField label={t('Decided by')} value={<DetailId value={review.moderatedBy} />} />
+              <DetailField label={t('Review ID')} value={<DetailId value={review.id} />} />
+              <DetailField label={t('Written')} value={t.dateTime(review.createdAt)} />
+              <DetailField label={t('Last changed')} value={t.dateTime(review.updatedAt)} />
             </DetailGrid>
           </DetailSection>
         </div>

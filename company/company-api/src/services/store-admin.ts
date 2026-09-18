@@ -5,6 +5,7 @@ import { resolveShard } from './tenant-shards';
 import { tenants } from '../db/schema/index';
 import { AppError, ERROR_CODES, conflict } from '../lib/errors';
 import { logger } from '../lib/logger';
+import { redis } from '../lib/redis';
 import {
   OTP_MAX_ATTEMPTS,
   generateOtp,
@@ -153,6 +154,31 @@ export async function consumeStoreAdminOtp(
 }
 
 /**
+ * Ends every open store admin panel session, from this side of the platform.
+ *
+ * The panel's sessions are JWTs whose `jti` names a record in the Redis both
+ * platforms share, so there is no longer a table in the tenant database to
+ * delete from — and that is the point: a token nobody can recall would make a
+ * password reset advisory. Deleting the record is what makes the reset take
+ * effect on the next request rather than whenever the cookie happens to lapse.
+ *
+ * **The key names are a deliberate copy of `client-api/src/lib/session.ts`**,
+ * under the same arrangement as the `tenant:v2:invalidate` channel: the two
+ * platforms are deployed independently and share no package, so the format is
+ * written down twice and must be changed in both places at once. Nothing else
+ * on this side reads or writes them.
+ */
+async function revokeStorePanelSessions(tenantRef: string, adminId: string): Promise<void> {
+  const index = `t:${tenantRef}:session-index:admin:${adminId}`;
+
+  const ids = await redis.smembers(index);
+  if (ids.length === 0) return;
+
+  await redis.del(...ids.map((jti) => `t:${tenantRef}:session:admin:${jti}`));
+  await redis.del(index);
+}
+
+/**
  * Writes a new store admin password to wherever the live credential currently
  * is: the staging column while the store is still a draft, and the store's own
  * database once provisioning has copied it across.
@@ -203,12 +229,7 @@ export async function applyStoreAdminPassword(tenant: Tenant, passwordHash: stri
       throw new AppError(ERROR_CODES.STORE_ADMIN_NOT_FOUND, 'This store has no admin login recorded.', 409);
     }
 
-    // The session table belongs to the client platform's own migrations, so a
-    // tenant that has not been reached by them yet simply has nothing to revoke.
-    const sessionTable = await client.query(`select to_regclass('public.admin_sessions') as name`);
-    if (sessionTable.rows[0]?.name) {
-      await client.query('delete from admin_sessions where admin_id = $1', [updated.rows[0]!.id]);
-    }
+    await revokeStorePanelSessions(tenant.tenantRef, updated.rows[0]!.id);
   } finally {
     await client.end().catch(() => undefined);
   }

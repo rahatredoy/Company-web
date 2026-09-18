@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * The one carousel in this app.
@@ -20,9 +21,11 @@ import { cn } from '@/lib/utils';
  *    reading and `dir="rtl"` all work because they are the platform's, not
  *    something re-declared with ARIA.
  *
- * What is given up is a true infinite loop — stepping past the end wraps with a
- * scroll back to the start. For the two-to-five slides a storefront hero
- * actually carries, the two are indistinguishable.
+ * What is given up is a true infinite loop of cloned slides. A looping carousel
+ * wraps by jumping instead: stepping past the last slide lands on the first with
+ * no animation, because animating it would sweep back across every slide in
+ * between — which is the carousel telling the visitor it ended, immediately
+ * after its arrows promised it would not. A jump reads as the wrap it is.
  *
  * Every consumer imports from this file and nothing else, so if scroll-snap
  * ever proves unacceptable on a target browser, one file changes.
@@ -34,7 +37,7 @@ interface CarouselContextValue {
   count: number;
   canScrollPrevious: boolean;
   canScrollNext: boolean;
-  scrollTo: (index: number) => void;
+  scrollTo: (index: number, instant?: boolean) => void;
   scrollBy: (delta: number) => void;
   /** Set once the visitor drives it themselves; stops any autoplay for good. */
   interacted: boolean;
@@ -124,13 +127,18 @@ export function Carousel({
     };
   }, [measure, children]);
 
-  const scrollTo = React.useCallback((index: number) => {
+  const scrollTo = React.useCallback((index: number, instant = false) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const items = viewport.querySelectorAll<HTMLElement>('[data-carousel-item]');
     const target = items[Math.max(0, Math.min(items.length - 1, index))];
     if (!target) return;
-    viewport.scrollTo({ left: target.offsetLeft - viewport.offsetLeft, behavior: 'smooth' });
+    // An explicit `behavior` beats the container's `scroll-smooth`, which is
+    // what lets a wrap jump while every ordinary step still glides.
+    viewport.scrollTo({
+      left: target.offsetLeft - viewport.offsetLeft,
+      behavior: instant ? 'auto' : 'smooth',
+    });
   }, []);
 
   const scrollBy = React.useCallback(
@@ -141,9 +149,16 @@ export function Carousel({
       if (items.length === 0) return;
 
       let next = activeIndex + delta;
-      if (next < 0) next = loop ? items.length - 1 : 0;
-      if (next > items.length - 1) next = loop ? 0 : items.length - 1;
-      scrollTo(next);
+      let wrapped = false;
+      if (next < 0) {
+        wrapped = loop;
+        next = loop ? items.length - 1 : 0;
+      }
+      if (next > items.length - 1) {
+        wrapped = loop;
+        next = loop ? 0 : items.length - 1;
+      }
+      scrollTo(next, wrapped);
     },
     [activeIndex, loop, scrollTo],
   );
@@ -193,6 +208,7 @@ export function CarouselViewport({
   gap?: string;
   snap?: 'start' | 'center';
 }) {
+  const t = useT();
   const { viewportRef, markInteracted, count } = useCarousel();
 
   return (
@@ -200,7 +216,7 @@ export function CarouselViewport({
       ref={viewportRef}
       tabIndex={0}
       role="group"
-      aria-label={`${count} items, scrollable`}
+      aria-label={t('{count} items, scrollable', { count })}
       onPointerDown={markInteracted}
       onKeyDown={(event) => {
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') markInteracted();
@@ -304,6 +320,7 @@ function ArrowButton({
   size: 'sm' | 'md';
   className?: string;
 }) {
+  const t = useT();
   const Icon = direction === 'previous' ? ChevronLeft : ChevronRight;
 
   return (
@@ -311,7 +328,7 @@ function ArrowButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      aria-label={direction === 'previous' ? 'Previous' : 'Next'}
+      aria-label={direction === 'previous' ? t('Previous') : t('Next')}
       className={cn(
         'grid place-items-center rounded-full border border-border bg-surface text-foreground shadow-[var(--shadow-card)]',
         'transition-colors hover:border-primary hover:text-primary',
@@ -322,45 +339,5 @@ function ArrowButton({
     >
       <Icon className={size === 'sm' ? 'size-4' : 'size-5'} aria-hidden />
     </button>
-  );
-}
-
-export function CarouselDots({ className, tone = 'dark' }: { className?: string; tone?: 'dark' | 'light' }) {
-  const { count, activeIndex, scrollTo, markInteracted } = useCarousel();
-  if (count <= 1) return null;
-
-  return (
-    <div className={cn('flex items-center justify-center gap-2', className)}>
-      {Array.from({ length: count }, (_, index) => {
-        const active = index === activeIndex;
-        return (
-          <button
-            key={index}
-            type="button"
-            onClick={() => {
-              markInteracted();
-              scrollTo(index);
-            }}
-            aria-label={`Go to slide ${index + 1} of ${count}`}
-            aria-current={active ? 'true' : undefined}
-            className={cn(
-              // Hit area is 24px even though the dot is 8px — the visible mark
-              // is decoration, the button is the control.
-              'grid size-6 place-items-center',
-              'after:block after:rounded-full after:transition-all',
-              active ? 'after:w-5' : 'after:w-2 hover:after:w-3',
-              'after:h-2',
-              tone === 'light'
-                ? active
-                  ? 'after:bg-white'
-                  : 'after:bg-white/50'
-                : active
-                  ? 'after:bg-primary'
-                  : 'after:bg-border-strong',
-            )}
-          />
-        );
-      })}
-    </div>
   );
 }

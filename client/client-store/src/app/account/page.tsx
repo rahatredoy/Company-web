@@ -9,9 +9,13 @@ import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { AddressBlock } from '@/components/account/order-detail-parts';
-import { formatDate, formatMoney, pluralise } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
+import { formatDate, formatMoney } from '@/lib/utils';
 
-export const metadata: Metadata = { title: 'My account', robots: { index: false, follow: false } };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('My account'), robots: { index: false, follow: false } };
+}
 
 /** Order statuses that still need watching, as opposed to finished ones. */
 const ACTIVE = new Set(['pending', 'confirmed', 'processing', 'packed', 'shipped', 'out_for_delivery']);
@@ -24,7 +28,7 @@ export default async function AccountDashboard() {
     getReturns(),
     getStoreConfig(),
   ]);
-  const locale = await readLocalePreference(config);
+  const [locale, t] = await Promise.all([readLocalePreference(config), getT()]);
 
   const active = orderPage.items.filter((order) => ACTIVE.has(order.status));
   const completed = orderPage.items.filter((order) => order.status === 'delivered');
@@ -34,22 +38,23 @@ export default async function AccountDashboard() {
   return (
     <>
       <h1 className="text-2xl font-semibold sm:text-3xl">
-        Welcome back{customer?.fullName ? `, ${customer.fullName.split(' ')[0]}` : ''}
+        {customer?.fullName
+          ? t('Welcome back, {name}', { name: customer.fullName.split(' ')[0] ?? '' })
+          : t('Welcome back')}
       </h1>
-      <p className="mt-2 text-muted">Here is what is happening with your orders.</p>
 
-      <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat icon={Truck} label="Active orders" value={String(active.length)} href="/account/orders" />
-        <Stat icon={Package} label="Completed" value={String(completed.length)} href="/account/orders?status=delivered" />
-        <Stat icon={RotateCcw} label="Returns" value={String(returns.length)} href="/account/returns" />
-        <Stat icon={MapPin} label="Addresses" value={String(addresses.length)} href="/account/addresses" />
+      <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat icon={Truck} label={t('Active orders')} value={t.number(active.length)} href="/account/orders" />
+        <Stat icon={Package} label={t('Completed')} value={t.number(completed.length)} href="/account/orders?status=delivered" />
+        <Stat icon={RotateCcw} label={t('Returns')} value={t.number(returns.length)} href="/account/returns" />
+        <Stat icon={MapPin} label={t('Addresses')} value={t.number(addresses.length)} href="/account/addresses" />
       </ul>
 
       <section className="mt-10">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Latest order</h2>
+          <h2 className="text-lg font-semibold">{t('Latest order')}</h2>
           <Link href="/account/orders" className="text-sm font-medium text-primary hover:underline">
-            View all
+            {t('View all')}
           </Link>
         </div>
 
@@ -58,26 +63,27 @@ export default async function AccountDashboard() {
             <div>
               <p className="font-mono font-semibold">{latest.orderNumber}</p>
               <p className="mt-0.5 text-sm text-muted">
-                {formatDate(latest.placedAt, locale.language)} · {latest.itemCount}{' '}
-                {pluralise(latest.itemCount, 'item')} ·{' '}
-                {formatMoney(latest.total, latest.currency, locale.language)}
+                {t.plural(latest.itemCount, '{date} · {count} item · {total}', '{date} · {count} items · {total}', {
+                  date: formatDate(latest.placedAt, locale.language),
+                  total: formatMoney(latest.total, latest.currency, locale.language),
+                })}
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={latest.status} />
               <Button asChild size="sm" variant="outline">
-                <Link href={`/account/orders/${latest.orderNumber}`}>View</Link>
+                <Link href={`/account/orders/${latest.orderNumber}`}>{t('View')}</Link>
               </Button>
             </div>
           </div>
         ) : (
           <EmptyState
-            title="No orders yet"
-            description="When you place an order it will appear here."
+            title={t('No orders yet')}
+            description={t('When you place an order it will appear here.')}
             action={
               <Button asChild>
-                <Link href="/shop">Start shopping</Link>
+                <Link href="/shop">{t('Start shopping')}</Link>
               </Button>
             }
             className="mt-4 rounded-(--radius-card) border border-dashed border-border"
@@ -87,9 +93,9 @@ export default async function AccountDashboard() {
 
       <section className="mt-10">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Default address</h2>
+          <h2 className="text-lg font-semibold">{t('Default address')}</h2>
           <Link href="/account/addresses" className="text-sm font-medium text-primary hover:underline">
-            Manage
+            {t('Manage')}
           </Link>
         </div>
 

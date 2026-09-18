@@ -11,6 +11,7 @@ import { Field } from '@/components/ui/field';
 import { Input, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
+import { useT } from '@/lib/i18n';
 
 const SELECT_CLASS = 'h-10 w-full rounded-md border border-input bg-background px-3 text-sm';
 
@@ -29,6 +30,7 @@ const SELECT_CLASS = 'h-10 w-full rounded-md border border-input bg-background p
  */
 export function PageEditor({ page, canManage }: { page: PageDetail | null; canManage: boolean }) {
   const router = useRouter();
+  const t = useT();
   const [saving, setSaving] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -64,11 +66,11 @@ export function PageEditor({ page, canManage }: { page: PageDetail | null; canMa
     try {
       if (page) {
         await api.put(`/api/v1/admin/website/pages/${page.id}`, payload);
-        toast.success('Page saved.');
+        toast.success(t('Page saved.'));
         router.refresh();
       } else {
         const created = await api.post<{ id: string }>('/api/v1/admin/website/pages', payload);
-        toast.success('Page created.');
+        toast.success(t('Page created.'));
         router.push(`/website/pages/${created.id}`);
       }
     } catch (caught) {
@@ -84,13 +86,13 @@ export function PageEditor({ page, canManage }: { page: PageDetail | null; canMa
   };
 
   const onDelete = async () => {
-    if (!page || !window.confirm(`Delete “${page.title}” permanently?`)) return;
+    if (!page || !window.confirm(t('Delete “{title}” permanently?', { title: page.title }))) return;
 
     setDeleting(true);
 
     try {
       await api.delete(`/api/v1/admin/website/pages/${page.id}`);
-      toast.success('Page deleted.');
+      toast.success(t('Page deleted.'));
       router.push('/website/pages');
     } catch (caught) {
       setError(errorMessage(caught));
@@ -107,24 +109,24 @@ export function PageEditor({ page, canManage }: { page: PageDetail | null; canMa
         <div className="space-y-6">
           <Card>
             <CardContent className="space-y-4 pt-6">
-              <Field label="Title" htmlFor="title" required error={fieldErrors.title}>
+              <Field label={t('Title')} htmlFor="title" required error={fieldErrors.title}>
                 <Input id="title" name="title" defaultValue={page?.title ?? ''} maxLength={200} disabled={!canManage} />
               </Field>
 
               <Field
-                label="Address"
+                label={t('Address')}
                 htmlFor="slug"
                 error={fieldErrors.slug}
                 hint={
                   page
-                    ? `Lives at /page/${page.slug}. Changing this breaks every existing link to it.`
-                    : 'Left empty, this is made from the title.'
+                    ? t('Lives at /page/{slug}. Changing this breaks every existing link to it.', { slug: page.slug })
+                    : t('Left empty, this is made from the title.')
                 }
               >
                 <Input id="slug" name="slug" defaultValue={page?.slug ?? ''} maxLength={220} disabled={!canManage} />
               </Field>
 
-              <Field label="Summary" htmlFor="excerpt" hint="Used in search results and link previews.">
+              <Field label={t('Summary')} htmlFor="excerpt" hint={t('Used in search results and link previews.')}>
                 <Textarea
                   id="excerpt"
                   name="excerpt"
@@ -136,10 +138,10 @@ export function PageEditor({ page, canManage }: { page: PageDetail | null; canMa
               </Field>
 
               <Field
-                label="Body"
+                label={t('Body')}
                 htmlFor="bodyHtml"
                 error={fieldErrors.bodyHtml}
-                hint="HTML. Only a small set of tags survives — headings, paragraphs, lists, links, tables."
+                hint={t('HTML. Only a small set of tags survives — headings, paragraphs, lists, links, tables.')}
               >
                 <Textarea
                   id="bodyHtml"
@@ -155,13 +157,13 @@ export function PageEditor({ page, canManage }: { page: PageDetail | null; canMa
 
           <Card>
             <CardHeader>
-              <CardTitle>Search engines</CardTitle>
+              <CardTitle>{t('Search engines')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Field label="Title tag" htmlFor="seoTitle">
+              <Field label={t('Title tag')} htmlFor="seoTitle">
                 <Input id="seoTitle" name="seoTitle" maxLength={160} defaultValue={page?.seoTitle ?? ''} disabled={!canManage} />
               </Field>
-              <Field label="Meta description" htmlFor="seoDescription">
+              <Field label={t('Meta description')} htmlFor="seoDescription">
                 <Textarea
                   id="seoDescription"
                   name="seoDescription"
@@ -178,10 +180,10 @@ export function PageEditor({ page, canManage }: { page: PageDetail | null; canMa
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Publishing</CardTitle>
+              <CardTitle>{t('Publishing')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Field label="Status" htmlFor="status">
+              <Field label={t('Status')} htmlFor="status">
                 <select
                   id="status"
                   name="status"
@@ -189,17 +191,17 @@ export function PageEditor({ page, canManage }: { page: PageDetail | null; canMa
                   className={SELECT_CLASS}
                   disabled={!canManage}
                 >
-                  <option value="draft">Draft — nobody can see it</option>
-                  <option value="published">Published — live on your site</option>
+                  <option value="draft">{t('Draft — nobody can see it')}</option>
+                  <option value="published">{t('Published — live on your site')}</option>
                 </select>
               </Field>
 
               <label className="flex items-center gap-3 text-sm">
                 <Switch name="showInFooter" defaultChecked={page?.showInFooter ?? false} disabled={!canManage} />
-                Link to it from the footer
+                {t('Link to it from the footer')}
               </label>
 
-              <Field label="Order" htmlFor="sortOrder" hint="Lower shows first in the footer.">
+              <Field label={t('Order::sort')} htmlFor="sortOrder" hint={t('Lower shows first in the footer.')}>
                 <Input
                   id="sortOrder"
                   name="sortOrder"
@@ -211,8 +213,7 @@ export function PageEditor({ page, canManage }: { page: PageDetail | null; canMa
 
               {page?.systemKey ? (
                 <Alert variant="info">
-                  This is one of your policy pages, so it cannot be deleted. Unpublish it instead if
-                  you do not want it.
+                  {t('This is one of your policy pages, so it cannot be deleted. Unpublish it instead if you do not want it.')}
                 </Alert>
               ) : null}
             </CardContent>
@@ -221,7 +222,7 @@ export function PageEditor({ page, canManage }: { page: PageDetail | null; canMa
           {canManage ? (
             <div className="space-y-2">
               <Button type="submit" className="w-full" loading={saving}>
-                {page ? 'Save page' : 'Create page'}
+                {page ? t('Save page') : t('Create page')}
               </Button>
               {page && !page.systemKey ? (
                 <Button
@@ -231,7 +232,7 @@ export function PageEditor({ page, canManage }: { page: PageDetail | null; canMa
                   loading={deleting}
                   onClick={onDelete}
                 >
-                  Delete page
+                  {t('Delete page')}
                 </Button>
               ) : null}
             </div>

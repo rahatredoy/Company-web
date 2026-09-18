@@ -39,7 +39,7 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui/toaster';
 import { api, errorMessage } from '@/lib/api';
-import { formatNumber } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { CategoryRow } from '@/lib/types';
 import { useViewTarget } from '@/hooks/use-detail';
@@ -105,6 +105,7 @@ export function CategoryManager({
   initial: CategoryFilterState;
 }) {
   const router = useRouter();
+  const t = useT();
 
   const [filters, setFilters] = React.useState<TreeFilters>({
     search: initial.search,
@@ -231,10 +232,14 @@ export function CategoryManager({
   async function removeOne(row: CategoryRow) {
     const warning =
       row.productCount > 0
-        ? `\n\n${formatNumber(row.productCount)} product${row.productCount === 1 ? '' : 's'} will stay, without a category.`
+        ? `\n\n${t.plural(
+            row.productCount,
+            '{count} product will stay, without a category.',
+            '{count} products will stay, without a category.',
+          )}`
         : '';
-    if (!globalThis.confirm(`Delete “${row.name}”?${warning}`)) return;
-    await run('Category deleted.', () => api.delete(`/api/v1/admin/categories/${row.id}`));
+    if (!globalThis.confirm(`${t('Delete “{name}”?', { name: row.name })}${warning}`)) return;
+    await run(t('Category deleted.'), () => api.delete(`/api/v1/admin/categories/${row.id}`));
   }
 
   /**
@@ -243,7 +248,7 @@ export function CategoryManager({
    * category refusing to be deleted because it still has subcategories must not
    * abandon the other nine.
    */
-  async function bulk(label: string, work: (id: string) => Promise<unknown>) {
+  async function bulk(success: (count: number) => string, work: (id: string) => Promise<unknown>) {
     const ids = [...selected];
     if (!ids.length) return;
 
@@ -252,9 +257,15 @@ export function CategoryManager({
     const failed = results.filter((result) => result.status === 'rejected');
     setBusy(false);
 
-    if (failed.length === 0) toast.success(`${label} ${ids.length} categor${ids.length === 1 ? 'y' : 'ies'}.`);
+    if (failed.length === 0) toast.success(success(ids.length));
     else if (failed.length === ids.length) toast.error(errorMessage((failed[0] as PromiseRejectedResult).reason));
-    else toast.error(`${ids.length - failed.length} done, ${failed.length} refused — see each row.`);
+    else
+      toast.error(
+        t('{done} done, {failed} refused — see each row.', {
+          done: ids.length - failed.length,
+          failed: failed.length,
+        }),
+      );
 
     refresh();
   }
@@ -262,10 +273,21 @@ export function CategoryManager({
   async function bulkDelete() {
     const ids = [...selected];
     if (!ids.length) return;
-    if (!globalThis.confirm(`Delete ${ids.length} categor${ids.length === 1 ? 'y' : 'ies'}? Their products stay, without a category.`)) {
+    if (
+      !globalThis.confirm(
+        t.plural(
+          ids.length,
+          'Delete {count} category? Their products stay, without a category.',
+          'Delete {count} categories? Their products stay, without a category.',
+        ),
+      )
+    ) {
       return;
     }
-    await bulk('Deleted', (id) => api.delete(`/api/v1/admin/categories/${id}`));
+    await bulk(
+      (count) => t.plural(count, 'Deleted {count} category.', 'Deleted {count} categories.'),
+      (id) => api.delete(`/api/v1/admin/categories/${id}`),
+    );
   }
 
   // -------------------------------------------------------------- reorder
@@ -284,7 +306,7 @@ export function CategoryManager({
 
     const source = rows.find((row) => row.id === sourceId);
     if (!source || source.parentId !== target.parentId) {
-      toast.error('Drag a category above or below one of its own siblings.');
+      toast.error(t('Drag a category above or below one of its own siblings.'));
       return;
     }
 
@@ -299,7 +321,7 @@ export function CategoryManager({
 
     siblings.splice(to, 0, siblings.splice(from, 1)[0]!);
 
-    await run('Order saved.', () =>
+    await run(t('Order saved.'), () =>
       api.patch('/api/v1/admin/categories/reorder', {
         order: siblings.map((id, index) => ({ id, sortOrder: index })),
       }),
@@ -410,8 +432,8 @@ export function CategoryManager({
             }}
             role="button"
             tabIndex={-1}
-            aria-label={`Reorder ${node.name}`}
-            title="Drag to reorder among its siblings"
+            aria-label={t('Reorder {name}', { name: node.name })}
+            title={t('Drag to reorder among its siblings')}
             className="grid size-6 cursor-grab place-items-center text-muted-foreground active:cursor-grabbing"
           >
             <GripVertical className="size-4" aria-hidden />
@@ -439,20 +461,20 @@ export function CategoryManager({
               return next;
             })
           }
-          aria-label="Select every category the filters kept"
+          aria-label={t('Select every category the filters kept')}
         />
       ),
       cell: (node) => (
         <Checkbox
           checked={selected.has(node.id)}
           onCheckedChange={(checked) => toggleRow(node.id, checked === true)}
-          aria-label={`Select ${node.name}`}
+          aria-label={t('Select {name}', { name: node.name })}
         />
       ),
     },
     {
       key: 'category',
-      header: 'Category',
+      header: t('Category'),
       cell: (node) => {
         const hasChildren = node.children.length > 0;
         const isOpen = expanded.has(node.id);
@@ -475,7 +497,9 @@ export function CategoryManager({
                   })
                 }
                 aria-expanded={isOpen}
-                aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${node.name}`}
+                aria-label={
+                  isOpen ? t('Collapse {name}', { name: node.name }) : t('Expand {name}', { name: node.name })
+                }
                 className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <ChevronRight
@@ -488,7 +512,7 @@ export function CategoryManager({
             )}
 
             <LazyImage
-              src={node.iconUrl}
+              src={node.imageUrl}
               alt=""
               className="size-8 rounded-lg border border-border"
               fallback={
@@ -510,35 +534,41 @@ export function CategoryManager({
       width: '7rem',
       headClassName: 'text-right',
       className: 'text-right tabular-nums text-muted-foreground',
-      header: 'Products',
-      cell: (node) => formatNumber(node.productCount),
+      header: t('Products'),
+      cell: (node) => t.number(node.productCount),
     },
     {
       key: 'status',
       width: '14rem',
       header: (
         <span className="inline-flex items-center gap-1.5">
-          Status
+          {t('Status')}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" aria-label="What these badges mean">
+              <button type="button" aria-label={t('What these badges mean')}>
                 <Info className="size-3.5" aria-hidden />
               </button>
             </TooltipTrigger>
             <TooltipContent className="max-w-64">
-              <b>Visible</b> — shoppers can reach it. <b>Featured</b> — it leads the storefront navigation.{' '}
-              <b>Not in menu</b> — reachable by link, but not listed.
+              {t.rich(
+                '{visible} — shoppers can reach it. {featured} — it leads the storefront navigation. {notInMenu} — reachable by link, but not listed.',
+                {
+                  visible: <b>{t('Visible')}</b>,
+                  featured: <b>{t('Featured')}</b>,
+                  notInMenu: <b>{t('Not in menu')}</b>,
+                },
+              )}
             </TooltipContent>
           </Tooltip>
         </span>
       ),
       cell: (node) => (
         <div className="flex flex-wrap items-center gap-1.5">
-          {node.isFeatured ? <Badge variant="warning">Featured</Badge> : null}
+          {node.isFeatured ? <Badge variant="warning">{t('Featured')}</Badge> : null}
           <Badge variant={node.isActive ? 'success' : 'neutral'}>
-            {node.isActive ? 'Visible' : 'Hidden'}
+            {node.isActive ? t('Visible') : t('Hidden')}
           </Badge>
-          {node.showInMenu ? null : <Badge variant="outline">Not in menu</Badge>}
+          {node.showInMenu ? null : <Badge variant="outline">{t('Not in menu')}</Badge>}
         </div>
       ),
     },
@@ -546,13 +576,13 @@ export function CategoryManager({
       key: 'actions',
       width: '11rem',
       headClassName: 'text-right',
-      header: 'Actions',
+      header: t('Actions'),
       cell: (node) => (
         <div className="flex items-center justify-end gap-0.5">
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`View ${node.name}`}
+            aria-label={t('View {name}', { name: node.name })}
             onClick={() => viewing.view(node)}
           >
             <Eye />
@@ -564,7 +594,7 @@ export function CategoryManager({
                 href={`${storefrontBase}/category/${node.slug}`}
                 target="_blank"
                 rel="noreferrer"
-                aria-label={`Open ${node.name} on the storefront`}
+                aria-label={t('Open {name} on the storefront', { name: node.name })}
               >
                 <Store />
               </a>
@@ -576,7 +606,7 @@ export function CategoryManager({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={`Edit ${node.name}`}
+                aria-label={t('Edit {name}', { name: node.name })}
                 onClick={() => setPanel({ open: true, row: node, parentId: null, sub: false })}
               >
                 <Pencil />
@@ -584,7 +614,7 @@ export function CategoryManager({
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" aria-label={`More actions for ${node.name}`}>
+                  <Button variant="ghost" size="icon-sm" aria-label={t('More actions for {name}', { name: node.name })}>
                     <MoreVertical />
                   </Button>
                 </DropdownMenuTrigger>
@@ -592,41 +622,41 @@ export function CategoryManager({
                   <DropdownMenuItem
                     onSelect={() => setPanel({ open: true, row: null, parentId: node.id, sub: true })}
                   >
-                    <Plus /> Add subcategory
+                    <Plus /> {t('Add subcategory')}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={() =>
-                      void run(node.isFeatured ? 'No longer featured.' : 'Featured.', () =>
+                      void run(node.isFeatured ? t('No longer featured.') : t('Featured.'), () =>
                         patch(node.id, { isFeatured: !node.isFeatured }),
                       )
                     }
                   >
-                    <Star /> {node.isFeatured ? 'Remove from featured' : 'Mark as featured'}
+                    <Star /> {node.isFeatured ? t('Remove from featured') : t('Mark as featured')}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={() =>
-                      void run(node.isActive ? 'Hidden.' : 'Visible.', () =>
+                      void run(node.isActive ? t('Hidden.') : t('Visible.'), () =>
                         patch(node.id, { isActive: !node.isActive }),
                       )
                     }
                   >
                     {node.isActive ? <EyeOff /> : <Eye />}
-                    {node.isActive ? 'Hide from storefront' : 'Show on storefront'}
+                    {node.isActive ? t('Hide from storefront') : t('Show on storefront')}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={() =>
                       void run(
-                        node.showInMenu ? 'Removed from navigation.' : 'Added to navigation.',
+                        node.showInMenu ? t('Removed from navigation.') : t('Added to navigation.'),
                         () => patch(node.id, { showInMenu: !node.showInMenu }),
                       )
                     }
                   >
                     <FolderTree />
-                    {node.showInMenu ? 'Hide from navigation' : 'Show in navigation'}
+                    {node.showInMenu ? t('Hide from navigation') : t('Show in navigation')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem destructive onSelect={() => void removeOne(node)}>
-                    <Trash2 /> Delete
+                    <Trash2 /> {t('Delete')}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -641,54 +671,98 @@ export function CategoryManager({
     <TooltipProvider delayDuration={200}>
       <div className="space-y-6">
       <PageHeader
-        title="Categories"
-        breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Categories' }]}
+        title={t('Categories')}
+        breadcrumb={[{ label: t('Dashboard'), href: '/dashboard' }, { label: t('Categories') }]}
         actions={
           <>
             <Button variant="outline" onClick={exportCsv} disabled={visible.length === 0}>
-              <Download /> Export
+              <Download /> {t('Export')}
             </Button>
 
             {canManage ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" disabled={selected.size === 0 || busy}>
-                    Bulk Actions
-                    {selected.size ? <Badge variant="primary">{selected.size}</Badge> : null}
+                    {t('Bulk Actions')}
+                    {selected.size ? <Badge variant="primary">{t.number(selected.size)}</Badge> : null}
                     <ChevronDown />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel>
-                    {selected.size} selected
+                    {t('{count} selected', { count: selected.size })}
                   </DropdownMenuLabel>
-                  <DropdownMenuItem onSelect={() => bulk('Made visible', (id) => patch(id, { isActive: true }))}>
-                    <Eye /> Make visible
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      bulk(
+                        (count) => t.plural(count, 'Made visible {count} category.', 'Made visible {count} categories.'),
+                        (id) => patch(id, { isActive: true }),
+                      )
+                    }
+                  >
+                    <Eye /> {t('Make visible')}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => bulk('Hidden', (id) => patch(id, { isActive: false }))}>
-                    <EyeOff /> Hide
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => bulk('Featured', (id) => patch(id, { isFeatured: true }))}>
-                    <Star /> Mark featured
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => bulk('Unfeatured', (id) => patch(id, { isFeatured: false }))}>
-                    <Star /> Remove featured
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      bulk(
+                        (count) => t.plural(count, 'Hidden {count} category.', 'Hidden {count} categories.'),
+                        (id) => patch(id, { isActive: false }),
+                      )
+                    }
+                  >
+                    <EyeOff /> {t('Hide')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    onSelect={() => bulk('Shown in navigation', (id) => patch(id, { showInMenu: true }))}
+                    onSelect={() =>
+                      bulk(
+                        (count) => t.plural(count, 'Featured {count} category.', 'Featured {count} categories.'),
+                        (id) => patch(id, { isFeatured: true }),
+                      )
+                    }
                   >
-                    <FolderTree /> Show in navigation
+                    <Star /> {t('Mark featured')}
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onSelect={() => bulk('Removed from navigation', (id) => patch(id, { showInMenu: false }))}
+                    onSelect={() =>
+                      bulk(
+                        (count) => t.plural(count, 'Unfeatured {count} category.', 'Unfeatured {count} categories.'),
+                        (id) => patch(id, { isFeatured: false }),
+                      )
+                    }
                   >
-                    <FolderTree /> Hide from navigation
+                    <Star /> {t('Remove featured')}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      bulk(
+                        (count) =>
+                          t.plural(count, 'Shown in navigation {count} category.', 'Shown in navigation {count} categories.'),
+                        (id) => patch(id, { showInMenu: true }),
+                      )
+                    }
+                  >
+                    <FolderTree /> {t('Show in navigation')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      bulk(
+                        (count) =>
+                          t.plural(
+                            count,
+                            'Removed from navigation {count} category.',
+                            'Removed from navigation {count} categories.',
+                          ),
+                        (id) => patch(id, { showInMenu: false }),
+                      )
+                    }
+                  >
+                    <FolderTree /> {t('Hide from navigation')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem destructive onSelect={bulkDelete}>
-                    <Trash2 /> Delete
+                    <Trash2 /> {t('Delete')}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -708,16 +782,16 @@ export function CategoryManager({
                   variant="outline"
                   onClick={() => setPanel({ open: true, row: null, parentId: null, sub: false })}
                 >
-                  <Plus /> Add Category
+                  <Plus /> {t('Add Category')}
                 </Button>
 
                 <Button
                   variant="outline"
                   onClick={() => setPanel({ open: true, row: null, parentId: null, sub: true })}
                   disabled={rows.length === 0}
-                  title={rows.length === 0 ? 'Add a category first — a subcategory sits inside one.' : undefined}
+                  title={rows.length === 0 ? t('Add a category first — a subcategory sits inside one.') : undefined}
                 >
-                  <Plus /> Add Subcategory
+                  <Plus /> {t('Add Subcategory')}
                 </Button>
               </>
             ) : null}
@@ -730,35 +804,35 @@ export function CategoryManager({
         <StatCard
           icon={Layers}
           tint="primary"
-          label="Total Categories"
+          label={t('Total Categories')}
           value={stats.total}
           note={
             stats.addedThisMonth > 0
-              ? `+${formatNumber(stats.addedThisMonth)} added this month`
-              : 'None added this month'
+              ? t('+{count} added this month', { count: stats.addedThisMonth })
+              : t('None added this month')
           }
           good={stats.addedThisMonth > 0}
         />
         <StatCard
           icon={FolderTree}
           tint="success"
-          label="Subcategories"
+          label={t('Subcategories')}
           value={stats.subcategories}
-          note={`Inside ${formatNumber(stats.parents)} parent categor${stats.parents === 1 ? 'y' : 'ies'}`}
+          note={t.plural(stats.parents, 'Inside {count} parent category', 'Inside {count} parent categories')}
         />
         <StatCard
           icon={Star}
           tint="warning"
-          label="Featured Categories"
+          label={t('Featured Categories')}
           value={stats.featured}
-          note="Lead the storefront navigation"
+          note={t('Lead the storefront navigation')}
         />
         <StatCard
           icon={EyeOff}
           tint="danger"
-          label="Hidden Categories"
+          label={t('Hidden Categories')}
           value={stats.hidden}
-          note="Not visible to shoppers"
+          note={t('Not visible to shoppers')}
         />
       </div>
 
@@ -775,8 +849,8 @@ export function CategoryManager({
           <Input
             value={term}
             onChange={(event) => setTerm(event.target.value)}
-            placeholder="Search categories…"
-            aria-label="Search categories"
+            placeholder={t('Search categories…')}
+            aria-label={t('Search categories')}
             className="pl-9"
           />
         </div>
@@ -784,14 +858,14 @@ export function CategoryManager({
         <select
           value={filters.parent}
           onChange={(event) => change('parent', event.target.value)}
-          aria-label="Parent category"
+          aria-label={t('Parent category')}
           className={cn(SELECT_CLASS, 'lg:w-52')}
         >
-          <option value="all">All Parent Categories</option>
-          <option value="root">Top level only</option>
+          <option value="all">{t('All Parent Categories')}</option>
+          <option value="root">{t('Top level only')}</option>
           {parentOptions.map((row) => (
             <option key={row.id} value={row.id}>
-              Inside {row.name}
+              {t('Inside {name}', { name: row.name })}
             </option>
           ))}
         </select>
@@ -799,36 +873,36 @@ export function CategoryManager({
         <select
           value={filters.status}
           onChange={(event) => change('status', event.target.value as TreeFilters['status'])}
-          aria-label="Status"
+          aria-label={t('Status')}
           className={cn(SELECT_CLASS, 'lg:w-40')}
         >
-          <option value="all">All Status</option>
-          <option value="active">Active</option>
-          <option value="inactive">Hidden</option>
+          <option value="all">{t('All Status')}</option>
+          <option value="active">{t('Active')}</option>
+          <option value="inactive">{t('Hidden')}</option>
         </select>
 
         <select
           value={filters.visibility}
           onChange={(event) => change('visibility', event.target.value as TreeFilters['visibility'])}
-          aria-label="Navigation visibility"
+          aria-label={t('Navigation visibility')}
           className={cn(SELECT_CLASS, 'lg:w-44')}
         >
-          <option value="all">All Visibility</option>
-          <option value="shown">In navigation</option>
-          <option value="hidden">Not in navigation</option>
+          <option value="all">{t('All Visibility')}</option>
+          <option value="shown">{t('In navigation')}</option>
+          <option value="hidden">{t('Not in navigation')}</option>
         </select>
 
         <div className="flex items-center gap-2 lg:ml-auto">
           <Button type="submit" variant="outline">
-            <SlidersHorizontal /> Filter
+            <SlidersHorizontal /> {t('Filter')}
           </Button>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" onClick={resetAll} aria-label="Reset filters">
+              <Button type="button" variant="ghost" size="icon" onClick={resetAll} aria-label={t('Reset filters')}>
                 <RotateCcw />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Reset filters</TooltipContent>
+            <TooltipContent>{t('Reset filters')}</TooltipContent>
           </Tooltip>
         </div>
       </form>
@@ -871,8 +945,8 @@ export function CategoryManager({
         }
         empty={
           rows.length === 0
-            ? 'No categories yet. Add the first one to start grouping your products.'
-            : 'No category matches these filters.'
+            ? t('No categories yet. Add the first one to start grouping your products.')
+            : t('No category matches these filters.')
         }
       />
 

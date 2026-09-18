@@ -125,10 +125,36 @@
     var(--font-sans)` resolves to nothing, which is how this file spent its
     first life silently rendering every serif masthead in the body sans.
     `next/font` writes the `*-family` variables; Tailwind reads them here.
+
+    Each face is followed by Noto Sans Bengali, so a Bangla shop keeps the
+    template's own face for its Latin text — prices, SKUs, brand names — and
+    takes each Bengali glyph from a face that has one. The fallback inside
+    `var()` keeps the stack valid where that font's class is absent.
   */
-  --font-sans: var(--font-sans-family);
-  --font-display: var(--font-display-family);
-  --font-technical: var(--font-technical-family);
+  --font-sans: var(--font-sans-family), var(--font-bengali-family, system-ui);
+  --font-display: var(--font-display-family), var(--font-bengali-family, serif);
+  --font-technical: var(--font-technical-family), var(--font-bengali-family, system-ui);
+}
+
+/*
+ * The type scale, one step under Tailwind's default (roughly 7% smaller at every
+ * size) — the stock scale made every page read oversized. Only the text moves:
+ * spacing, control heights and icons are still on the default rem scale. Line
+ * heights stay Tailwind's own unitless ratios, so they follow the new sizes.
+ * Hand-set `text-[Npx]` sizes in the components were stepped down by the same
+ * amount; keep new ones in step. The same block is in all four Next apps.
+ */
+@theme {
+  --text-xs: 0.6875rem; /* 11px, was 12 */
+  --text-sm: 0.8125rem; /* 13px, was 14 */
+  --text-base: 0.9375rem; /* 15px, was 16 */
+  --text-lg: 1.0625rem; /* 17px, was 18 */
+  --text-xl: 1.1875rem; /* 19px, was 20 */
+  --text-2xl: 1.375rem; /* 22px, was 24 */
+  --text-3xl: 1.75rem; /* 28px, was 30 */
+  --text-4xl: 2.125rem; /* 34px, was 36 */
+  --text-5xl: 2.75rem; /* 44px, was 48 */
+  --text-6xl: 3.5rem; /* 56px, was 60 */
 }
 
 @layer base {
@@ -146,6 +172,8 @@
     background-color: var(--background);
     color: var(--text-primary);
     font-family: var(--font-sans), system-ui, sans-serif;
+    /* Text with no size class of its own follows the scale above, not the browser's 16px. */
+    font-size: var(--text-base);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -165,8 +193,7 @@
 
     Colour is deliberately NOT set here. `body` already carries the text colour
     and headings inherit it, so the common case is unchanged — but a heading
-    inside a coloured band (the newsletter block, a flash-sale bar, a dark
-    footer) then inherits that band's foreground instead of being forced back to
+    inside a coloured band (a flash-sale bar, a dark footer) then inherits that band's foreground instead of being forced back to
     the page's near-black. Setting it here made every such heading invisible,
     while the paragraph beside it was correct.
   */
@@ -174,7 +201,7 @@
   h2,
   h3,
   h4 {
-    font-family: var(--font-heading, var(--font-sans-family)), system-ui, sans-serif;
+    font-family: var(--font-heading, var(--font-sans-family)), var(--font-bengali-family, system-ui), sans-serif;
     letter-spacing: var(--heading-tracking, -0.01em);
     text-wrap: balance;
   }
@@ -276,13 +303,13 @@
 
   .cms-content h2 {
     margin-top: 2.5rem;
-    font-size: 1.25rem;
+    font-size: var(--text-xl);
     font-weight: 600;
   }
 
   .cms-content h3 {
     margin-top: 2rem;
-    font-size: 1.05rem;
+    font-size: 1rem;
     font-weight: 600;
   }
 
@@ -323,7 +350,7 @@
   .cms-content table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 
   .cms-content th,

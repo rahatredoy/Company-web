@@ -583,6 +583,9 @@ export default async function publicRoutes(app: FastifyInstance) {
 
     // Rotate the token on elevation, then move the cookie across.
     const promoted = await promoteClientSession(session.id, session.remember);
+    // The challenge expired between being read and being promoted — rare, and
+    // indistinguishable to the caller from having taken too long over the code.
+    if (!promoted) throw unauthorized('Your session has expired. Sign in again.', ERROR_CODES.SESSION_EXPIRED);
     clearSessionCookie(reply, 'clientOtp');
     setSessionCookie(reply, 'client', promoted);
 

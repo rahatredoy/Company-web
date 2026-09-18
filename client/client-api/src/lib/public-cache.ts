@@ -55,7 +55,6 @@ const PUBLIC_READS: Record<string, CachePolicy> = {
   '/api/v1/storefront/brands/:slug': { browser: 60, shared: 300, stale: 600 },
   '/api/v1/storefront/pages/:slug': { browser: 60, shared: 300, stale: 600 },
   '/api/v1/storefront/faqs': { browser: 60, shared: 300, stale: 600 },
-  '/api/v1/storefront/checkout/shipping-methods': { browser: 60, shared: 300, stale: 600 },
 
   // The homepage layout. Moves with a campaign, so shorter.
   '/api/v1/storefront/home': { browser: 30, shared: 120, stale: 600 },

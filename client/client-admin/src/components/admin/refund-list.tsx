@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ListMeta } from '@/lib/api';
-import { formatDate, formatMoney } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useViewTarget } from '@/hooks/use-detail';
 import type { RefundRow } from '@/lib/types';
@@ -31,6 +31,7 @@ export function RefundList({
   filtered: boolean;
   canApprove: boolean;
 }) {
+  const t = useT();
   const list = useInfiniteList<RefundRow>({ path: '/api/v1/admin/refunds', query, initial });
 
   /** One panel for the whole list; a row's button names which record it shows. */
@@ -39,7 +40,7 @@ export function RefundList({
   const columns: Column<RefundRow>[] = [
     {
       key: 'refund',
-      header: 'Refund',
+      header: t('Refund'),
       cell: (row) => (
         <>
           <span className="block font-mono text-sm font-medium">{row.refundNumber}</span>
@@ -50,9 +51,9 @@ export function RefundList({
     {
       key: 'order',
       width: '10rem',
-      header: 'Order',
+      header: t('Order'),
       cell: (row) => (
-        <Link href={`/orders/${row.orderId}`} className="font-mono text-sm hover:underline">
+        <Link href={`/orders?view=${row.orderId}`} className="font-mono text-sm hover:underline">
           {row.orderNumber}
         </Link>
       ),
@@ -60,28 +61,28 @@ export function RefundList({
     {
       key: 'raised',
       width: '10rem',
-      header: 'Raised',
+      header: t('Raised'),
       className: 'text-sm text-muted-foreground',
-      cell: (row) => formatDate(row.createdAt),
+      cell: (row) => t.date(row.createdAt),
     },
     {
       key: 'status',
       width: '10rem',
-      header: 'Status',
+      header: t('Status'),
       cell: (row) => (
         <>
           <StatusBadge status={row.status} />
-          {row.method ? <span className="block text-xs text-muted-foreground">via {row.method}</span> : null}
+          {row.method ? <span className="block text-xs text-muted-foreground">{t('via {method}', { method: row.method })}</span> : null}
         </>
       ),
     },
     {
       key: 'amount',
       width: '9rem',
-      header: 'Amount',
+      header: t('Amount'),
       headClassName: 'text-right',
       className: 'text-right font-medium tabular-nums',
-      cell: (row) => formatMoney(row.amount, row.currency),
+      cell: (row) => t.money(row.amount, row.currency),
     },
     {
       key: 'actions',
@@ -92,7 +93,7 @@ export function RefundList({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`View refund ${row.refundNumber}`}
+            aria-label={t('View refund {number}', { number: row.refundNumber })}
             onClick={() => viewing.view(row)}
           >
             <Eye />
@@ -117,7 +118,7 @@ export function RefundList({
         onRetry={list.retry}
         minWidth="76rem"
         estimateRowHeight={66}
-        empty={filtered ? 'No refund matches those filters.' : 'No refunds yet.'}
+        empty={filtered ? t('No refund matches those filters.') : t('No refunds yet.')}
       />
 
       <RefundDetail row={viewing.row} open={viewing.open} onOpenChange={viewing.onOpenChange} />

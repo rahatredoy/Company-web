@@ -6,7 +6,7 @@ import type { ProductSummary, SortValue } from '@/types';
 import { ProductCard, type ProductCardVariant } from '@/components/commerce/product-card';
 import { Button } from '@/components/ui/button';
 import { loadCatalogPage } from '@/app/actions/catalog';
-import { pluralise } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * The whole shop, on the homepage, a batch at a time.
@@ -59,6 +59,7 @@ export function CatalogFeed({
   gridClassName: string;
   locale: string;
 }) {
+  const t = useT();
   const [extra, setExtra] = React.useState<ProductSummary[]>([]);
   const [page, setPage] = React.useState(1);
   const [busy, setBusy] = React.useState(false);
@@ -149,24 +150,26 @@ export function CatalogFeed({
             leaves the total to the "shop all" link beside its heading. */}
         <p className="text-sm text-muted" role="status" aria-live="polite">
           {hidden.size === 0
-            ? `Showing ${items.length} of ${total} ${pluralise(total, 'product')}`
-            : `Showing ${items.length} ${pluralise(items.length, 'product')}`}
+            ? t.plural(total, 'Showing {shown} of {count} product', 'Showing {shown} of {count} products', {
+                shown: items.length,
+              })
+            : t.plural(items.length, 'Showing {count} product', 'Showing {count} products')}
         </p>
 
         {failed ? (
-          <p className="text-sm text-error">That did not load. Check your connection and try again.</p>
+          <p className="text-sm text-error">{t('That did not load. Check your connection and try again.')}</p>
         ) : null}
 
         {hasMore ? (
           <Button variant="outline" onClick={loadMore} disabled={busy}>
             {busy ? (
               <>
-                <Loader2 className="animate-spin" aria-hidden /> Loading
+                <Loader2 className="animate-spin" aria-hidden /> {t('Loading')}
               </>
             ) : failed ? (
-              'Try again'
+              t('Try again')
             ) : (
-              `Load ${Math.min(remaining, 24)} more`
+              t('Load {count} more', { count: Math.min(remaining, 24) })
             )}
           </Button>
         ) : null}

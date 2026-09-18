@@ -1,10 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { publicReadCache } from '../../lib/public-cache';
 import accountRoutes from './account.routes';
+import googleAuthRoutes from './auth-google.routes';
 import customerAuthRoutes from './auth.routes';
 import checkoutRoutes from './checkout.routes';
 import configRoutes from './config.routes';
 import contentRoutes from './content.routes';
+import storefrontDiscountRoutes from './discounts.routes';
 import homeRoutes from './home.routes';
 import paymentRoutes from './payments.routes';
 import storefrontOrderRoutes from './orders.routes';
@@ -28,9 +30,11 @@ import taxonomyRoutes from './taxonomy.routes';
  *
  * **The account half is guarded by `requireCustomer`**, a fourth cookie family
  * that satisfies none of the other three and carries no permissions at all.
- * Checkout sits between the two: `optionalCustomer` attaches a shopper when one
- * is signed in, because requiring an account in order to buy something is how a
- * shop loses the sale.
+ * **Checkout is on that guarded side too.** `POST /checkout` requires a
+ * customer, so a signed-out basket is refused rather than taken as a guest and
+ * every order on the platform belongs to a customer record. The discount quote
+ * keeps `optionalCustomer`, because it is asked from the basket — before the
+ * sign-in the order itself will demand.
  *
  * The tenant is resolved before any of this runs, from the hostname alone — see
  * `plugins/tenant.ts`. `plugins/security.ts` treats every path that is not
@@ -59,9 +63,11 @@ export default async function storefrontRoutes(app: FastifyInstance) {
 
   // The shopping half.
   await app.register(customerAuthRoutes);
+  await app.register(googleAuthRoutes);
   await app.register(accountRoutes);
   await app.register(storefrontOrderRoutes);
   await app.register(storefrontReturnRoutes);
+  await app.register(storefrontDiscountRoutes);
   await app.register(checkoutRoutes);
   await app.register(paymentRoutes);
 }

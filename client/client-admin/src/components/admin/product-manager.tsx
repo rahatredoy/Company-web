@@ -23,7 +23,6 @@ import {
   Search,
   SlidersHorizontal,
   Star,
-  Store,
   TriangleAlert,
   Trash2,
   Warehouse,
@@ -43,7 +42,7 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui/toaster';
 import { api, apiFetchListed, errorMessage, type ListMeta } from '@/lib/api';
-import { formatMoney, formatNumber, formatRelative } from '@/lib/format';
+import { useT, type MessageKey } from '@/lib/i18n';
 import { PRODUCT_LIST_SORT } from '@/lib/list';
 import { cn } from '@/lib/utils';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
@@ -93,7 +92,7 @@ const STATUS_TONE: Record<ProductStatus, 'success' | 'warning' | 'neutral'> = {
   inactive: 'neutral',
 };
 
-const STATUS_LABEL: Record<ProductStatus, string> = {
+const STATUS_LABEL: Record<ProductStatus, MessageKey> = {
   active: 'Active',
   draft: 'Draft',
   inactive: 'Inactive',
@@ -113,6 +112,8 @@ export interface ProductFilterState {
   brandId: string;
   stock: 'all' | 'in_stock' | 'low' | 'out' | 'untracked';
   featured: 'all' | 'yes' | 'no';
+  /** `pending` keeps only products with a review waiting for a decision. */
+  reviews: 'all' | 'pending';
   sort: ProductSort;
   order: 'asc' | 'desc';
 }
@@ -124,6 +125,7 @@ export const PRODUCT_DEFAULTS: ProductFilterState = {
   brandId: '',
   stock: 'all',
   featured: 'all',
+  reviews: 'all',
   // From `lib/list.ts`, because the server component that renders the first batch
   // needs the same two values and cannot read them out of this module.
   sort: PRODUCT_LIST_SORT.sort,
@@ -139,6 +141,7 @@ function queryFor(filters: ProductFilterState) {
     brandId: filters.brandId || undefined,
     stock: filters.stock,
     featured: filters.featured,
+    reviews: filters.reviews,
     sort: filters.sort,
     order: filters.order,
   };
@@ -165,13 +168,14 @@ function SortButton({
   /** Spoken name, when the visible one is not a plain string. */
   label?: string;
 }) {
+  const t = useT();
   const on = active === sort;
 
   return (
     <button
       type="button"
       onClick={() => onSort(sort)}
-      aria-label={`Sort by ${label ?? String(children)}`}
+      aria-label={t('Sort by {column}', { column: label ?? String(children) })}
       className={cn(
         'inline-flex items-center gap-1 uppercase transition-colors hover:text-foreground',
         on && 'text-foreground',
@@ -190,14 +194,14 @@ function SortButton({
 }
 
 /**
- * How a product's stock reads, using the same buckets the inventory screen does.
+ * How a product's stock reads, using the same buckets the product screen does.
  *
  * Four states, not three, and they have to stay apart: **not counted** is a
  * variant nobody has ever recorded a level for, **not tracked** is the owner
  * saying stock may never refuse a sale, and both read as zero available while
  * meaning opposite things. Only the third is a shop that has genuinely sold out.
  */
-function stockOf(row: ProductRow): { tone: 'success' | 'warning' | 'danger' | 'neutral'; label: string } {
+function stockOf(row: ProductRow): { tone: 'success' | 'warning' | 'danger' | 'neutral'; label: MessageKey } {
   if (!row.trackInventory) return { tone: 'neutral', label: 'Not tracked' };
   if (row.stockRecords === 0) return { tone: 'neutral', label: 'Not counted' };
   if (row.stock <= 0) return { tone: 'danger', label: 'Out of stock' };
@@ -221,11 +225,11 @@ function stockOf(row: ProductRow): { tone: 'success' | 'warning' | 'danger' | 'n
  * it already says "4 days ago" the year is four characters saying nothing — and
  * kept otherwise, because that is exactly when it is the whole point.
  */
-function shortDate(input: string): string {
+function shortDate(input: string, locale: string): string {
   const date = new Date(input);
   if (Number.isNaN(date.getTime())) return '—';
   const thisYear = date.getFullYear() === new Date().getFullYear();
-  return new Intl.DateTimeFormat('en-US', {
+  return new Intl.DateTimeFormat(locale, {
     month: 'short',
     day: 'numeric',
     ...(thisYear ? {} : { year: 'numeric' }),
@@ -246,7 +250,6 @@ export function ProductManager({
   brands,
   currency,
   permissions,
-  storefrontBase,
   storeMeasureOptions,
   filters,
   openCreate = false,
@@ -257,9 +260,8 @@ export function ProductManager({
   categories: Pick<CategoryRow, 'id' | 'name' | 'parentId'>[];
   brands: Pick<BrandRow, 'id' | 'name'>[];
   currency: string;
-  permissions: { create: boolean; update: boolean; delete: boolean };
-  /** Storefront origin, for the preview link. Null on a host we cannot read. */
-  storefrontBase: string | null;
+  /** `reviews` decides whether the Reviews column links to the product's Reviews tab. */
+  permissions: { create: boolean; update: boolean; delete: boolean; reviews: boolean };
   /** The shop's default size picker, for a product sold by weight or volume. */
   storeMeasureOptions?: { label: string; measure: number }[];
   filters: ProductFilterState;
@@ -270,6 +272,7 @@ export function ProductManager({
   openCreate?: boolean;
 }) {
   const router = useRouter();
+  const t = useT();
   const [pending, startTransition] = React.useTransition();
 
   const query = React.useMemo(() => queryFor(filters), [filters]);
@@ -290,8 +293,7 @@ export function ProductManager({
    *
    * It used to open the storefront, which answers a different question: the
    * shop's page shows a price and a picture and says nothing about cost, stock
-   * buckets, SKUs or the variants that are switched off. The storefront is
-   * still one click away, under the `Store` icon beside it.
+   * buckets, SKUs or the variants that are switched off.
    */
   const viewing = useViewTarget<ProductRow>();
   const [creating, setCreating] = React.useState(openCreate);
@@ -339,6 +341,7 @@ export function ProductManager({
     if (next.brandId) params.set('brand', next.brandId);
     if (next.stock !== 'all') params.set('stock', next.stock);
     if (next.featured !== 'all') params.set('featured', next.featured);
+    if (next.reviews !== 'all') params.set('reviews', next.reviews);
     if (next.sort !== PRODUCT_DEFAULTS.sort) params.set('sort', next.sort);
     if (next.order !== PRODUCT_DEFAULTS.order) params.set('order', next.order);
 
@@ -365,7 +368,8 @@ export function ProductManager({
     filters.categoryId !== '' ||
     filters.brandId !== '' ||
     filters.stock !== 'all' ||
-    filters.featured !== 'all';
+    filters.featured !== 'all' ||
+    filters.reviews !== 'all';
 
   // --------------------------------------------------------------- writes
 
@@ -399,9 +403,13 @@ export function ProductManager({
   async function removeOne(row: ProductRow) {
     const warning =
       row.soldCount > 0
-        ? `\n\nIt has sold ${formatNumber(row.soldCount)} time${row.soldCount === 1 ? '' : 's'}, so it will be hidden from the store rather than deleted.`
+        ? `\n\n${t.plural(
+            row.soldCount,
+            'It has sold {count} time, so it will be hidden from the store rather than deleted.',
+            'It has sold {count} times, so it will be hidden from the store rather than deleted.',
+          )}`
         : '';
-    if (!globalThis.confirm(`Delete “${row.name}”?${warning}`)) return;
+    if (!globalThis.confirm(`${t('Delete “{name}”?', { name: row.name })}${warning}`)) return;
 
     setBusy(true);
     try {
@@ -410,8 +418,8 @@ export function ProductManager({
       );
       toast.success(
         result && result.deleted === false
-          ? (result.message ?? 'Product hidden from the store.')
-          : 'Product deleted.',
+          ? (result.message ?? t('Product hidden from the store.'))
+          : t('Product deleted.'),
       );
       refresh();
     } catch (caught) {
@@ -426,7 +434,7 @@ export function ProductManager({
    * with its own rules. Failures are counted rather than thrown: one product
    * refusing a price change must not abandon the other nine.
    */
-  async function bulk(label: string, work: (id: string) => Promise<unknown>) {
+  async function bulk(done: (count: number) => string, work: (id: string) => Promise<unknown>) {
     const ids = [...selected];
     if (!ids.length) return;
 
@@ -435,9 +443,15 @@ export function ProductManager({
     const failed = results.filter((result) => result.status === 'rejected');
     setBusy(false);
 
-    if (failed.length === 0) toast.success(`${label} ${ids.length} product${ids.length === 1 ? '' : 's'}.`);
+    if (failed.length === 0) toast.success(done(ids.length));
     else if (failed.length === ids.length) toast.error(errorMessage((failed[0] as PromiseRejectedResult).reason));
-    else toast.error(`${ids.length - failed.length} done, ${failed.length} refused — see each row.`);
+    else
+      toast.error(
+        t('{done} done, {refused} refused — see each row.', {
+          done: ids.length - failed.length,
+          refused: failed.length,
+        }),
+      );
 
     refresh();
   }
@@ -449,9 +463,15 @@ export function ProductManager({
     const chosen = rows.filter((row) => ids.includes(row.id));
     const sold = chosen.filter((row) => row.soldCount > 0).length;
     const note = sold
-      ? `\n\n${sold} of them ${sold === 1 ? 'has' : 'have'} sold before, so ${sold === 1 ? 'it' : 'they'} will be hidden from the store rather than deleted.`
+      ? `\n\n${t.plural(
+          sold,
+          '{count} of them has sold before, so it will be hidden from the store rather than deleted.',
+          '{count} of them have sold before, so they will be hidden from the store rather than deleted.',
+        )}`
       : '';
-    if (!globalThis.confirm(`Delete ${ids.length} product${ids.length === 1 ? '' : 's'}?${note}`)) return;
+    if (!globalThis.confirm(`${t.plural(ids.length, 'Delete {count} product?', 'Delete {count} products?')}${note}`)) {
+      return;
+    }
 
     setBusy(true);
     const results = await Promise.allSettled(
@@ -469,12 +489,12 @@ export function ProductManager({
       toast.error(errorMessage((results.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason));
     } else {
       const parts = [
-        deleted ? `${deleted} deleted` : null,
-        hidden ? `${hidden} hidden (already sold)` : null,
-        failed ? `${failed} refused` : null,
+        deleted ? t('{count} deleted', { count: deleted }) : null,
+        hidden ? t('{count} hidden (already sold)', { count: hidden }) : null,
+        failed ? t('{count} refused', { count: failed }) : null,
       ].filter(Boolean);
       if (failed) toast.error(parts.join(', '));
-      else toast.success(`${parts.join(', ')}.`);
+      else toast.success(t('{summary}.', { summary: parts.join(', ') }));
     }
 
     refresh();
@@ -580,9 +600,9 @@ export function ProductManager({
       URL.revokeObjectURL(url);
 
       if (list.total !== null && list.total > collected.length) {
-        toast.error(`Exported the first ${formatNumber(collected.length)} of ${formatNumber(list.total)}.`);
+        toast.error(t('Exported the first {shown} of {total}.', { shown: collected.length, total: list.total }));
       } else {
-        toast.success(`Exported ${formatNumber(collected.length)} product${collected.length === 1 ? '' : 's'}.`);
+        toast.success(t.plural(collected.length, 'Exported {count} product.', 'Exported {count} products.'));
       }
     } catch (caught) {
       toast.error(errorMessage(caught));
@@ -602,6 +622,9 @@ export function ProductManager({
   );
   const brandOptions = React.useMemo(() => [...brands].sort((a, b) => a.name.localeCompare(b.name)), [brands]);
 
+  /** A whole percentage, in the panel's own digits. */
+  const percent = (value: number) => `${t.number(value, { maximumFractionDigits: 0, useGrouping: false })}%`;
+
   /*
    * Columns as data, not as JSX. A virtualised table only ever holds the rows on
    * screen, so its columns cannot be sized from its contents — `InfiniteTable`
@@ -620,7 +643,7 @@ export function ProductManager({
           onCheckedChange={(checked) =>
             setSelected(() => (checked === true ? new Set(rows.map((row) => row.id)) : new Set()))
           }
-          aria-label="Select every product loaded"
+          aria-label={t('Select every product loaded')}
         />
       ),
       cell: (row) => (
@@ -634,7 +657,7 @@ export function ProductManager({
               return next;
             })
           }
-          aria-label={`Select ${row.name}`}
+          aria-label={t('Select {name}', { name: row.name })}
         />
       ),
     },
@@ -642,7 +665,7 @@ export function ProductManager({
       key: 'name',
       header: (
         <SortButton sort="name" active={filters.sort} order={filters.order} onSort={sortBy}>
-          Product
+          {t('Product')}
         </SortButton>
       ),
       cell: (row) => (
@@ -670,7 +693,7 @@ export function ProductManager({
               of a shop that has never barcoded anything.
             */}
             <p className="flex items-center gap-2 truncate text-xs text-muted-foreground">
-              <span className="font-mono">{row.sku ?? 'no SKU'}</span>
+              <span className="font-mono">{row.sku ?? t('no SKU')}</span>
               {row.barcode ? <span className="truncate font-mono opacity-70">{row.barcode}</span> : null}
               {row.variantCount > 1 ? (
                 <span className="inline-flex shrink-0 items-center gap-1">
@@ -692,11 +715,11 @@ export function ProductManager({
        */
       key: 'placement',
       width: '9rem',
-      header: 'Category',
+      header: t('Category'),
       cell: (row) => (
         <div className="min-w-0 text-sm">
           <p className="truncate">{row.categoryName ?? '—'}</p>
-          <p className="truncate text-xs text-muted-foreground">{row.brandName ?? 'No brand'}</p>
+          <p className="truncate text-xs text-muted-foreground">{row.brandName ?? t('No brand')}</p>
         </div>
       ),
     },
@@ -705,7 +728,7 @@ export function ProductManager({
       width: '8rem',
       header: (
         <SortButton sort="price" active={filters.sort} order={filters.order} onSort={sortBy}>
-          Price
+          {t('Price')}
         </SortButton>
       ),
       cell: (row) => {
@@ -715,13 +738,13 @@ export function ProductManager({
             <p className="truncate whitespace-nowrap">
               {row.salePriceFrom ? (
                 <>
-                  <span className="font-medium tabular-nums">{formatMoney(row.salePriceFrom, currency)}</span>
+                  <span className="font-medium tabular-nums">{t.money(row.salePriceFrom, currency)}</span>
                   <span className="ml-1.5 text-xs text-muted-foreground line-through tabular-nums">
-                    {formatMoney(row.priceFrom, currency)}
+                    {t.money(row.priceFrom, currency)}
                   </span>
                 </>
               ) : (
-                <span className="font-medium tabular-nums">{formatMoney(row.priceFrom, currency)}</span>
+                <span className="font-medium tabular-nums">{t.money(row.priceFrom, currency)}</span>
               )}
             </p>
             <p
@@ -730,7 +753,7 @@ export function ProductManager({
                 margin !== null && margin < 0 ? 'text-destructive' : 'text-muted-foreground',
               )}
             >
-              {margin === null ? 'no cost set' : `${margin.toFixed(0)}% margin`}
+              {margin === null ? t('no cost set') : t('{percent} margin', { percent: percent(margin) })}
             </p>
           </div>
         );
@@ -741,7 +764,7 @@ export function ProductManager({
       width: '9rem',
       header: (
         <SortButton sort="stock" active={filters.sort} order={filters.order} onSort={sortBy}>
-          Stock
+          {t('Stock')}
         </SortButton>
       ),
       /*
@@ -754,8 +777,8 @@ export function ProductManager({
       cell: (row) => {
         const stock = stockOf(row);
         const held = [
-          row.reserved > 0 ? `${formatNumber(row.reserved)} reserved` : null,
-          row.incoming > 0 ? `${formatNumber(row.incoming)} incoming` : null,
+          row.reserved > 0 ? t('{count} reserved', { count: row.reserved }) : null,
+          row.incoming > 0 ? t('{count} incoming', { count: row.incoming }) : null,
         ].filter(Boolean);
 
         return (
@@ -768,73 +791,108 @@ export function ProductManager({
                   stock.tone === 'warning' && 'text-warning',
                 )}
               >
-                {row.stockRecords === 0 ? '—' : formatNumber(row.stock)}
+                {row.stockRecords === 0 ? '—' : t.number(row.stock)}
               </span>
-              <Badge variant={stock.tone}>{stock.label}</Badge>
+              <Badge variant={stock.tone}>{t(stock.label)}</Badge>
             </p>
             <p className="truncate text-xs text-muted-foreground tabular-nums">
-              {held.length > 0 ? held.join(' · ') : `warns at ${formatNumber(row.lowStockThreshold)}`}
+              {held.length > 0 ? held.join(' · ') : t('warns at {count}', { count: row.lowStockThreshold })}
             </p>
           </div>
         );
       },
     },
     {
-      /*
-       * Two lifetime figures answering the same question — is this product
-       * working — so they share a column. Sold is the sortable one; the rating
-       * rides under it because a good seller with a falling rating is the row an
-       * owner most needs to notice, and it is invisible if it only exists on a
-       * screen they have to open one product at a time.
-       */
       key: 'performance',
-      width: '6.5rem',
+      width: '5rem',
       header: (
         <SortButton sort="sold" active={filters.sort} order={filters.order} onSort={sortBy}>
-          Sold
+          {t('Sold')}
         </SortButton>
       ),
-      cell: (row) => (
-        <div className="min-w-0">
-          <p className="font-medium tabular-nums">{formatNumber(row.soldCount)}</p>
-          <p className="flex items-center gap-1 truncate text-xs text-muted-foreground tabular-nums">
-            {row.ratingCount > 0 ? (
-              <>
-                <Star className="size-3 shrink-0 fill-warning text-warning" aria-hidden />
-                {Number(row.ratingAverage).toFixed(1)}
-                <span className="opacity-70">({formatNumber(row.ratingCount)})</span>
-              </>
+      cell: (row) => <p className="font-medium tabular-nums">{t.number(row.soldCount)}</p>,
+    },
+    {
+      /*
+       * Reviews are moderated per product — there is no separate queue screen.
+       * The button is the count and opens this product's Reviews tab; under it,
+       * whatever is still waiting (or the rating once nothing is), so a product
+       * with a review to approve stands out from the list.
+       */
+      key: 'reviews',
+      width: '7rem',
+      header: t('Reviews'),
+      cell: (row) => {
+        const label = (
+          <>
+            <Star
+              className={cn('size-3.5 shrink-0', row.ratingCount > 0 ? 'fill-warning text-warning' : '')}
+              aria-hidden
+            />
+            <span className="tabular-nums">{t.number(row.reviewCount)}</span>
+          </>
+        );
+
+        return (
+          <div className="min-w-0">
+            {permissions.reviews ? (
+              <Button asChild variant="outline" size="sm" className="h-7 gap-1 px-2">
+                <Link
+                  href={`/products/${row.id}?tab=reviews`}
+                  aria-label={t.plural(row.reviewCount, '{count} review', '{count} reviews')}
+                >
+                  {label}
+                </Link>
+              </Button>
             ) : (
-              'no reviews'
+              <span className="inline-flex items-center gap-1 text-sm">{label}</span>
             )}
-          </p>
-        </div>
-      ),
+            <p className="mt-0.5 truncate text-xs tabular-nums">
+              {row.pendingReviewCount > 0 ? (
+                <span className="text-warning">{t('{count} waiting', { count: row.pendingReviewCount })}</span>
+              ) : row.ratingCount > 0 ? (
+                <span className="text-muted-foreground">
+                  {t.number(Number(row.ratingAverage), { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                </span>
+              ) : row.reviewCount === 0 ? (
+                <span className="text-muted-foreground">{t('no reviews')}</span>
+              ) : null}
+            </p>
+          </div>
+        );
+      },
     },
     {
       key: 'status',
       width: '9rem',
       header: (
         <span className="inline-flex items-center gap-1.5">
-          Status
+          {t('Status')}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" aria-label="What these badges mean">
+              <button type="button" aria-label={t('What these badges mean')}>
                 <Info className="size-3.5" aria-hidden />
               </button>
             </TooltipTrigger>
             <TooltipContent className="max-w-64">
-              <b>Active</b> — on sale. <b>Draft</b> — never published. <b>Inactive</b> — withdrawn from sale.{' '}
-              <b>Featured</b> — promoted on the storefront.
+              {t.rich(
+                '{active} — on sale. {draft} — never published. {inactive} — withdrawn from sale. {featured} — promoted on the storefront.',
+                {
+                  active: <b>{t('Active')}</b>,
+                  draft: <b>{t('Draft')}</b>,
+                  inactive: <b>{t('Inactive')}</b>,
+                  featured: <b>{t('Featured')}</b>,
+                },
+              )}
             </TooltipContent>
           </Tooltip>
         </span>
       ),
       cell: (row) => (
         <div className="flex flex-wrap items-center gap-1">
-          <Badge variant={STATUS_TONE[row.status]}>{STATUS_LABEL[row.status]}</Badge>
-          {row.isFeatured ? <Badge variant="warning">Featured</Badge> : null}
-          {row.isNewArrival ? <Badge variant="outline">New</Badge> : null}
+          <Badge variant={STATUS_TONE[row.status]}>{t(STATUS_LABEL[row.status])}</Badge>
+          {row.isFeatured ? <Badge variant="warning">{t('Featured')}</Badge> : null}
+          {row.isNewArrival ? <Badge variant="outline">{t('New')}</Badge> : null}
         </div>
       ),
     },
@@ -850,13 +908,13 @@ export function ProductManager({
       className: 'text-xs text-muted-foreground',
       header: (
         <SortButton sort="updatedAt" active={filters.sort} order={filters.order} onSort={sortBy}>
-          Updated
+          {t('Updated')}
         </SortButton>
       ),
       cell: (row) => (
         <div className="min-w-0">
-          <p className="truncate">{formatRelative(row.updatedAt)}</p>
-          <p className="truncate opacity-70">added {shortDate(row.createdAt)}</p>
+          <p className="truncate">{t.relative(row.updatedAt)}</p>
+          <p className="truncate opacity-70">{t('added {date}', { date: shortDate(row.createdAt, t.locale) })}</p>
         </div>
       ),
     },
@@ -864,7 +922,7 @@ export function ProductManager({
       key: 'actions',
       width: '10rem',
       headClassName: 'text-right',
-      header: 'Actions',
+      header: t('Actions'),
       cell: (row) => (
         <div className="flex items-center justify-end gap-0.5">
           <Tooltip>
@@ -872,32 +930,14 @@ export function ProductManager({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={`View ${row.name}`}
+                aria-label={t('View {name}', { name: row.name })}
                 onClick={() => viewing.view(row)}
               >
                 <Eye />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>View every detail</TooltipContent>
+            <TooltipContent>{t('View every detail')}</TooltipContent>
           </Tooltip>
-
-          {storefrontBase ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon-sm" asChild>
-                  <a
-                    href={`${storefrontBase}/product/${row.slug}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={`Open ${row.name} on the storefront`}
-                  >
-                    <Store />
-                  </a>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Open on the storefront</TooltipContent>
-            </Tooltip>
-          ) : null}
 
           {permissions.update ? (
             <Tooltip>
@@ -905,31 +945,31 @@ export function ProductManager({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={`Quick edit ${row.name}`}
+                  aria-label={t('Quick edit {name}', { name: row.name })}
                   onClick={() => setEditing(row)}
                 >
                   <Pencil />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Quick edit</TooltipContent>
+              <TooltipContent>{t('Quick edit')}</TooltipContent>
             </Tooltip>
           ) : null}
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label={`More actions for ${row.name}`}>
+              <Button variant="ghost" size="icon-sm" aria-label={t('More actions for {name}', { name: row.name })}>
                 <MoreVertical />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
                 <Link href={`/products/${row.id}`}>
-                  <ArrowUpRight /> Open full editor
+                  <ArrowUpRight /> {t('Open full editor')}
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link href={`/inventory?search=${encodeURIComponent(row.sku ?? row.name)}`}>
-                  <Warehouse /> Adjust stock
+                <Link href={`/products/${row.id}?stock=adjust`}>
+                  <Warehouse /> {t('Adjust stock')}
                 </Link>
               </DropdownMenuItem>
 
@@ -938,26 +978,26 @@ export function ProductManager({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onSelect={() =>
-                      void run(row.isFeatured ? 'No longer featured.' : 'Featured.', () =>
+                      void run(row.isFeatured ? t('No longer featured.') : t('Featured.'), () =>
                         patch(row.id, { isFeatured: !row.isFeatured }),
                       )
                     }
                   >
-                    <Star /> {row.isFeatured ? 'Remove from featured' : 'Mark as featured'}
+                    <Star /> {row.isFeatured ? t('Remove from featured') : t('Mark as featured')}
                   </DropdownMenuItem>
                   {row.status === 'active' ? (
                     <DropdownMenuItem
                       onSelect={() =>
-                        void run('Hidden from the storefront.', () => patch(row.id, { status: 'inactive' }))
+                        void run(t('Hidden from the storefront.'), () => patch(row.id, { status: 'inactive' }))
                       }
                     >
-                      <EyeOff /> Hide from storefront
+                      <EyeOff /> {t('Hide from storefront')}
                     </DropdownMenuItem>
                   ) : (
                     <DropdownMenuItem
-                      onSelect={() => void run('Published.', () => patch(row.id, { status: 'active' }))}
+                      onSelect={() => void run(t('Published.'), () => patch(row.id, { status: 'active' }))}
                     >
-                      <BadgeCheck /> Publish
+                      <BadgeCheck /> {t('Publish')}
                     </DropdownMenuItem>
                   )}
                 </>
@@ -967,7 +1007,7 @@ export function ProductManager({
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem destructive onSelect={() => void removeOne(row)}>
-                    <Trash2 /> Delete
+                    <Trash2 /> {t('Delete')}
                   </DropdownMenuItem>
                 </>
               ) : null}
@@ -982,49 +1022,79 @@ export function ProductManager({
     <TooltipProvider delayDuration={200}>
       <div className="space-y-6">
         <PageHeader
-          title="Products"
-          breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Products' }]}
+          title={t('Products')}
+          breadcrumb={[{ label: t('Dashboard'), href: '/dashboard' }, { label: t('Products') }]}
           actions={
             <>
               <Button variant="outline" onClick={exportCsv} loading={exporting} disabled={rows.length === 0}>
-                {exporting ? null : <Download />} Export
+                {exporting ? null : <Download />} {t('Export')}
               </Button>
 
               {permissions.update || permissions.delete ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" disabled={selected.size === 0 || busy}>
-                      Bulk Actions
-                      {selected.size ? <Badge variant="primary">{selected.size}</Badge> : null}
+                      {t('Bulk Actions')}
+                      {selected.size ? <Badge variant="primary">{t.number(selected.size)}</Badge> : null}
                       <ChevronDown />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuLabel>{selected.size} selected</DropdownMenuLabel>
+                    <DropdownMenuLabel>{t('{count} selected', { count: selected.size })}</DropdownMenuLabel>
 
                     {permissions.update ? (
                       <>
                         <DropdownMenuItem
-                          onSelect={() => bulk('Published', (id) => patch(id, { status: 'active' }))}
+                          onSelect={() =>
+                            bulk(
+                              (count) => t.plural(count, 'Published {count} product.', 'Published {count} products.'),
+                              (id) => patch(id, { status: 'active' }),
+                            )
+                          }
                         >
-                          <BadgeCheck /> Publish
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => bulk('Moved to draft', (id) => patch(id, { status: 'draft' }))}>
-                          <Pencil /> Move to draft
+                          <BadgeCheck /> {t('Publish')}
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onSelect={() => bulk('Hidden', (id) => patch(id, { status: 'inactive' }))}
+                          onSelect={() =>
+                            bulk(
+                              (count) =>
+                                t.plural(count, 'Moved to draft {count} product.', 'Moved to draft {count} products.'),
+                              (id) => patch(id, { status: 'draft' }),
+                            )
+                          }
                         >
-                          <EyeOff /> Hide from storefront
+                          <Pencil /> {t('Move to draft')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            bulk(
+                              (count) => t.plural(count, 'Hidden {count} product.', 'Hidden {count} products.'),
+                              (id) => patch(id, { status: 'inactive' }),
+                            )
+                          }
+                        >
+                          <EyeOff /> {t('Hide from storefront')}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={() => bulk('Featured', (id) => patch(id, { isFeatured: true }))}>
-                          <Star /> Mark featured
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            bulk(
+                              (count) => t.plural(count, 'Featured {count} product.', 'Featured {count} products.'),
+                              (id) => patch(id, { isFeatured: true }),
+                            )
+                          }
+                        >
+                          <Star /> {t('Mark featured')}
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onSelect={() => bulk('Unfeatured', (id) => patch(id, { isFeatured: false }))}
+                          onSelect={() =>
+                            bulk(
+                              (count) => t.plural(count, 'Unfeatured {count} product.', 'Unfeatured {count} products.'),
+                              (id) => patch(id, { isFeatured: false }),
+                            )
+                          }
                         >
-                          <Star /> Remove featured
+                          <Star /> {t('Remove featured')}
                         </DropdownMenuItem>
                       </>
                     ) : null}
@@ -1033,7 +1103,7 @@ export function ProductManager({
                       <>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem destructive onSelect={bulkDelete}>
-                          <Trash2 /> Delete
+                          <Trash2 /> {t('Delete')}
                         </DropdownMenuItem>
                       </>
                     ) : null}
@@ -1043,7 +1113,7 @@ export function ProductManager({
 
               {permissions.create ? (
                 <Button onClick={() => setCreating(true)}>
-                  <Plus /> Add Product
+                  <Plus /> {t('Add Product')}
                 </Button>
               ) : null}
             </>
@@ -1055,45 +1125,45 @@ export function ProductManager({
           <StatCard
             icon={Package}
             tint="primary"
-            label="Total Products"
+            label={t('Total Products')}
             value={stats?.total ?? list.total ?? rows.length}
             note={
               stats
                 ? stats.addedThisMonth > 0
-                  ? `+${formatNumber(stats.addedThisMonth)} added this month`
-                  : 'None added this month'
-                : 'Across the whole catalogue'
+                  ? t('+{count} added this month', { count: stats.addedThisMonth })
+                  : t('None added this month')
+                : t('Across the whole catalogue')
             }
             good={(stats?.addedThisMonth ?? 0) > 0}
           />
           <StatCard
             icon={BadgeCheck}
             tint="success"
-            label="Active Products"
+            label={t('Active Products')}
             value={stats?.active ?? 0}
             note={
               stats
-                ? `${formatNumber(stats.draft)} draft · ${formatNumber(stats.inactive)} hidden`
-                : 'On sale right now'
+                ? t('{draft} draft · {hidden} hidden', { draft: stats.draft, hidden: stats.inactive })
+                : t('On sale right now')
             }
           />
           <StatCard
             icon={TriangleAlert}
             tint="warning"
-            label="Low Stock"
+            label={t('Low Stock')}
             value={stats?.lowStock ?? 0}
             note={
               stats && stats.untracked > 0
-                ? `${formatNumber(stats.untracked)} with no stock record`
-                : 'At or below their reorder point'
+                ? t('{count} with no stock record', { count: stats.untracked })
+                : t('At or below their reorder point')
             }
           />
           <StatCard
             icon={PackageX}
             tint="danger"
-            label="Out of Stock"
+            label={t('Out of Stock')}
             value={stats?.outOfStock ?? 0}
-            note="Cannot be bought until restocked"
+            note={t('Cannot be bought until restocked')}
           />
         </div>
 
@@ -1113,8 +1183,8 @@ export function ProductManager({
             <Input
               value={term}
               onChange={(event) => setTerm(event.target.value)}
-              placeholder="Search by name, slug or SKU…"
-              aria-label="Search products"
+              placeholder={t('Search by name, slug or SKU…')}
+              aria-label={t('Search products')}
               className="pl-9"
             />
           </div>
@@ -1122,10 +1192,10 @@ export function ProductManager({
           <select
             value={filters.categoryId}
             onChange={(event) => apply({ categoryId: event.target.value })}
-            aria-label="Category"
+            aria-label={t('Category')}
             className={cn(SELECT_CLASS, 'lg:w-48')}
           >
-            <option value="">All Categories</option>
+            <option value="">{t('All Categories')}</option>
             {categoryOptions.map((category) => (
               <option key={category.id} value={category.id}>
                 {category.name}
@@ -1136,10 +1206,10 @@ export function ProductManager({
           <select
             value={filters.brandId}
             onChange={(event) => apply({ brandId: event.target.value })}
-            aria-label="Brand"
+            aria-label={t('Brand')}
             className={cn(SELECT_CLASS, 'lg:w-40')}
           >
-            <option value="">All Brands</option>
+            <option value="">{t('All Brands')}</option>
             {brandOptions.map((brand) => (
               <option key={brand.id} value={brand.id}>
                 {brand.name}
@@ -1150,36 +1220,46 @@ export function ProductManager({
           <select
             value={filters.status}
             onChange={(event) => apply({ status: event.target.value as ProductFilterState['status'] })}
-            aria-label="Status"
+            aria-label={t('Status')}
             className={cn(SELECT_CLASS, 'lg:w-36')}
           >
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="draft">Draft</option>
-            <option value="inactive">Inactive</option>
+            <option value="all">{t('All Status')}</option>
+            <option value="active">{t('Active')}</option>
+            <option value="draft">{t('Draft')}</option>
+            <option value="inactive">{t('Inactive')}</option>
           </select>
 
           <select
             value={filters.stock}
             onChange={(event) => apply({ stock: event.target.value as ProductFilterState['stock'] })}
-            aria-label="Stock"
+            aria-label={t('Stock')}
             className={cn(SELECT_CLASS, 'lg:w-40')}
           >
-            <option value="all">All Stock</option>
-            <option value="in_stock">In stock</option>
-            <option value="low">Low stock</option>
-            <option value="out">Out of stock</option>
+            <option value="all">{t('All Stock')}</option>
+            <option value="in_stock">{t('In stock')}</option>
+            <option value="low">{t('Low stock')}</option>
+            <option value="out">{t('Out of stock')}</option>
             {/* "Not counted", not "Not tracked": the API filters this on having
                 no `inventory_levels` row at all, which is a different state from
                 an owner switching stock tracking off — and the badge in the
                 Stock column now names both. Two labels for two states, or the
                 filter selects rows that do not carry the word it used. */}
-            <option value="untracked">Not counted</option>
+            <option value="untracked">{t('Not counted')}</option>
+          </select>
+
+          <select
+            value={filters.reviews}
+            onChange={(event) => apply({ reviews: event.target.value as ProductFilterState['reviews'] })}
+            aria-label={t('Reviews')}
+            className={cn(SELECT_CLASS, 'lg:w-40')}
+          >
+            <option value="all">{t('All reviews')}</option>
+            <option value="pending">{t('Reviews waiting')}</option>
           </select>
 
           <div className="flex items-center gap-2 lg:ml-auto">
             <Button type="submit" variant="outline">
-              <SlidersHorizontal /> Filter
+              <SlidersHorizontal /> {t('Filter')}
             </Button>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1191,12 +1271,12 @@ export function ProductManager({
                     setTerm('');
                     startTransition(() => router.push('/products'));
                   }}
-                  aria-label="Reset filters"
+                  aria-label={t('Reset filters')}
                 >
                   <RotateCcw />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Reset filters</TooltipContent>
+              <TooltipContent>{t('Reset filters')}</TooltipContent>
             </Tooltip>
           </div>
         </form>
@@ -1218,8 +1298,8 @@ export function ProductManager({
           estimateRowHeight={58}
           empty={
             filtering
-              ? "No product matches these filters."
-              : "No products yet. Add the first one and it will show up here, ready to publish when you are."
+              ? t('No product matches these filters.')
+              : t('No products yet. Add the first one and it will show up here, ready to publish when you are.')
           }
         />
 
@@ -1236,9 +1316,9 @@ export function ProductManager({
           currency={currency}
           storeMeasureOptions={storeMeasureOptions}
           onCreated={(product) => {
-            toast.success(`${product.name} created.`, {
-              description: 'Specifications, related products and the rest of the gallery are on its own page.',
-              action: { label: 'Open', onClick: () => router.push(`/products/${product.id}`) },
+            toast.success(t('{name} created.', { name: product.name }), {
+              description: t('Specifications, related products and the rest of the gallery are on its own page.'),
+              action: { label: t('Open'), onClick: () => router.push(`/products/${product.id}`) },
             });
             if (openCreate) startTransition(() => router.replace(urlFor({})));
             refresh();
@@ -1250,7 +1330,7 @@ export function ProductManager({
           open={viewing.open}
           onOpenChange={viewing.onOpenChange}
           currency={currency}
-          storefrontBase={storefrontBase}
+          canEdit={permissions.update}
         />
 
         <ProductQuickEdit

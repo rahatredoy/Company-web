@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/toaster';
+import { useT } from '@/lib/i18n';
 
 const LIMIT = 100;
 
@@ -46,6 +47,7 @@ export function ProductSpecifications({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const t = useT();
 
   const [rows, setRows] = React.useState<Draft[]>(() =>
     specifications.map((row) => ({
@@ -80,7 +82,7 @@ export function ProductSpecifications({
 
     try {
       await api.put(`/api/v1/admin/products/${productId}/specifications`, { specifications: payload });
-      toast.success(payload.length === 0 ? 'Specifications cleared.' : 'Specifications saved.');
+      toast.success(payload.length === 0 ? t('Specifications cleared.') : t('Specifications saved.'));
       router.refresh();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -92,10 +94,12 @@ export function ProductSpecifications({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Specifications</CardTitle>
+        <CardTitle>{t('Specifications')}</CardTitle>
         <CardDescription>
-          The detail table on the product page. Group is a heading and is optional; tick <em>Key</em> to also show
-          the row when shoppers compare products.
+          {t.rich(
+            'The detail table on the product page. Group is a heading and is optional; tick {key} to also show the row when shoppers compare products.',
+            { key: <em>{t('Key::spec')}</em> },
+          )}
         </CardDescription>
       </CardHeader>
 
@@ -104,7 +108,7 @@ export function ProductSpecifications({
 
         {rows.length === 0 ? (
           <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-            No specifications yet.
+            {t('No specifications yet.')}
           </p>
         ) : (
           <ul className="space-y-2">
@@ -113,25 +117,25 @@ export function ProductSpecifications({
                 <Input
                   value={row.groupName}
                   onChange={(event) => patch(row.key, { groupName: event.target.value })}
-                  placeholder="Group"
+                  placeholder={t('Group')}
                   maxLength={80}
-                  aria-label={`Row ${index + 1} group`}
+                  aria-label={t('Row {number} group', { number: index + 1 })}
                   disabled={!canManage}
                 />
                 <Input
                   value={row.label}
                   onChange={(event) => patch(row.key, { label: event.target.value })}
-                  placeholder="Screen"
+                  placeholder={t('Screen')}
                   maxLength={120}
-                  aria-label={`Row ${index + 1} name`}
+                  aria-label={t('Row {number} name', { number: index + 1 })}
                   disabled={!canManage}
                 />
                 <Input
                   value={row.value}
                   onChange={(event) => patch(row.key, { value: event.target.value })}
-                  placeholder="6.1 inch"
+                  placeholder={t('6.1 inch')}
                   maxLength={400}
-                  aria-label={`Row ${index + 1} value`}
+                  aria-label={t('Row {number} value', { number: index + 1 })}
                   disabled={!canManage}
                 />
 
@@ -142,7 +146,7 @@ export function ProductSpecifications({
                       onCheckedChange={(checked) => patch(row.key, { isKeySpec: checked === true })}
                       disabled={!canManage}
                     />
-                    Key
+                    {t('Key::spec')}
                   </label>
                   {canManage ? (
                     <Button
@@ -150,7 +154,7 @@ export function ProductSpecifications({
                       variant="ghost"
                       size="icon-sm"
                       onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))}
-                      aria-label={`Remove row ${index + 1}`}
+                      aria-label={t('Remove row {number}', { number: index + 1 })}
                     >
                       <Trash2 aria-hidden />
                     </Button>
@@ -175,10 +179,10 @@ export function ProductSpecifications({
                 ])
               }
             >
-              <Plus aria-hidden /> Add a row
+              <Plus aria-hidden /> {t('Add a row')}
             </Button>
             <Button type="button" size="sm" className="ml-auto" onClick={save} loading={saving}>
-              Save specifications
+              {t('Save specifications')}
             </Button>
           </div>
         ) : null}

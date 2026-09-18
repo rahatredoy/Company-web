@@ -2,10 +2,10 @@
 
 import { Eye } from 'lucide-react';
 import type { ListMeta } from '@/lib/api';
-import { formatDateTime } from '@/lib/format';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useViewTarget } from '@/hooks/use-detail';
 import type { ContactMessageRow } from '@/lib/types';
+import { useT } from '@/lib/i18n';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -30,6 +30,7 @@ export function MessageList({
   query: Record<string, string | undefined>;
   filtered: boolean;
 }) {
+  const t = useT();
   const list = useInfiniteList<ContactMessageRow>({
     path: '/api/v1/admin/contact-messages',
     query,
@@ -51,17 +52,17 @@ export function MessageList({
         onLoadMore={list.loadMore}
         onRetry={list.retry}
         estimateRowHeight={180}
-        empty={filtered ? 'No message matches that filter.' : 'No messages yet.'}
+        empty={filtered ? t('No message matches that filter.') : t('No messages yet.')}
         render={(row) => (
           <Card>
             <CardContent className="space-y-3 pt-6">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="font-medium">
-                    {row.subject || 'No subject'}
+                    {row.subject || t('No subject')}
                     {row.status === 'new' ? (
                       <Badge variant="info" className="ml-2">
-                        New
+                        {t('New')}
                       </Badge>
                     ) : null}
                   </p>
@@ -75,11 +76,11 @@ export function MessageList({
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</span>
+                  <span className="text-xs text-muted-foreground">{t.dateTime(row.createdAt)}</span>
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`View the message from ${row.name}`}
+                    aria-label={t('View the message from {name}', { name: row.name })}
                     onClick={() => viewing.view(row)}
                   >
                     <Eye />

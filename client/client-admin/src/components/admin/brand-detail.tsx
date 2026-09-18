@@ -1,7 +1,7 @@
 'use client';
 
 import { StatusBadge } from '@/components/ui/status-badge';
-import { formatDateTime, formatNumber } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import type { BrandRow } from '@/lib/types';
 import {
   DetailBool,
@@ -39,17 +39,18 @@ export function BrandDetail({
   onOpenChange: (open: boolean) => void;
   storefrontBase: string | null;
 }) {
+  const t = useT();
   return (
     <DetailSheet
       open={open}
       onOpenChange={onOpenChange}
-      title={row?.name ?? 'Brand'}
+      title={row?.name ?? t('Brand')}
       subtitle={row?.slug}
       badge={
         row ? (
           <>
             <StatusBadge status={row.isActive ? 'active' : 'disabled'} />
-            {row.isFeatured ? <StatusBadge status="info" label="Featured" /> : null}
+            {row.isFeatured ? <StatusBadge status="info" label={t('Featured')} /> : null}
           </>
         ) : null
       }
@@ -62,61 +63,48 @@ export function BrandDetail({
       {row ? (
         <div className="space-y-6">
           {row.logoUrl ? (
-            <DetailSection title="Logo">
+            <DetailSection title={t('Logo')}>
               <a href={row.logoUrl} target="_blank" rel="noreferrer">
                 <LazyImage
                   src={row.logoUrl}
                   alt=""
                   className="size-28 rounded-lg border border-border bg-muted"
-                  fallback={<span className="text-xs text-muted-foreground">No logo</span>}
+                  fallback={<span className="text-xs text-muted-foreground">{t('No logo')}</span>}
                 />
               </a>
             </DetailSection>
           ) : null}
 
-          <DetailSection title="Brand">
+          <DetailSection title={t('Brand')}>
             <DetailGrid>
-              <DetailField label="Name" value={row.name} />
-              <DetailField label="Address" value={row.slug} mono />
-              <DetailField label="Active" value={<DetailBool value={row.isActive} />} />
-              <DetailField label="Featured" value={<DetailBool value={row.isFeatured} />} />
-              <DetailField label="Order in lists" value={formatNumber(row.sortOrder)} />
+              <DetailField label={t('Name')} value={row.name} />
+              <DetailField label={t('Address')} value={row.slug} mono />
+              <DetailField label={t('Active')} value={<DetailBool value={row.isActive} />} />
+              <DetailField label={t('Featured')} value={<DetailBool value={row.isFeatured} />} />
               <DetailField
-                label="Products"
-                value={formatNumber(row.productCount)}
-                hint="Filed under this brand, whatever their status."
+                label={t('Products')}
+                value={t.number(row.productCount)}
+                hint={t('Filed under this brand, whatever their status.')}
               />
               <DetailField
-                label="Website"
-                value={row.websiteUrl ? <span className="break-all">{row.websiteUrl}</span> : null}
-                full
-              />
-              <DetailField
-                label="Logo"
+                label={t('Logo')}
                 value={row.logoUrl ? <span className="break-all">{row.logoUrl}</span> : null}
                 full
               />
-              <DetailField label="Brand ID" value={<DetailId value={row.id} />} />
-              <DetailField label="Created" value={formatDateTime(row.createdAt)} />
-              <DetailField label="Updated" value={formatDateTime(row.updatedAt)} />
+              <DetailField label={t('Brand ID')} value={<DetailId value={row.id} />} />
+              <DetailField label={t('Created')} value={t.dateTime(row.createdAt)} />
+              <DetailField label={t('Updated')} value={t.dateTime(row.updatedAt)} />
             </DetailGrid>
           </DetailSection>
 
-          <DetailSection title="Description">
+          <DetailSection title={t('Description')}>
             {row.description ? (
               <DetailProse>{row.description}</DetailProse>
             ) : (
               <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
-                None.
+                {t('None.')}
               </p>
             )}
-          </DetailSection>
-
-          <DetailSection title="Search engines">
-            <DetailGrid>
-              <DetailField label="SEO title" value={row.seoTitle} full />
-              <DetailField label="SEO description" value={row.seoDescription} full />
-            </DetailGrid>
           </DetailSection>
         </div>
       ) : null}

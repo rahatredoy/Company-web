@@ -5,8 +5,8 @@
  *   npx tsx scripts/verify-commerce.ts --keep      # leave the fixtures behind
  *
  * What it is really proving is that the **server** decides what an order costs.
- * The basket lives in the customer's own browser, so every price, discount and
- * shipping rate in it is a number they could have edited; if any of them reached
+ * The basket lives in the customer's own browser, so every price and discount
+ * in it is a number they could have edited; if any of them reached
  * an order, the shop could be robbed with a devtools console.
  *
  * Everything it creates is prefixed `zz-commerce` / `ZZCOM` and removed at the
@@ -61,7 +61,6 @@ interface Res {
 type Jar = Map<string, string>;
 const adminJar: Jar = new Map();
 const shopperJar: Jar = new Map();
-const guestJar: Jar = new Map();
 
 async function call(
   host: string,
@@ -144,7 +143,7 @@ async function clearOwnRateLimits(): Promise<void> {
     'customer-login',
     'customer-forgot',
     'customer-reset',
-    'coupon-validate',
+    'discount-quote',
     'checkout',
     'order-track',
     'return-request',
@@ -202,14 +201,22 @@ async function main(): Promise<void> {
 
   // Stock has to be tracked for the oversell checks to mean anything — an
   // untracked variant is deliberately always sellable.
+  /*
+   * Stocked in the store's **default** warehouse, which is where `POST /products`
+   * has already written this variant's level row.
+   *
+   * A warehouse of the script's own would leave the variant with *two* level
+   * rows, and every assertion below reads the level without naming one — so the
+   * checks would measure the empty shelf instead of the stocked one and report
+   * it as a stock bug. The shop this stands in for has one warehouse.
+   */
   const [warehouse] = await sql<{ id: string }>(
-    `insert into warehouses (name, code, is_default) values ('ZZCOM WH', 'ZZCOMWH', false)
-     on conflict (code) do update set name = excluded.name returning id`,
+    `select id from warehouses where is_active order by is_default desc, name asc limit 1`,
   );
   await sql(
     `insert into inventory_levels (variant_id, warehouse_id, available, low_stock_threshold)
      values ($1, $2, 3, 2)
-     on conflict (variant_id, warehouse_id) do update set available = 3`,
+     on conflict (variant_id, warehouse_id) do update set available = 3, reserved = 0`,
     [variantId, warehouse!.id],
   );
 
@@ -220,19 +227,15 @@ async function main(): Promise<void> {
   );
 
   await sql(
-    `insert into coupons (code, description, type, value, min_order_amount, status)
-     values ('ZZCOM20', '20% off', 'percentage', 20, 50, 'active')
-     on conflict (code) do update set value = 20, min_order_amount = 50, status = 'active'`,
+    `insert into discounts (kind, name, code, title, value_type, value, min_order_amount, status)
+     values ('coupon', 'zz commerce 20', 'ZZCOM20', '20% off', 'percentage', 20, 50, 'active')
+     on conflict (upper(code)) where code is not null do update set value = 20, min_order_amount = 50, status = 'active'`,
   );
   await sql(
-    `insert into coupons (code, description, type, value, status, ends_at)
-     values ('ZZCOMOLD', 'expired', 'percentage', 50, 'active', now() - interval '1 day')
-     on conflict (code) do update set ends_at = now() - interval '1 day'`,
+    `insert into discounts (kind, name, code, title, value_type, value, status, ends_at)
+     values ('coupon', 'zz commerce old', 'ZZCOMOLD', 'expired', 'percentage', 50, 'active', now() - interval '1 day')
+     on conflict (upper(code)) where code is not null do update set ends_at = now() - interval '1 day'`,
   );
-
-  const shipping = await shop('/checkout/shipping-methods?country=Bangladesh');
-  const shippingMethodId = shipping.body?.data?.[0]?.id as string;
-  check('the store quotes a delivery option', Boolean(shippingMethodId), shipping.body);
 
   const address = {
     fullName: 'Zz Commerce',
@@ -291,37 +294,70 @@ async function main(): Promise<void> {
 
   console.log('\n2. The server prices the basket, not the browser');
   {
-    const valid = await shop('/coupons/validate', { method: 'POST', body: { code: 'ZZCOM20', subtotal: 100 } });
-    check('a good coupon validates', valid.body?.data?.valid === true, valid.body);
-    check('and is worth what the rule says', valid.body?.data?.discount === '20.00', valid.body?.data);
+    const priced = (codes: string[], quantity = 1) =>
+      shop('/discounts/quote', { method: 'POST', body: { lines: [{ ...line, quantity }], codes } });
 
-    const under = await shop('/coupons/validate', { method: 'POST', body: { code: 'ZZCOM20', subtotal: 10 } });
-    check('under the minimum it is refused', under.body?.data?.reason === 'minimum_not_met', under.body?.data);
+    const valid = await priced(['ZZCOM20']);
+    check('a good coupon applies', valid.body?.data?.applied?.[0]?.code === 'ZZCOM20', valid.body);
+    check('and is worth what the rule says', valid.body?.data?.itemDiscount === '20.00', valid.body?.data);
 
-    const expired = await shop('/coupons/validate', { method: 'POST', body: { code: 'ZZCOMOLD', subtotal: 100 } });
-    check('an expired coupon is refused', expired.body?.data?.reason === 'expired', expired.body?.data);
+    await sql(`update discounts set min_order_amount = 150 where code = 'ZZCOM20'`);
+    const under = await priced(['ZZCOM20']);
+    check('under the minimum it is refused', under.body?.data?.refused?.[0]?.reason === 'minimum_not_met', under.body?.data);
+    await sql(`update discounts set min_order_amount = 50 where code = 'ZZCOM20'`);
 
-    const nonsense = await shop('/coupons/validate', { method: 'POST', body: { code: 'NOPE', subtotal: 100 } });
-    check('an unknown coupon is refused', nonsense.body?.data?.reason === 'unknown', nonsense.body?.data);
+    const expired = await priced(['ZZCOMOLD']);
+    check('an expired coupon is refused', expired.body?.data?.refused?.[0]?.reason === 'expired', expired.body?.data);
 
-    const order = await shop('/checkout', {
+    const nonsense = await priced(['NOPE']);
+    check('an unknown coupon is refused', nonsense.body?.data?.refused?.[0]?.reason === 'unknown', nonsense.body?.data);
+
+    const signedOut = await shop('/checkout', {
       method: 'POST',
-      jar: guestJar,
       body: {
         email: 'zz-guest@example.test',
         phone: '+8801700000000',
         lines: [line],
         shippingAddress: address,
-        shippingMethodId,
         paymentProvider: 'cod',
         couponCode: 'ZZCOM20',
       },
     });
-    check('a guest can check out', order.status === 201, order.body);
+    check('checkout refuses a signed-out basket', signedOut.status === 401, signedOut.status);
+
+    const order = await shop('/checkout', {
+      method: 'POST',
+      jar: shopperJar,
+      body: {
+        // Deliberately not the account's own address: the contact email is
+        // where the confirmation goes, and it is not what identifies the buyer.
+        email: 'zz-guest@example.test',
+        phone: '+8801700000000',
+        lines: [line],
+        shippingAddress: address,
+        paymentProvider: 'cod',
+        couponCode: 'ZZCOM20',
+      },
+    });
+    check('a signed-in customer can check out', order.status === 201, order.body);
 
     const number = order.body?.data?.orderNumber as string;
-    const detail = await shop(`/account/orders/${number}`, { jar: guestJar });
-    check('the guest can read their own receipt', detail.status === 200, detail.status);
+
+    const book = await shop('/account/addresses', { jar: shopperJar });
+    check(
+      'the first order saved where it was sent, so the next checkout opens filled in',
+      (book.body?.data ?? []).length === 1 && book.body?.data?.[0]?.addressLine1 === address.addressLine1,
+      book.body?.data,
+    );
+
+    const [owner] = await sql<{ customer_id: string | null }>(
+      'select customer_id from orders where order_number = $1',
+      [number],
+    );
+    check('and it is attached to the account, not to the address typed at the till', typeof owner?.customer_id === 'string', owner);
+
+    const detail = await shop(`/account/orders/${number}`, { jar: shopperJar });
+    check('the customer can read their own receipt', detail.status === 200, detail.status);
     check('priced from the database, not the request', detail.body?.data?.totals?.subtotal === '100.00', detail.body?.data?.totals);
     check('the coupon was applied server-side', detail.body?.data?.totals?.discount === '20.00', detail.body?.data?.totals);
     check('and the total adds up', detail.body?.data?.totals?.total === '80.00', detail.body?.data?.totals);
@@ -335,12 +371,12 @@ async function main(): Promise<void> {
 
     const badCoupon = await shop('/checkout', {
       method: 'POST',
+      jar: shopperJar,
       body: {
         email: 'zz-guest@example.test',
         phone: '+8801700000000',
         lines: [line],
         shippingAddress: address,
-        shippingMethodId,
         paymentProvider: 'cod',
         couponCode: 'ZZCOMOLD',
       },
@@ -349,12 +385,12 @@ async function main(): Promise<void> {
 
     const badMethod = await shop('/checkout', {
       method: 'POST',
+      jar: shopperJar,
       body: {
         email: 'zz-guest@example.test',
         phone: '+8801700000000',
         lines: [line],
         shippingAddress: address,
-        shippingMethodId,
         paymentProvider: 'stripe',
         couponCode: null,
       },
@@ -372,12 +408,12 @@ async function main(): Promise<void> {
 
     const greedy = await shop('/checkout', {
       method: 'POST',
+      jar: shopperJar,
       body: {
         email: 'zz-guest@example.test',
         phone: '+8801700000000',
         lines: [{ ...line, quantity: 99 }],
         shippingAddress: address,
-        shippingMethodId,
         paymentProvider: 'cod',
       },
     });
@@ -401,7 +437,6 @@ async function main(): Promise<void> {
         phone: '+8801700000000',
         lines: [line],
         shippingAddress: address,
-        shippingMethodId,
         paymentProvider: 'mock',
       },
     });
@@ -460,7 +495,6 @@ async function main(): Promise<void> {
         phone: '+8801700000000',
         lines: [line],
         shippingAddress: address,
-        shippingMethodId,
         paymentProvider: 'cod',
       },
     });
@@ -499,7 +533,7 @@ async function main(): Promise<void> {
     check('the return shows in the account', (list.body?.data ?? []).length >= 1, list.body?.data?.length);
   }
 
-  console.log('\n5. Guest tracking');
+  console.log('\n5. Tracking by order number and contact address');
   {
     const [row] = await sql<{ order_number: string }>(
       `select order_number from orders where email = 'zz-guest@example.test' order by placed_at desc limit 1`,
@@ -545,7 +579,74 @@ async function main(): Promise<void> {
     check('marked as a verified purchase', after.body?.data?.items?.[0]?.verifiedPurchase === true, after.body?.data?.items?.[0]);
   }
 
-  console.log('\n7. Isolation');
+  console.log('\n7. The address book fills the next checkout in');
+  {
+    // The limiter is real and is meant to be; this section places four more
+    // orders on top of the six above, which is what it exists to stop.
+    await clearOwnRateLimits();
+
+    // Every order so far went to the same address, so the book still holds one
+    // — an address matched on its content is never saved a second time.
+    const start = ((await shop('/account/addresses', { jar: shopperJar })).body?.data ?? []) as any[];
+    check('repeat orders to one address leave one saved address', start.length === 1, start);
+    check('and it is the default, because it is the only one', start[0]?.isDefault === true, start[0]);
+
+    // These orders are about the address book rather than about stock, and
+    // section 3 counted the shelf down to the unit.
+    await sql(`update inventory_levels set available = 9 where variant_id = $1`, [variantId]);
+
+    const order = (shippingAddress: unknown, shippingAddressId: unknown) =>
+      shop('/checkout', {
+        method: 'POST',
+        jar: shopperJar,
+        body: {
+          email: SHOPPER_EMAIL,
+          phone: '+8801700000000',
+          lines: [line],
+          shippingAddress,
+          shippingAddressId,
+          paymentProvider: 'cod',
+        },
+      });
+    const addresses = async (): Promise<any[]> =>
+      ((await shop('/account/addresses', { jar: shopperJar })).body?.data ?? []) as any[];
+
+    const again = await order(address, start[0]?.id);
+    check('ordering to the same address again is taken', again.status === 201, again.body);
+    check('and saves no second copy of it', (await addresses()).length === 1);
+
+    const moved = { ...address, addressLine1: 'House 42, Road 9', city: 'Chattogram', postalCode: '4000' };
+    const corrected = await order(moved, start[0]?.id);
+    check('an address corrected at the till is taken', corrected.status === 201, corrected.body);
+
+    const afterEdit = await addresses();
+    check('and edits the saved address rather than adding one beside it', afterEdit.length === 1, afterEdit);
+    check('in place, keeping its id', afterEdit[0]?.id === start[0]?.id, afterEdit[0]?.id);
+    check(
+      'so the next checkout opens on the correction, not the mistake',
+      afterEdit[0]?.addressLine1 === moved.addressLine1 && afterEdit[0]?.city === moved.city,
+      afterEdit[0],
+    );
+
+    const elsewhere = { ...address, fullName: 'Zz Recipient', addressLine1: 'Office 3, Road 4', city: 'Sylhet' };
+    const gift = await order(elsewhere, null);
+    check('an order to somewhere new is taken', gift.status === 201, gift.body);
+
+    const afterGift = await addresses();
+    check('and is saved beside the first rather than over it', afterGift.length === 2, afterGift.length);
+    check(
+      'without taking the default away from the address book',
+      afterGift.find((row) => row.id === start[0]?.id)?.isDefault === true &&
+        afterGift.filter((row) => row.isDefault).length === 1,
+      afterGift,
+    );
+
+    const forged = await order(moved, '00000000-0000-4000-8000-000000000000');
+    check('an address id belonging to nobody is ignored, not obeyed', forged.status === 201, forged.body);
+    check('and the address it names is matched on its content instead', (await addresses()).length === 2);
+  }
+
+  console.log('\n8. Isolation');
   if (!OTHER || OTHER === SLUG) {
     console.log('  SKIP  no second store given; pass --other <slug>');
   } else {
@@ -589,19 +690,15 @@ async function cleanup(sql: (text: string, params?: unknown[]) => Promise<any[]>
                select r.id from returns r join orders o on o.id = r.order_id
                where o.email in ($1, $2))`, [SHOPPER_EMAIL, 'zz-guest@example.test']);
   await sql(`delete from returns where order_id in (select id from orders where email in ($1, $2))`, [SHOPPER_EMAIL, 'zz-guest@example.test']);
-  await sql(`delete from coupon_redemptions where order_id in (select id from orders where email in ($1, $2))`, [SHOPPER_EMAIL, 'zz-guest@example.test']);
+  await sql(`delete from discount_redemptions where order_id in (select id from orders where email in ($1, $2))`, [SHOPPER_EMAIL, 'zz-guest@example.test']);
   await sql(`delete from payments where order_id in (select id from orders where email in ($1, $2))`, [SHOPPER_EMAIL, 'zz-guest@example.test']);
   await sql(`delete from order_status_history where order_id in (select id from orders where email in ($1, $2))`, [SHOPPER_EMAIL, 'zz-guest@example.test']);
   await sql(`delete from order_addresses where order_id in (select id from orders where email in ($1, $2))`, [SHOPPER_EMAIL, 'zz-guest@example.test']);
   await sql(`delete from order_items where order_id in (select id from orders where email in ($1, $2))`, [SHOPPER_EMAIL, 'zz-guest@example.test']);
   await sql(`delete from orders where email in ($1, $2)`, [SHOPPER_EMAIL, 'zz-guest@example.test']);
   await sql(`delete from reviews where customer_name = 'Zz Shopper'`);
-  await sql(`delete from customer_sessions where customer_id in (select id from customers where email = $1)`, [SHOPPER_EMAIL]);
   await sql(`delete from customers where email = $1`, [SHOPPER_EMAIL]);
-  await sql(`delete from coupons where code in ('ZZCOM20', 'ZZCOMOLD')`);
-  await sql(`delete from inventory_transactions where warehouse_id in (select id from warehouses where code = 'ZZCOMWH')`);
-  await sql(`delete from inventory_levels where warehouse_id in (select id from warehouses where code = 'ZZCOMWH')`);
-  await sql(`delete from warehouses where code = 'ZZCOMWH'`);
+  await sql(`delete from discounts where code in ('ZZCOM20', 'ZZCOMOLD')`);
   await sql(`delete from payment_methods where provider = 'mock'`);
   // Variants, media and stock rows cascade from the product.
   await sql(`delete from products where name like $1`, [`${TAG}%`]);

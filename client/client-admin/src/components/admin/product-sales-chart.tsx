@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { formatMoney, formatNumber } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 
 /**
  * One product's takings, day by day.
@@ -36,15 +36,15 @@ const AXIS = {
   axisLine: false,
 } as const;
 
-function dayLabel(value: string): string {
+function dayLabel(value: string, locale: string): string {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
 }
 
 /** `$2.5K`, `$1.2M` — an axis needs the size, never the cents. */
-function compactMoney(value: number, currency: string): string {
-  return new Intl.NumberFormat('en-US', {
+function compactMoney(value: number, currency: string, locale: string): string {
+  return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
     notation: 'compact',
@@ -59,6 +59,7 @@ export function ProductSalesChart({
   data: { bucket: string; units: number; revenue: string }[];
   currency: string;
 }) {
+  const t = useT();
   const points = React.useMemo(
     () => data.map((row) => ({ ...row, revenue: Number(row.revenue) || 0 })),
     [data],
@@ -75,9 +76,9 @@ export function ProductSalesChart({
     return (
       <div className="grid h-56 place-items-center rounded-lg border border-dashed text-center">
         <div className="px-6">
-          <p className="text-sm font-medium">Nothing sold in this period</p>
+          <p className="text-sm font-medium">{t('Nothing sold in this period')}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Sales appear here on the day the order is placed. Try a wider range.
+            {t('Sales appear here on the day the order is placed. Try a wider range.')}
           </p>
         </div>
       </div>
@@ -96,7 +97,12 @@ export function ProductSalesChart({
           </defs>
 
           <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="bucket" tickFormatter={dayLabel} minTickGap={24} {...AXIS} />
+          <XAxis
+            dataKey="bucket"
+            tickFormatter={(value: string) => dayLabel(value, t.locale)}
+            minTickGap={24}
+            {...AXIS}
+          />
           <YAxis
             yAxisId="units"
             allowDecimals={false}
@@ -106,7 +112,7 @@ export function ProductSalesChart({
           <YAxis
             yAxisId="revenue"
             orientation="right"
-            tickFormatter={(value: number) => compactMoney(value, currency)}
+            tickFormatter={(value: number) => compactMoney(value, currency, t.locale)}
             width={56}
             {...AXIS}
           />
@@ -118,24 +124,26 @@ export function ProductSalesChart({
               const point = payload[0]!.payload as { units: number; revenue: number };
               return (
                 <div className="rounded-lg border border-border bg-popover px-3 py-2 shadow-[var(--shadow-raised)]">
-                  <p className="mb-1 text-xs font-medium text-muted-foreground">{dayLabel(String(label))}</p>
+                  <p className="mb-1 text-xs font-medium text-muted-foreground">
+                    {dayLabel(String(label), t.locale)}
+                  </p>
                   <p className="text-sm font-semibold tabular-nums">
-                    {formatNumber(point.units)} unit{point.units === 1 ? '' : 's'}
+                    {t.plural(point.units, '{count} unit', '{count} units')}
                   </p>
                   <p className="text-xs text-muted-foreground tabular-nums">
-                    {formatMoney(point.revenue, currency)}
+                    {t.money(point.revenue, currency)}
                   </p>
                 </div>
               );
             }}
           />
 
-          <Bar yAxisId="units" dataKey="units" name="Units" fill="var(--chart-2)" radius={[3, 3, 0, 0]} />
+          <Bar yAxisId="units" dataKey="units" name={t('Units')} fill="var(--chart-2)" radius={[3, 3, 0, 0]} />
           <Area
             yAxisId="revenue"
             type="monotone"
             dataKey="revenue"
-            name="Revenue"
+            name={t('Revenue')}
             stroke="var(--chart-1)"
             strokeWidth={2}
             fill="url(#productRevenueFill)"

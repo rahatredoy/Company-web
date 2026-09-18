@@ -9,7 +9,8 @@ import type { ProductSummary } from '@/types';
 import { Button } from '@/components/ui/button';
 import { CheckboxField } from '@/components/ui/checkbox';
 import { useCart } from '@/lib/commerce/cart';
-import { formatMoney, pluralise } from '@/lib/utils';
+import { formatMoney } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 import { sum } from '@/lib/commerce/money';
 
 /**
@@ -32,6 +33,7 @@ export function FrequentlyBoughtTogether({
   currency: string;
   locale: string;
 }) {
+  const t = useT();
   const { add } = useCart();
   const [selected, setSelected] = React.useState<Set<string>>(
     () => new Set(items.map((item) => item.id)),
@@ -76,12 +78,12 @@ export function FrequentlyBoughtTogether({
       });
     }
 
-    toast.success(`${chosen.length} ${pluralise(chosen.length, 'item')} added to your cart`);
+    toast.success(t.plural(chosen.length, '{count} item added to your cart', '{count} items added to your cart'));
   };
 
   return (
     <div className="rounded-(--radius-card) border border-border bg-surface p-5 sm:p-6">
-      <h2 className="text-lg font-semibold">Frequently bought together</h2>
+      <h2 className="text-lg font-semibold">{t('Frequently bought together')}</h2>
 
       <div className="mt-5 flex flex-col gap-6 lg:flex-row lg:items-start">
         <ul className="flex flex-wrap items-center gap-3">
@@ -119,8 +121,7 @@ export function FrequentlyBoughtTogether({
                   label={
                     <span className="flex flex-wrap items-baseline gap-x-2">
                       <span className={index === 0 ? 'font-medium' : undefined}>
-                        {index === 0 ? 'This item: ' : ''}
-                        {item.name}
+                        {index === 0 ? t('This item: {name}', { name: item.name }) : item.name}
                       </span>
                       <span className="text-sm font-semibold">
                         {formatMoney(item.salePrice ?? item.price, item.currency, locale)}
@@ -135,19 +136,19 @@ export function FrequentlyBoughtTogether({
 
         <div className="shrink-0 lg:w-56 lg:border-l lg:border-border lg:pl-6">
           <p className="text-sm text-muted">
-            Total for {chosen.length} {pluralise(chosen.length, 'item')}
+            {t.plural(chosen.length, 'Total for {count} item', 'Total for {count} items')}
           </p>
           <p className="mt-1 text-2xl font-bold tabular-nums">
             {formatMoney(total, currency, locale)}
           </p>
 
           {allSelected && saving ? (
-            <p className="mt-1 text-xs text-success">Bundle price — saves you money on the set</p>
+            <p className="mt-1 text-xs text-success">{t('Bundle price — saves you money on the set')}</p>
           ) : null}
 
           <Button onClick={addAll} disabled={chosen.length === 0} className="mt-4 w-full">
             <ShoppingCart aria-hidden />
-            Add selected to cart
+            {t('Add selected to cart')}
           </Button>
         </div>
       </div>

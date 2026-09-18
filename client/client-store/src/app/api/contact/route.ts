@@ -2,12 +2,13 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { submitContactMessage } from '@/lib/api/content';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
+import { getT } from '@/lib/i18n/server';
 
 /**
  * Contact form submission.
  *
- * Rate-limited harder than the newsletter: this one produces a message a human
- * has to read, so a flood costs staff time rather than a database row.
+ * Rate-limited hard: this one produces a message a human has to read, so a
+ * flood costs staff time rather than a database row.
  */
 
 const schema = z.object({
@@ -19,10 +20,11 @@ const schema = z.object({
 });
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const t = await getT();
   const limit = rateLimit(`contact:${clientIp(request)}`, 3, 300_000);
   if (!limit.ok) {
     return NextResponse.json(
-      { error: 'Too many messages. Please wait a few minutes and try again.' },
+      { error: t('Too many messages. Please wait a few minutes and try again.') },
       { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } },
     );
   }
@@ -31,7 +33,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Please check your message and try again.' }, { status: 400 });
+    return NextResponse.json({ error: t('Please check your message and try again.') }, { status: 400 });
   }
 
   const parsed = schema.safeParse(payload);
@@ -41,17 +43,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       const key = issue.path.join('.');
       if (key && !details[key]) {
         details[key] =
-          issue.code === 'too_small' ? 'This is a little short.' : 'Please check this field.';
+          issue.code === 'too_small' ? t('This is a little short.') : t('Please check this field.');
       }
     }
-    return NextResponse.json({ error: 'Some details need your attention.', details }, { status: 422 });
+    return NextResponse.json({ error: t('Some details need your attention.'), details }, { status: 422 });
   }
 
   try {
     await submitContactMessage(parsed.data);
   } catch (error) {
     console.error('[storefront] contact submission failed', error);
-    return NextResponse.json({ error: 'We could not send your message.' }, { status: 502 });
+    return NextResponse.json({ error: t('We could not send your message.') }, { status: 502 });
   }
 
   return new NextResponse(null, { status: 204 });

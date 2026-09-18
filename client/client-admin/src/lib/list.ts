@@ -29,7 +29,7 @@ export const BATCH_SIZE = 25;
  * appeared on the column actually in use.
  *
  * `PRODUCT_DEFAULTS` is built from this, so the page and the panel cannot
- * disagree about it. The other two keyset lists — orders and inventory — still
- * read their own defaults the broken way.
+ * disagree about it. The orders list still reads its own defaults the broken
+ * way.
  */
 export const PRODUCT_LIST_SORT = { sort: 'createdAt', order: 'desc' } as const;

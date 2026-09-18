@@ -28,6 +28,13 @@ export function slugify(input: string, maxLength = 120): string {
     .replace(/\p{M}/gu, '')
     .toLowerCase()
     .trim()
+    // Apostrophes are dropped rather than separated on. "Men's Clothing" came
+    // out as `men-s-clothing` — a stray one-letter segment baked into a live
+    // storefront address — because the generic rule below treats every
+    // non-alphanumeric character as a word boundary. A word interrupted by a
+    // quote mark is still one word. Kept ahead of that rule, and matched in
+    // `client-admin/src/lib/slugify.ts` so the panel previews what is saved.
+    .replace(/['‘’ʼ´`]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-')

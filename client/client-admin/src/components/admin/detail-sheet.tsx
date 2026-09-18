@@ -14,6 +14,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -22,7 +23,7 @@ import { cn } from '@/lib/utils';
  * The lists used to answer "view" by sending the reader to the storefront,
  * which is the shopper's version of the row — a product page shows a price and
  * a picture and says nothing about cost, stock buckets, the ledger or who
- * bought it, and half the lists here (customers, refunds, subscribers,
+ * bought it, and half the lists here (customers, refunds,
  * messages) have no storefront page at all. So a view opens the record itself,
  * beside the list, holding **every column the database has** on that row plus
  * the rows that point at it.
@@ -69,6 +70,8 @@ export function DetailSheet({
   size?: 'sm' | 'md' | 'lg';
   children?: React.ReactNode;
 }) {
+  const t = useT();
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent size={size} className="gap-0">
@@ -82,11 +85,11 @@ export function DetailSheet({
 
         <SheetBody>
           {error ? (
-            <Alert variant="danger" title="That record could not be loaded">
+            <Alert variant="danger" title={t('That record could not be loaded')}>
               <p>{error}</p>
               {onRetry ? (
                 <Button size="sm" variant="outline" className="mt-3" onClick={onRetry}>
-                  <RotateCcw aria-hidden /> Try again
+                  <RotateCcw aria-hidden /> {t('Try again')}
                 </Button>
               ) : null}
             </Alert>
@@ -196,7 +199,7 @@ export function DetailField({
       <dd
         className={cn(
           'text-sm break-words',
-          mono && 'font-mono text-[13px]',
+          mono && 'font-mono text-[12px]',
           empty && 'text-muted-foreground',
         )}
       >
@@ -209,8 +212,9 @@ export function DetailField({
 
 /** A yes/no column, shown as a word rather than an unlabelled tick. */
 export function DetailBool({ value }: { value: boolean | null | undefined }) {
+  const t = useT();
   if (value === null || value === undefined) return <span className="text-muted-foreground">—</span>;
-  return <span className={value ? 'text-success' : 'text-muted-foreground'}>{value ? 'Yes' : 'No'}</span>;
+  return <span className={value ? 'text-success' : 'text-muted-foreground'}>{value ? t('Yes') : t('No')}</span>;
 }
 
 /**
@@ -222,6 +226,7 @@ export function DetailBool({ value }: { value: boolean | null | undefined }) {
  * title, because a full uuid in a two-column grid pushes the layout around.
  */
 export function DetailId({ value, className }: { value: string | null | undefined; className?: string }) {
+  const t = useT();
   const [copied, setCopied] = React.useState(false);
 
   // Clears itself, and clears the timer if the panel closes first — a setState
@@ -236,12 +241,12 @@ export function DetailId({ value, className }: { value: string | null | undefine
 
   return (
     <span className={cn('inline-flex items-center gap-1', className)}>
-      <code className="truncate font-mono text-[12px]" title={value}>
+      <code className="truncate font-mono text-[11px]" title={value}>
         {value}
       </code>
       <button
         type="button"
-        aria-label="Copy identifier"
+        aria-label={t('Copy identifier')}
         className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         onClick={() => {
           void navigator.clipboard?.writeText(value).then(
@@ -268,7 +273,7 @@ export function DetailId({ value, className }: { value: string | null | undefine
 export function DetailTable<T>({
   columns,
   rows,
-  empty = 'Nothing yet.',
+  empty,
   rowKey,
 }: {
   columns: { key: string; header: React.ReactNode; align?: 'left' | 'right'; cell: (row: T) => React.ReactNode }[];
@@ -276,7 +281,9 @@ export function DetailTable<T>({
   empty?: React.ReactNode;
   rowKey: (row: T, index: number) => string;
 }) {
-  if (rows.length === 0) return <DetailEmpty>{empty}</DetailEmpty>;
+  const t = useT();
+  // Only an omitted `empty` gets the default — a caller passing `null` asked for nothing.
+  if (rows.length === 0) return <DetailEmpty>{empty === undefined ? t('Nothing yet.') : empty}</DetailEmpty>;
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
@@ -326,11 +333,13 @@ export function DetailEmpty({ children }: { children: React.ReactNode }) {
 /** Money and totals — a right-aligned list where the labels are not fields. */
 export function DetailTotals({
   rows,
+  className,
 }: {
   rows: { label: React.ReactNode; value: React.ReactNode; strong?: boolean; muted?: boolean }[];
+  className?: string;
 }) {
   return (
-    <dl className="space-y-1.5 rounded-lg border border-border p-3">
+    <dl className={cn('space-y-1.5 rounded-lg border border-border p-3', className)}>
       {rows.map((row, index) => (
         <div
           key={index}
@@ -366,24 +375,157 @@ export function DetailProse({ children }: { children: React.ReactNode }) {
  * a large object cannot stretch the panel.
  */
 export function DetailJson({ value }: { value: unknown }) {
+  const t = useT();
   if (value === null || value === undefined) return <span className="text-muted-foreground">—</span>;
   if (typeof value === 'object' && Object.keys(value as object).length === 0) {
-    return <span className="text-muted-foreground">Empty</span>;
+    return <span className="text-muted-foreground">{t('Empty')}</span>;
   }
 
   return (
-    <pre className="max-h-48 overflow-auto rounded-lg border border-border bg-muted/30 p-3 font-mono text-[12px] leading-relaxed">
+    <pre className="max-h-48 overflow-auto rounded-lg border border-border bg-muted/30 p-3 font-mono text-[11px] leading-relaxed">
       {JSON.stringify(value, null, 2)}
     </pre>
   );
 }
 
+// ----------------------------------------------------- the summary layout --
+//
+// The pieces above print a record field by field, every column in a two-column
+// grid. That reads as a dump once a record has thirty of them, and most of those
+// are empty on any given row. These are for a panel that shows what the owner
+// acts on instead: a few figures first, then short cards side by side, each a
+// list of label and value with the empty ones left out rather than dashed.
+
+/** One figure worth reading before anything else — price, stock, sold. */
+export function DetailStat({
+  label,
+  value,
+  sub,
+  tone = 'default',
+}: {
+  label: React.ReactNode;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: 'default' | 'success' | 'warning' | 'danger' | 'muted';
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+      <p className="truncate text-xs text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          'mt-0.5 truncate text-lg leading-7 font-semibold tabular-nums',
+          tone === 'success' && 'text-success',
+          tone === 'warning' && 'text-warning',
+          tone === 'danger' && 'text-destructive',
+          tone === 'muted' && 'text-muted-foreground',
+        )}
+      >
+        {value}
+      </p>
+      {sub ? <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{sub}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * Cards side by side — as many columns as there are cards, up to three.
+ *
+ * Counted from the children actually passed, so a card left out because it had
+ * nothing to say does not leave a hole where it would have been. A child that
+ * renders null still counts, which is why callers decide before rendering.
+ */
+export function DetailColumns({ children, className }: { children: React.ReactNode; className?: string }) {
+  const items = React.Children.toArray(children);
+  if (items.length === 0) return null;
+
+  return (
+    <div
+      className={cn(
+        'grid gap-4',
+        items.length === 2 && 'md:grid-cols-2',
+        items.length >= 3 && 'md:grid-cols-3',
+        className,
+      )}
+    >
+      {items}
+    </div>
+  );
+}
+
+export function DetailCard({
+  title,
+  action,
+  children,
+  className,
+}: {
+  title: React.ReactNode;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={cn('min-w-0 rounded-lg border border-border p-4', className)}>
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export interface DetailFact {
+  label: React.ReactNode;
+  value: React.ReactNode;
+  hint?: React.ReactNode;
+  /** Label above the value, for prose that would wrap badly right-aligned. */
+  stacked?: boolean;
+  mono?: boolean;
+}
+
+/** Drops the facts that were left out, and the ones whose value is empty. */
+export function keepFacts(facts: (DetailFact | null | undefined | false | 0 | '')[]): DetailFact[] {
+  return facts.filter((fact): fact is DetailFact => {
+    if (!fact) return false;
+    return fact.value !== null && fact.value !== undefined && fact.value !== '';
+  });
+}
+
+/** Label on the left, value on the right, a hairline between rows. */
+export function DetailFactList({ facts }: { facts: DetailFact[] }) {
+  return (
+    <dl className="divide-y divide-border">
+      {facts.map((fact, index) =>
+        fact.stacked ? (
+          <div key={index} className="space-y-1 py-2 first:pt-0 last:pb-0">
+            <dt className="text-xs text-muted-foreground">{fact.label}</dt>
+            <dd className={cn('text-sm break-words', fact.mono && 'font-mono text-[12px]')}>{fact.value}</dd>
+            {fact.hint ? <p className="text-xs text-muted-foreground">{fact.hint}</p> : null}
+          </div>
+        ) : (
+          <div key={index} className="flex items-baseline justify-between gap-4 py-2 first:pt-0 last:pb-0">
+            <dt className="shrink-0 text-sm text-muted-foreground">{fact.label}</dt>
+            <dd className="min-w-0 text-right">
+              <span className={cn('text-sm font-medium break-words', fact.mono && 'font-mono text-[12px]')}>
+                {fact.value}
+              </span>
+              {fact.hint ? <span className="block text-xs text-muted-foreground">{fact.hint}</span> : null}
+            </dd>
+          </div>
+        ),
+      )}
+    </dl>
+  );
+}
+
 /** The footer's link out to the shopper's version of this row, when there is one. */
-export function DetailStorefrontLink({ href, label = 'View in store' }: { href: string; label?: string }) {
+export function DetailStorefrontLink({ href, label }: { href: string; label?: string }) {
+  const t = useT();
+
   return (
     <Button asChild variant="outline" size="sm">
       <a href={href} target="_blank" rel="noreferrer">
-        <ExternalLink aria-hidden /> {label}
+        <ExternalLink aria-hidden /> {label ?? t('View in store')}
       </a>
     </Button>
   );

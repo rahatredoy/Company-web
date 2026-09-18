@@ -29,6 +29,21 @@ const bool = z
 const port = z.coerce.number().int().min(1).max(65535);
 
 /**
+ * Set explicitly, or left to follow `NODE_ENV`. Blank counts as unset.
+ *
+ * Separate from `bool` above because "not set" and "set to false" are different
+ * answers here: unset means "do whatever production means", and false is a
+ * deliberate opt-out that has to be typed.
+ */
+const optionalBool = z
+  .union([z.boolean(), z.string()])
+  .optional()
+  .transform((v) => {
+    if (v === undefined || (typeof v === 'string' && v.trim() === '')) return undefined;
+    return typeof v === 'boolean' ? v : ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
+  });
+
+/**
  * The tenant database cluster is **sharded**: one PostgreSQL server holds many
  * stores' databases, and a store's own shard is named on its control-plane
  * record. Growth is a matter of appending a server here, not of resizing one.
@@ -85,6 +100,41 @@ const secretKey = z
   .min(32, 'must be at least 32 characters')
   .refine((v) => Buffer.from(v, 'base64url').length >= 32, 'must decode to at least 32 bytes (base64url)');
 
+
+/**
+ * Nothing leaves this process over plaintext, in production.
+ *
+ * Every value checked here is an address this API either **calls** or **prints
+ * into something a browser will follow** — an emailed link, a redirect, a CORS
+ * allow-list entry, the origin of an uploaded picture. An `http://` one is not
+ * a cosmetic inconsistency: it is a request whose contents anybody on the path
+ * can read, and, worse, rewrite. A reset link delivered over http hands the
+ * account to whoever is sitting on the coffee-shop wifi; an `http://` image on
+ * an `https://` page is mixed content the browser blocks outright.
+ *
+ * Caught at boot rather than at the first request, because the alternative is a
+ * platform that runs perfectly well and is quietly insecure — the failure has no
+ * symptom until somebody is already reading the traffic. A misconfigured
+ * deployment that refuses to start is the loud version of the same mistake.
+ *
+ * Development is exempt and has to be: the six apps talk to each other over
+ * `http://localhost` on six ports, and there is no network between them.
+ */
+function requireHttps(
+  ctx: z.RefinementCtx,
+  key: string,
+  value: string | undefined,
+  what: string,
+): void {
+  if (!value) return;
+  if (value.startsWith('https://')) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: [key],
+    message: `must be an https:// address in production — ${what} would otherwise travel in the clear (got ${value.split('://')[0] ?? 'a relative value'}://…)`,
+  });
+}
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -92,6 +142,26 @@ export const envSchema = z.object({
   API_PORT: port.default(4100),
   API_HOST: z.string().default('0.0.0.0'),
   API_PUBLIC_URL: z.string().url().default('http://localhost:4100'),
+
+  /**
+   * Refuse any request that did not arrive over TLS. See `plugins/https.ts`.
+   *
+   * Unset follows `NODE_ENV`, which is the answer for every real deployment.
+   * Set it to `false` only where the edge already redirects `:80` and does not
+   * forward `x-forwarded-proto` — the hook reads that header and would
+   * otherwise refuse everything.
+   */
+  FORCE_HTTPS: optionalBool,
+  /**
+   * Permit a plaintext connection to PostgreSQL or Redis in production.
+   *
+   * Deliberately unwieldy to type. TLS on those two is not optional theatre:
+   * the tenant databases hold every customer's address and order history, and
+   * Redis holds the session tokens that stand in for a password. Set it only
+   * when both genuinely sit on a private network the traffic cannot leave —
+   * never for a host reached by a public IP.
+   */
+  ALLOW_PLAINTEXT_DATA_STORES: optionalBool,
 
   REDIS_URL: z.string().min(1),
 
@@ -190,7 +260,85 @@ export const envSchema = z.object({
    * link addressed to a store admin is rejected outright.
    */
   MAIL_DEV_REDIRECT_TO: optionalEmail,
+
+  // --- Text messages (phone sign-in) ------------------------------------------------
+  /**
+   * `log` writes the message to the API log and sends nothing, which is how a
+   * one-time code is read during local development — the same arrangement
+   * `MAIL_DRIVER=log` provides for reset links. It is the only value because it
+   * is the only driver written; a real gateway is a branch in `lib/sms.ts` and
+   * a value added here.
+   */
+  SMS_DRIVER: z.enum(['log']).default('log'),
+  /**
+   * What a number typed without a country code is assumed to be dialling from.
+   *
+   * A shopper types the number the way they dial it, which in Bangladesh is
+   * `01712345678` — no country code at all. Something has to supply the missing
+   * one before the number can be stored as an identity, and the platform's own
+   * market is a far better guess than refusing every number that is not already
+   * international.
+   */
+  SMS_DEFAULT_COUNTRY_CODE: z.string().regex(/^\+?[0-9]{1,4}$/).default('+880'),
+
+  // --- Sign in with Google ----------------------------------------------------------
+  /**
+   * Both or neither. The storefront only draws the Google button when the API
+   * says it is configured, and every Google route refuses outright when it is
+   * not — so a half-filled pair is a button that leads to a 503, which is worse
+   * than no button.
+   *
+   * **One redirect URI is registered with Google for the whole platform**:
+   * `{API_PUBLIC_URL}/api/v1/oauth/google/callback`. Google matches redirect
+   * URIs exactly and has no wildcards, so a per-store URI would mean editing a
+   * Google Cloud project every time somebody opened a shop. See
+   * `modules/oauth/google.routes.ts` for how the callback finds its way back to
+   * the store the shopper actually came from.
+   */
+  GOOGLE_CLIENT_ID: optionalString,
+  GOOGLE_CLIENT_SECRET: optionalString,
 }).superRefine((env, ctx) => {
+  if (env.NODE_ENV === 'production') {
+    requireHttps(ctx, 'API_PUBLIC_URL', env.API_PUBLIC_URL, "this API's own advertised address");
+    requireHttps(ctx, 'COMPANY_API_URL', env.COMPANY_API_URL, 'every tenant lookup, which carries INTERNAL_API_KEY');
+    requireHttps(ctx, 'ADMIN_URL_PATTERN', env.ADMIN_URL_PATTERN, 'store admin panel links, including password resets');
+    requireHttps(ctx, 'STORE_URL_PATTERN', env.STORE_URL_PATTERN, 'storefront links in customer email');
+    requireHttps(ctx, 'R2_ENDPOINT', env.R2_ENDPOINT, 'the signed upload, which carries the bucket credential');
+    requireHttps(ctx, 'R2_PUBLIC_URL', env.R2_PUBLIC_URL, 'every product picture, on an https page');
+
+    /*
+     * The two backing stores.
+     *
+     * HTTPS at the edge secures the half of the journey the customer can see.
+     * A session token read straight off the wire between this API and Redis is
+     * the same account taken, and a tenant database reached over plaintext hands
+     * over the orders of every store on that shard. `rediss://` is Redis over
+     * TLS; PostgreSQL wants `sslmode` on the URL or `ssl: true` on the shard.
+     */
+    if (!env.ALLOW_PLAINTEXT_DATA_STORES) {
+      if (!env.REDIS_URL.startsWith('rediss://')) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['REDIS_URL'],
+          message:
+            'must use rediss:// (Redis over TLS) in production — it holds the session tokens that stand in for a password. Set ALLOW_PLAINTEXT_DATA_STORES=true only if Redis is on a private network.',
+        });
+      }
+
+      const plaintextShards = [
+        ...(env.TENANT_DB_SSL ? [] : ['TENANT_DB_SSL']),
+        ...env.TENANT_SHARDS.filter((shard) => !shard.ssl).map((shard) => shard.id),
+      ];
+      if (plaintextShards.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['TENANT_SHARDS'],
+          message: `every shard must set "ssl": true in production — these do not: ${plaintextShards.join(', ')}. Tenant databases hold customer addresses and order history. Set ALLOW_PLAINTEXT_DATA_STORES=true only if the cluster is on a private network.`,
+        });
+      }
+    }
+  }
+
   // A missing key would otherwise surface as an undelivered reset link.
   if (env.MAIL_DRIVER === 'resend' && !env.RESEND_API_KEY) {
     ctx.addIssue({

@@ -15,24 +15,29 @@ import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { api, errorCode, errorMessage } from '@/lib/api';
+import { useT, type Translator } from '@/lib/i18n';
 import type { SessionResponse } from '@/lib/types';
 
-const signInSchema = z.object({
-  email: z.string().trim().min(1, 'Enter your email address.').email('Enter a valid email address.'),
-  password: z.string().min(1, 'Enter your password.'),
-  remember: z.boolean().default(false),
-});
+/** Built per render language, so a validation message is in the store's language. */
+const signInSchema = (t: Translator) =>
+  z.object({
+    email: z.string().trim().min(1, t('Enter your email address.')).email(t('Enter a valid email address.')),
+    password: z.string().min(1, t('Enter your password.')),
+    remember: z.boolean().default(false),
+  });
 
-type SignInValues = z.input<typeof signInSchema>;
+type SignInValues = z.input<ReturnType<typeof signInSchema>>;
 
 export function SignInForm({ mfaPending }: { mfaPending: boolean }) {
   const router = useRouter();
+  const t = useT();
+  const schema = React.useMemo(() => signInSchema(t), [t]);
   const [stage, setStage] = React.useState<'password' | 'mfa'>(mfaPending ? 'mfa' : 'password');
   const [formError, setFormError] = React.useState<string | null>(null);
   const [notReady, setNotReady] = React.useState(false);
 
   const form = useForm<SignInValues>({
-    resolver: zodResolver(signInSchema),
+    resolver: zodResolver(schema),
     defaultValues: { email: '', password: '', remember: false },
   });
 
@@ -62,30 +67,31 @@ export function SignInForm({ mfaPending }: { mfaPending: boolean }) {
   return (
     <Card className="shadow-[var(--shadow-raised)]">
       <CardHeader>
-        <CardTitle>Sign in</CardTitle>
-        <CardDescription>Use the email address and password your store was registered with.</CardDescription>
+        <CardTitle>{t('Sign in')}</CardTitle>
+        <CardDescription>{t('Use the email address and password your store was registered with.')}</CardDescription>
       </CardHeader>
 
       <CardContent>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5" noValidate>
           {formError ? (
-            <Alert variant="danger" title={notReady ? 'Account not ready' : 'Could not sign in'}>
+            <Alert variant="danger" title={notReady ? t('Account not ready') : t('Could not sign in')}>
               {formError}
             </Alert>
           ) : null}
 
-          <Field label="Email address" htmlFor="email" error={form.formState.errors.email?.message}>
+          <Field label={t('Email address')} htmlFor="email" error={form.formState.errors.email?.message}>
             <Input
               id="email"
               type="email"
               autoComplete="username"
               autoFocus
+              // i18n-ignore -- an example address, not language
               placeholder="you@yourstore.com"
               {...form.register('email')}
             />
           </Field>
 
-          <Field label="Password" htmlFor="password" error={form.formState.errors.password?.message}>
+          <Field label={t('Password')} htmlFor="password" error={form.formState.errors.password?.message}>
             <Input id="password" type="password" autoComplete="current-password" {...form.register('password')} />
           </Field>
 
@@ -95,19 +101,19 @@ export function SignInForm({ mfaPending }: { mfaPending: boolean }) {
                 checked={form.watch('remember')}
                 onCheckedChange={(checked) => form.setValue('remember', checked === true)}
               />
-              Keep me signed in
+              {t('Keep me signed in')}
             </Label>
             <Link
               href="/forgot-password"
               className="text-sm font-medium text-primary underline-offset-4 hover:underline"
             >
-              Forgot password?
+              {t('Forgot password?')}
             </Link>
           </div>
 
           <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? <Loader2 className="animate-spin" /> : null}
-            Sign in
+            {t('Sign in')}
           </Button>
         </form>
       </CardContent>
@@ -115,25 +121,28 @@ export function SignInForm({ mfaPending }: { mfaPending: boolean }) {
       {/* No sign-up, no invite: this panel has exactly one account, created when
           the store was registered. Anything else belongs to the company site. */}
       <div className="border-t border-border px-6 py-4 text-center text-sm text-muted-foreground">
-        This panel has one admin account — the one your store was registered with.
+        {t('This panel has one admin account — the one your store was registered with.')}
       </div>
     </Card>
   );
 }
 
-const mfaSchema = z.object({
-  code: z.string().trim().min(6, 'Enter the code from your authenticator app.'),
-  remember: z.boolean().default(false),
-});
+const mfaSchema = (t: Translator) =>
+  z.object({
+    code: z.string().trim().min(6, t('Enter the code from your authenticator app.')),
+    remember: z.boolean().default(false),
+  });
 
-type MfaValues = z.input<typeof mfaSchema>;
+type MfaValues = z.input<ReturnType<typeof mfaSchema>>;
 
 function MfaForm({ onBack }: { onBack: () => void }) {
   const router = useRouter();
+  const t = useT();
+  const schema = React.useMemo(() => mfaSchema(t), [t]);
   const [formError, setFormError] = React.useState<string | null>(null);
 
   const form = useForm<MfaValues>({
-    resolver: zodResolver(mfaSchema),
+    resolver: zodResolver(schema),
     defaultValues: { code: '', remember: false },
   });
 
@@ -154,9 +163,9 @@ function MfaForm({ onBack }: { onBack: () => void }) {
         <span className="mb-3 grid size-10 place-items-center rounded-xl bg-primary-soft text-primary">
           <KeyRound className="size-5" />
         </span>
-        <CardTitle>Two-factor authentication</CardTitle>
+        <CardTitle>{t('Two-factor authentication')}</CardTitle>
         <CardDescription>
-          Enter the 6-digit code from your authenticator app, or one of your recovery codes.
+          {t('Enter the 6-digit code from your authenticator app, or one of your recovery codes.')}
         </CardDescription>
       </CardHeader>
 
@@ -164,7 +173,7 @@ function MfaForm({ onBack }: { onBack: () => void }) {
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5" noValidate>
           {formError ? <Alert variant="danger">{formError}</Alert> : null}
 
-          <Field label="Authentication code" htmlFor="code" error={form.formState.errors.code?.message}>
+          <Field label={t('Authentication code')} htmlFor="code" error={form.formState.errors.code?.message}>
             <Input
               id="code"
               inputMode="text"
@@ -178,11 +187,11 @@ function MfaForm({ onBack }: { onBack: () => void }) {
 
           <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? <Loader2 className="animate-spin" /> : null}
-            Verify and continue
+            {t('Verify and continue')}
           </Button>
 
           <Button type="button" variant="ghost" className="w-full" onClick={onBack}>
-            Use a different account
+            {t('Use a different account')}
           </Button>
         </form>
       </CardContent>

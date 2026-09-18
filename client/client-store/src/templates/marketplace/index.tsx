@@ -1,9 +1,11 @@
 import type { StorefrontTemplate, TemplateChromeProps, TemplateHomepageProps, TemplatePreset } from '../registry';
+import { TEMPLATE_META } from '../meta';
 import { StoreLogo } from '../chrome';
 import { AnnouncementBar } from '@/components/layout/announcement-bar';
 import { UtilityBar } from '@/components/layout/utility-bar';
 import { HeaderActions } from '@/components/layout/header-actions';
 import { MobileNav } from '@/components/layout/mobile-nav';
+import { BackButton } from '@/components/layout/back-button';
 import { SearchBox } from '@/components/layout/search-box';
 import { MegaMenu } from '@/components/layout/mega-menu';
 import { CategorySidebar } from '@/components/layout/category-sidebar';
@@ -52,6 +54,7 @@ function Header({ config, locale }: TemplateChromeProps) {
 
       <div className="container-store flex h-16 items-center gap-4">
         <MobileNav config={config} />
+        <BackButton />
         <StoreLogo config={config} priority />
 
         <SearchBox variant="inline" className="mx-auto hidden max-w-2xl flex-1 lg:block" />
@@ -90,7 +93,7 @@ function Homepage({ config, sections }: TemplateHomepageProps) {
       {hero ? (
         <div className="container-store pt-4">
           <div className="grid gap-4 lg:grid-cols-[14rem_minmax(0,1fr)]">
-            <CategorySidebar config={config} headerTone="primary" />
+            <CategorySidebar config={config} />
             {/* The hero brings its own shell padding; inside the split it must not. */}
             <div className="min-w-0 [&>section]:!pt-0">
               <HomepageSections sections={[hero]} context={context} />
@@ -109,7 +112,7 @@ const GRID = 'product-grid grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 
 const template: StorefrontTemplate = {
   key: 'marketplace',
   name: 'Marketplace',
-  description: 'Dense, search-led layout for large multi-category catalogues.',
+  description: TEMPLATE_META.marketplace.description,
   Header,
   Footer,
   Homepage,

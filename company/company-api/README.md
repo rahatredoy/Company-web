@@ -71,8 +71,13 @@ src/
   inserted even if application code is bypassed. No endpoint creates admins.
 - **Passwords** use Argon2id (19 MiB, t=2, p=1). Unknown accounts still burn a
   hash so timing does not reveal existence.
-- **Sessions** are opaque 32-byte tokens; only their SHA-256 is stored. Admin and
-  client sessions live in separate tables with separate cookies and secrets.
+- **Sessions** are JWTs (HS256, `lib/jwt.ts`) carried in HttpOnly cookies, each
+  naming a Redis record that decides whether it is still live — a JWT cannot be
+  recalled, so no record means no session, which is what keeps sign-out and
+  "sign out everywhere" immediate rather than advisory. The token itself is never
+  stored, so there is nothing in a dump to replay. Admin and client sessions use
+  separate cookies, separate audiences **and** separate signing secrets, so
+  neither can be verified as the other. The `alg` header is never trusted.
 - **Admin MFA** is TOTP (RFC 6238) implemented on `node:crypto`. The seed is
   encrypted with AES-256-GCM; recovery codes are hashed and single-use.
 - **Sensitive admin actions** (suspend, extend trial, cancel, disable domain,

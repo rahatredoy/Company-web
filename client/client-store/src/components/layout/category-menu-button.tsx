@@ -6,6 +6,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { ChevronDown, Menu } from 'lucide-react';
 import type { StoreConfig } from '@/types';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * The solid "All Categories" button that opens a department list.
@@ -21,7 +22,7 @@ import { cn } from '@/lib/utils';
 export function CategoryMenuButton({
   config,
   tone = 'primary',
-  label = 'All Categories',
+  label,
   className,
 }: {
   config: StoreConfig;
@@ -29,6 +30,7 @@ export function CategoryMenuButton({
   label?: string;
   className?: string;
 }) {
+  const t = useT();
   if (config.categoryMenu.length === 0) return null;
 
   return (
@@ -43,7 +45,7 @@ export function CategoryMenuButton({
         )}
       >
         <Menu className="size-4" aria-hidden />
-        <span>{label}</span>
+        <span>{label ?? t('All Categories')}</span>
         <ChevronDown className="size-4 opacity-80" aria-hidden />
       </DropdownMenu.Trigger>
 
@@ -69,7 +71,7 @@ export function CategoryMenuButton({
                     sideOffset={4}
                     className="z-50 w-56 rounded-(--radius-card) border border-border bg-surface p-1.5 shadow-[var(--shadow-raised)]"
                   >
-                    <MenuLink href={`/category/${entry.slug}`} label={`All ${entry.name}`} emphasis />
+                    <MenuLink href={`/category/${entry.slug}`} label={t('All {name}', { name: entry.name })} emphasis />
                     {entry.children.map((child) => (
                       <MenuLink key={child.id} href={`/category/${child.slug}`} label={child.name} />
                     ))}
@@ -82,7 +84,7 @@ export function CategoryMenuButton({
           )}
 
           <DropdownMenu.Separator className="my-1.5 h-px bg-border" />
-          <MenuLink href="/categories" label="View all categories" emphasis />
+          <MenuLink href="/categories" label={t('View all categories')} emphasis />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

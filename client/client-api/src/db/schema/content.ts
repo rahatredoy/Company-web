@@ -61,7 +61,9 @@ export const faqs = pgTable(
 );
 
 /**
- * The homepage builder's output.
+ * The blocks the storefront's homepage is made of, in order. Seeded at
+ * provisioning (`services/store-content-seed.ts`) and changed by the scripts
+ * beside it; the admin panel has no editor for it.
  *
  * `type` is a closed enum and `config` is read through a per-type schema, so the
  * storefront renders only section shapes it recognises — an unknown or malformed

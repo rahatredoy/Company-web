@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4100';
+const isProduction = process.env.NODE_ENV === 'production';
 
 /**
  * `connect-src` for an API address that is different for every store.
@@ -73,7 +74,7 @@ const csp = [
    */
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  process.env.NODE_ENV === 'production'
+  isProduction
     ? "script-src 'self' 'unsafe-inline'"
     : "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
@@ -96,7 +97,24 @@ const nextConfig: NextConfig = {
    * or a link in somebody's notes would otherwise hit.
    */
   async redirects() {
-    return [{ source: '/products/new', destination: '/products?new=1', permanent: true }];
+    return [
+      { source: '/products/new', destination: '/products?new=1', permanent: true },
+      // The Inventory screen is gone: stock is read and adjusted on each product.
+      { source: '/inventory', destination: '/products', permanent: false },
+      // Shipping is gone too: checkout charges from the zone the store was set up with.
+      { source: '/shipping', destination: '/orders', permanent: false },
+      // Design is part of the Settings screen now, not a destination of its own.
+      { source: '/website/design', destination: '/settings', permanent: false },
+      // Refunds are a tab of the Returns screen now.
+      { source: '/refunds', destination: '/returns?tab=refunds', permanent: false },
+      // Reviews are moderated on each product's Reviews tab now.
+      { source: '/reviews', destination: '/products?reviews=pending', permanent: false },
+      // An order has no screen of its own: it opens in the list's View panel.
+      { source: '/orders/:id', destination: '/orders?view=:id', permanent: false },
+      // Nor does a return or a customer: each opens in its list's View panel.
+      { source: '/returns/:id', destination: '/returns?view=:id', permanent: false },
+      { source: '/customers/:id', destination: '/customers?view=:id', permanent: false },
+    ];
   },
   async headers() {
     return [
@@ -112,10 +130,25 @@ const nextConfig: NextConfig = {
             key: 'Permissions-Policy',
             value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()',
           },
-          {
-            key: 'Strict-Transport-Security',
-            value: 'max-age=63072000; includeSubDomains; preload',
-          },
+          /*
+           * Two years, every subdomain, preload-eligible.
+           *
+           * **Production only.** The header is ignored by browsers when it
+           * arrives over plain http, so sending it in development achieves
+           * nothing — but a developer who puts `next dev` behind an https tunnel
+           * on localhost would have `includeSubDomains` applied to `localhost`
+           * itself, and every other app on a localhost port would stop being
+           * reachable over http until the pin expired. There is no way to clear
+           * that but to wait or to wipe the browser's HSTS store.
+           */
+          ...(isProduction
+            ? [
+                {
+                  key: 'Strict-Transport-Security',
+                  value: 'max-age=63072000; includeSubDomains; preload',
+                },
+              ]
+            : []),
         ],
       },
     ];

@@ -23,11 +23,7 @@ export const categories = pgTable(
     parentId: uuid('parent_id'),
     name: varchar('name', { length: 140 }).notNull(),
     slug: varchar('slug', { length: 160 }).notNull(),
-    description: text('description'),
     imageUrl: text('image_url'),
-    iconUrl: text('icon_url'),
-    /** Optional wide image for the category landing page. */
-    bannerUrl: text('banner_url'),
     isActive: boolean('is_active').notNull().default(true),
     showInMenu: boolean('show_in_menu').notNull().default(true),
     /**
@@ -66,18 +62,14 @@ export const brands = pgTable(
     slug: varchar('slug', { length: 160 }).notNull(),
     description: text('description'),
     logoUrl: text('logo_url'),
-    websiteUrl: text('website_url'),
     isActive: boolean('is_active').notNull().default(true),
     isFeatured: boolean('is_featured').notNull().default(false),
-    sortOrder: integer('sort_order').notNull().default(0),
-    seoTitle: varchar('seo_title', { length: 160 }),
-    seoDescription: varchar('seo_description', { length: 300 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex('brands_slug_key').on(table.slug),
-    index('brands_active_idx').on(table.isActive, table.sortOrder),
+    index('brands_active_idx').on(table.isActive, table.name),
   ],
 );
 
@@ -140,7 +132,6 @@ export const products = pgTable(
     categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'set null' }),
     brandId: uuid('brand_id').references(() => brands.id, { onDelete: 'set null' }),
 
-    shortDescription: varchar('short_description', { length: 500 }),
     description: text('description'),
 
     /** Denormalised from the default variant so listing queries stay one join. */
@@ -241,6 +232,14 @@ export const products = pgTable(
     seoTitle: varchar('seo_title', { length: 160 }),
     seoDescription: varchar('seo_description', { length: 300 }),
 
+    /**
+     * The owner's own note on this product — a supplier, a reorder reminder, why
+     * the price is what it is. **Private**: written only by `PUT /products/:id/
+     * note` and returned only by the admin detail read. Every storefront query
+     * names its columns, which is what keeps this one out of a shopper's reply.
+     */
+    ownerNote: text('owner_note'),
+
     publishedAt: timestamp('published_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -269,8 +268,6 @@ export const productVariants = pgTable(
 
     price: numeric('price', { precision: 12, scale: 2 }).notNull(),
     salePrice: numeric('sale_price', { precision: 12, scale: 2 }),
-    saleStartsAt: timestamp('sale_starts_at', { withTimezone: true }),
-    saleEndsAt: timestamp('sale_ends_at', { withTimezone: true }),
     /** Never exposed by any storefront endpoint. */
     costPrice: numeric('cost_price', { precision: 12, scale: 2 }),
 

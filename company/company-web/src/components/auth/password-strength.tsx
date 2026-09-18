@@ -44,7 +44,7 @@ export function PasswordStrength({ value }: { value: string }) {
           return (
             <li
               key={rule.label}
-              className={cn('text-[11px]', ok ? 'text-success' : 'text-muted-foreground')}
+              className={cn('text-[10.5px]', ok ? 'text-success' : 'text-muted-foreground')}
             >
               {ok ? '✓' : '○'} {rule.label}
             </li>

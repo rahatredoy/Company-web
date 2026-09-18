@@ -2,11 +2,10 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import type { ReturnDetail, ReturnStatus } from '@/lib/types';
+import type { ReturnStatus } from '@/lib/types';
 import { api, errorMessage } from '@/lib/api';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
   DialogBody,
@@ -19,8 +18,9 @@ import {
 import { Field } from '@/components/ui/field';
 import { Input, Textarea } from '@/components/ui/input';
 import { toast } from '@/components/ui/toaster';
+import { useT, type MessageKey } from '@/lib/i18n';
 
-const LABELS: Record<ReturnStatus, string> = {
+const LABELS: Record<ReturnStatus, MessageKey> = {
   requested: 'Requested',
   under_review: 'Start review',
   approved: 'Approve',
@@ -28,6 +28,17 @@ const LABELS: Record<ReturnStatus, string> = {
   received: 'Mark received',
   inspected: 'Record inspection',
   completed: 'Complete and refund',
+};
+
+/** A status as it reads in the middle of a sentence, lower case in English. */
+const STATUS_WORD: Record<ReturnStatus, MessageKey> = {
+  requested: 'requested::status',
+  under_review: 'under review::status',
+  approved: 'approved::status',
+  rejected: 'rejected::status',
+  received: 'received::status',
+  inspected: 'inspected::status',
+  completed: 'completed::status',
 };
 
 /**
@@ -39,15 +50,29 @@ const LABELS: Record<ReturnStatus, string> = {
  * restocking the whole return automatically is how a shop ends up re-selling
  * something that was returned broken, so the default here is zero and somebody
  * has to say otherwise.
+ *
+ * It lives in the footer of the return's View panel — a return has no screen of
+ * its own — so a move re-reads the panel (`onMoved`) as well as the list behind
+ * it, and the next buttons are the new status's.
  */
+export interface ReturnWorkflowRecord {
+  id: string;
+  resolution: string;
+  items: { id: string; productName: string; quantity: number }[];
+  allowedTransitions: ReturnStatus[];
+}
+
 export function ReturnWorkflow({
   detail,
   canApprove,
+  onMoved,
 }: {
-  detail: ReturnDetail;
+  detail: ReturnWorkflowRecord;
   canApprove: boolean;
+  onMoved?: () => void;
 }) {
   const router = useRouter();
+  const t = useT();
   const [busy, setBusy] = React.useState<ReturnStatus | null>(null);
   const [error, setError] = React.useState('');
   const [prompt, setPrompt] = React.useState<ReturnStatus | null>(null);
@@ -67,10 +92,11 @@ export function ReturnWorkflow({
 
       toast.success(
         result?.refundNumber
-          ? `Return completed. Refund ${result.refundNumber} is waiting for approval.`
-          : `Return is now ${status.replace(/_/g, ' ')}.`,
+          ? t('Return completed. Refund {number} is waiting for approval.', { number: result.refundNumber })
+          : t('Return is now {status}.', { status: t(STATUS_WORD[status]) }),
       );
       setPrompt(null);
+      onMoved?.();
       router.refresh();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -101,58 +127,55 @@ export function ReturnWorkflow({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>What happens next</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {error ? <Alert variant="danger">{error}</Alert> : null}
+    <div className="w-full space-y-2">
+      {error ? <Alert variant="danger">{error}</Alert> : null}
 
-        {detail.allowedTransitions.length === 0 ? (
-          <p className="text-sm text-muted-foreground">This return is finished.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {detail.allowedTransitions.map((status) => (
-              <Button
-                key={status}
-                size="sm"
-                variant={status === 'rejected' ? 'outline' : 'primary'}
-                disabled={busy !== null}
-                loading={busy === status}
-                onClick={() => {
-                  if (status === 'rejected' || status === 'inspected') setPrompt(status);
-                  else void move(status);
-                }}
-              >
-                {LABELS[status]}
-              </Button>
-            ))}
-          </div>
-        )}
+      {detail.allowedTransitions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t('This return is finished.')}</p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          {detail.allowedTransitions.map((status) => (
+            <Button
+              key={status}
+              size="sm"
+              variant={status === 'rejected' ? 'outline' : 'primary'}
+              className={status === 'rejected' ? 'text-destructive' : undefined}
+              disabled={busy !== null}
+              loading={busy === status}
+              onClick={() => {
+                if (status === 'rejected' || status === 'inspected') setPrompt(status);
+                else void move(status);
+              }}
+            >
+              {t(LABELS[status])}
+            </Button>
+          ))}
+        </div>
+      )}
 
-        {detail.resolution === 'refund' && detail.allowedTransitions.includes('completed') ? (
-          <p className="text-xs text-muted-foreground">
-            Completing raises a refund for review. It is not paid until someone approves it under
-            Refunds.
-          </p>
-        ) : null}
-      </CardContent>
+      {detail.resolution === 'refund' && detail.allowedTransitions.includes('completed') ? (
+        <p className="text-xs text-muted-foreground">
+          {t('Completing raises a refund for review. It is not paid until someone approves it under Refunds.')}
+        </p>
+      ) : null}
 
       <Dialog open={prompt !== null} onOpenChange={(open) => !open && setPrompt(null)}>
         <DialogContent size={prompt === 'rejected' ? 'sm' : 'md'}>
           <form onSubmit={onPrompt}>
             <DialogHeader>
-              <DialogTitle>{prompt === 'rejected' ? 'Reject this return' : 'Record the inspection'}</DialogTitle>
+              <DialogTitle>{prompt === 'rejected' ? t('Reject this return') : t('Record the inspection')}</DialogTitle>
               <DialogDescription>
                 {prompt === 'rejected'
-                  ? 'The customer is shown this, so say what went wrong.'
-                  : 'How many of each item came back in a sellable state? Anything you leave at zero is written off as damaged.'}
+                  ? t('The customer is shown this, so say what went wrong.')
+                  : t(
+                      'How many of each item came back in a sellable state? Anything you leave at zero is written off as damaged.',
+                    )}
               </DialogDescription>
             </DialogHeader>
 
             <DialogBody>
               {prompt === 'rejected' ? (
-                <Field label="Reason" htmlFor="rejectionReason" required>
+                <Field label={t('Reason')} htmlFor="rejectionReason" required>
                   <Textarea id="rejectionReason" name="rejectionReason" rows={3} maxLength={300} />
                 </Field>
               ) : (
@@ -164,7 +187,7 @@ export function ReturnWorkflow({
                     {detail.items.map((item) => (
                       <Field
                         key={item.id}
-                        label={`${item.productName} — ${item.quantity} returned`}
+                        label={t('{product} — {count} returned', { product: item.productName, count: item.quantity })}
                         htmlFor={`restock-${item.id}`}
                       >
                         <Input
@@ -178,7 +201,7 @@ export function ReturnWorkflow({
                       </Field>
                     ))}
                   </div>
-                  <Field label="Note" htmlFor="note">
+                  <Field label={t('Note')} htmlFor="note">
                     <Input id="note" name="note" maxLength={300} />
                   </Field>
                 </>
@@ -187,15 +210,15 @@ export function ReturnWorkflow({
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setPrompt(null)}>
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button type="submit" loading={saving} variant={prompt === 'rejected' ? 'destructive' : 'primary'}>
-                {prompt === 'rejected' ? 'Reject return' : 'Save inspection'}
+                {prompt === 'rejected' ? t('Reject return') : t('Save inspection')}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
-    </Card>
+    </div>
   );
 }

@@ -42,7 +42,8 @@ import {
 import { serverGetOptional } from '@/lib/server-api';
 import { storefrontUrl } from '@/lib/env';
 import { resolveDays, resolveGranularity } from '@/lib/dashboard';
-import { formatDate, formatMoney, formatNumber } from '@/lib/format';
+import type { MessageKey } from '@/lib/i18n';
+import { getT } from '@/lib/i18n/server';
 import {
   can,
   type DashboardPayload,
@@ -51,7 +52,10 @@ import {
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
-export const metadata: Metadata = { title: 'Dashboard' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Dashboard') };
+}
 export const dynamic = 'force-dynamic';
 
 /** First value of a param that Next may hand over as an array. */
@@ -66,26 +70,12 @@ function one(value: string | string[] | undefined): string | undefined {
  * before it has products is advice it cannot act on. Replaced by the growth card
  * the moment there is a first sale rather than sitting alongside it for ever.
  */
-const SETUP_STEPS = [
+const SETUP_STEPS: { icon: typeof Package; label: MessageKey; href: string }[] = [
   { icon: Package, label: 'Add your products', href: '/products?new=1' },
-  { icon: Warehouse, label: 'Record what you have in stock', href: '/inventory' },
-  { icon: Palette, label: 'Choose how your store looks', href: '/website/design' },
+  { icon: Warehouse, label: 'Record what you have in stock', href: '/products' },
+  { icon: Palette, label: 'Choose how your store looks', href: '/settings' },
   { icon: Globe, label: 'Open your storefront', href: '/website/pages' },
 ];
-
-/**
- * What every section reads as when the call itself did not come back.
- *
- * The page still renders — header, range picker, quick actions, the layout — with
- * each card carrying the same short explanation. The alternative was one
- * full-screen error, which loses the parts that never depended on that call and
- * leaves the reader with nothing to click.
- */
-const UNAVAILABLE = {
-  ok: false,
-  reason: 'unavailable',
-  message: 'Your store’s API did not answer. Reload in a moment.',
-} as const;
 
 /**
  * The panel's home screen.
@@ -108,6 +98,7 @@ export default async function DashboardPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  const t = await getT();
   const days = resolveDays(one(params.days));
   const granularity = resolveGranularity(one(params.granularity));
 
@@ -128,18 +119,32 @@ export default async function DashboardPage({
   const admin = session?.authenticated ? session.admin : null;
   const store = session?.authenticated ? session.store : null;
   const currency = dashboard?.currency ?? store?.currency ?? 'USD';
-  const money = (value: string | number) => formatMoney(value, currency);
+  const money = (value: string | number) => t.money(value, currency);
+
+  /*
+   * What every section reads as when the call itself did not come back.
+   *
+   * The page still renders — header, range picker, quick actions, the layout —
+   * with each card carrying the same short explanation. The alternative was one
+   * full-screen error, which loses the parts that never depended on that call
+   * and leaves the reader with nothing to click.
+   */
+  const unavailable = {
+    ok: false,
+    reason: 'unavailable',
+    message: t('Your store’s API did not answer. Reload in a moment.'),
+  } as const;
 
   const range = dashboard?.range;
   const sections = dashboard?.sections;
-  const metrics = sections?.metrics ?? UNAVAILABLE;
-  const series = sections?.series ?? UNAVAILABLE;
-  const recentOrders = sections?.recentOrders ?? UNAVAILABLE;
-  const topProducts = sections?.topProducts ?? UNAVAILABLE;
-  const lowStock = sections?.lowStock ?? UNAVAILABLE;
-  const reviews = sections?.reviews ?? UNAVAILABLE;
+  const metrics = sections?.metrics ?? unavailable;
+  const series = sections?.series ?? unavailable;
+  const recentOrders = sections?.recentOrders ?? unavailable;
+  const topProducts = sections?.topProducts ?? unavailable;
+  const lowStock = sections?.lowStock ?? unavailable;
+  const reviews = sections?.reviews ?? unavailable;
 
-  const compareLabel = `vs previous ${days} day${days === 1 ? '' : 's'}`;
+  const compareLabel = t.plural(days, 'vs previous {count} day', 'vs previous {count} days');
   const totals = metrics.ok ? metrics.data.totals : null;
   const trading =
     (metrics.ok && metrics.data.orders.value > 0) || (recentOrders.ok && recentOrders.data.length > 0);
@@ -147,29 +152,29 @@ export default async function DashboardPage({
   const quickActions = [
     can(admin, 'products.create') && {
       icon: Plus,
-      title: 'Add product',
-      description: 'Create a new product',
+      title: t('Add product'),
+      description: t('Create a new product'),
       href: '/products?new=1',
       external: false,
     },
     can(admin, 'marketing.manage') && {
       icon: BadgePercent,
-      title: 'Create discount',
-      description: 'Launch a new promotion',
+      title: t('Create discount'),
+      description: t('Launch a new promotion'),
       href: '/discounts',
       external: false,
     },
     can(admin, 'orders.view') && {
       icon: ShoppingCart,
-      title: 'View orders',
-      description: 'Manage customer orders',
+      title: t('View orders'),
+      description: t('Manage customer orders'),
       href: '/orders',
       external: false,
     },
     store?.slug && {
       icon: Globe,
-      title: 'View store',
-      description: 'Open your storefront',
+      title: t('View store'),
+      description: t('Open your storefront'),
       href: storefrontUrl(store.slug),
       external: true,
     },
@@ -184,8 +189,8 @@ export default async function DashboardPage({
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Dashboard"
-        description="Here's what's happening with your store today."
+        title={t('Dashboard')}
+        description={t("Here's what's happening with your store today.")}
         actions={
           <RangePicker days={days} from={range?.from} to={range?.to} timezone={range?.timezone} />
         }
@@ -195,14 +200,13 @@ export default async function DashboardPage({
         <Card className="flex flex-wrap items-center gap-3 border-destructive/40 bg-destructive-soft/40 p-4">
           <CircleAlert className="size-4 shrink-0 text-destructive" aria-hidden />
           <p className="min-w-0 flex-1 text-sm">
-            <span className="font-medium">Your figures could not be loaded.</span>{' '}
+            <span className="font-medium">{t('Your figures could not be loaded.')}</span>{' '}
             <span className="text-muted-foreground">
-              Either the session has expired or the store API did not answer. Everything below is
-              waiting on it.
+              {t('Either the session has expired or the store API did not answer. Everything below is waiting on it.')}
             </span>
           </p>
           <Button asChild size="sm" variant="secondary">
-            <Link href="/dashboard">Try again</Link>
+            <Link href="/dashboard">{t('Try again')}</Link>
           </Button>
         </Card>
       ) : null}
@@ -216,15 +220,14 @@ export default async function DashboardPage({
           <Star className="size-4 shrink-0 text-warning" aria-hidden />
           <p className="min-w-0 flex-1 text-sm">
             <span className="font-medium">
-              {formatNumber(reviews.data.pending)} review{reviews.data.pending === 1 ? '' : 's'} waiting
-              for you.
+              {t.plural(reviews.data.pending, '{count} review waiting for you.', '{count} reviews waiting for you.')}
             </span>{' '}
             <span className="text-muted-foreground">
-              Nothing appears on your storefront until you approve it.
+              {t('Nothing appears on your storefront until you approve it.')}
             </span>
           </p>
           <Button asChild size="sm" variant="secondary">
-            <Link href="/reviews?status=pending">Moderate</Link>
+            <Link href="/products?reviews=pending">{t('Moderate')}</Link>
           </Button>
         </Card>
       ) : null}
@@ -233,7 +236,7 @@ export default async function DashboardPage({
       {metrics.ok ? (
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
-            label="Revenue"
+            label={t('Revenue')}
             value={money(metrics.data.revenue.value)}
             metric={metrics.data.revenue}
             icon={Receipt}
@@ -242,8 +245,8 @@ export default async function DashboardPage({
             compareLabel={compareLabel}
           />
           <KpiCard
-            label="Orders"
-            value={formatNumber(metrics.data.orders.value)}
+            label={t('Orders')}
+            value={t.number(metrics.data.orders.value)}
             metric={metrics.data.orders}
             icon={PackageCheck}
             tint="primary"
@@ -251,8 +254,8 @@ export default async function DashboardPage({
             compareLabel={compareLabel}
           />
           <KpiCard
-            label="Pending orders"
-            value={formatNumber(metrics.data.pendingOrders.value)}
+            label={t('Pending orders')}
+            value={t.number(metrics.data.pendingOrders.value)}
             metric={metrics.data.pendingOrders}
             icon={ShoppingCart}
             tint="warning"
@@ -264,13 +267,13 @@ export default async function DashboardPage({
             // to read correctly for a queue that is empty and one that is not.
             hint={
               metrics.data.pendingOrders.value === 0
-                ? 'Nothing waiting on you'
-                : 'Placed in this period, not yet shipped'
+                ? t('Nothing waiting on you')
+                : t('Placed in this period, not yet shipped')
             }
           />
           <KpiCard
-            label="Low stock products"
-            value={lowStock.ok ? formatNumber(lowStock.data.low) : '—'}
+            label={t('Low stock products')}
+            value={lowStock.ok ? t.number(lowStock.data.low) : '—'}
             icon={Warehouse}
             tint="danger"
             align="inline"
@@ -282,10 +285,10 @@ export default async function DashboardPage({
                 lowStock.message
               ) : lowStock.data.out > 0 ? (
                 <span className="text-destructive">
-                  {formatNumber(lowStock.data.out)} out of stock right now
+                  {t('{count} out of stock right now', { count: lowStock.data.out })}
                 </span>
               ) : (
-                `Across ${formatNumber(lowStock.data.tracked)} tracked variants`
+                t('Across {count} tracked variants', { count: lowStock.data.tracked })
               )
             }
           />
@@ -303,11 +306,14 @@ export default async function DashboardPage({
         <Card className="flex flex-col">
           <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
             <div>
-              <CardTitle className="text-base">Sales overview</CardTitle>
+              <CardTitle className="text-base">{t('Sales overview')}</CardTitle>
               <p className="text-xs text-muted-foreground">
                 {totals
-                  ? `${money(totals.revenue)} taken · ${money(totals.averageOrderValue)} average order`
-                  : 'Revenue over the chosen window'}
+                  ? t('{revenue} taken · {average} average order', {
+                      revenue: money(totals.revenue),
+                      average: money(totals.averageOrderValue),
+                    })
+                  : t('Revenue over the chosen window')}
               </p>
             </div>
             <GranularityPicker granularity={granularity} />
@@ -319,7 +325,7 @@ export default async function DashboardPage({
               <PanelBoundary
                 fallback={
                   <PanelNote icon={CircleAlert} tone="danger">
-                    The chart could not be drawn. Your figures above are unaffected.
+                    {t('The chart could not be drawn. Your figures above are unaffected.')}
                   </PanelNote>
                 }
               >
@@ -338,11 +344,11 @@ export default async function DashboardPage({
         {/* ------------------------------------------------------ recent orders --- */}
         <Card className="flex flex-col">
           <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
-            <CardTitle className="text-base">Recent orders</CardTitle>
+            <CardTitle className="text-base">{t('Recent orders')}</CardTitle>
             {can(admin, 'orders.view') ? (
               <Button asChild variant="ghost" size="sm">
                 <Link href="/orders">
-                  View all <ArrowRight aria-hidden />
+                  {t('View all')} <ArrowRight aria-hidden />
                 </Link>
               </Button>
             ) : null}
@@ -351,36 +357,36 @@ export default async function DashboardPage({
             {!recentOrders.ok ? (
               <SectionNote section={recentOrders} />
             ) : recentOrders.data.length === 0 ? (
-              <PanelNote icon={Inbox}>No orders yet. They appear the moment one is placed.</PanelNote>
+              <PanelNote icon={Inbox}>{t('No orders yet. They appear the moment one is placed.')}</PanelNote>
             ) : (
               <TableWrapper className="border-0">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Order</TableHead>
-                      <TableHead>Customer</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead>{t('Order')}</TableHead>
+                      <TableHead>{t('Customer')}</TableHead>
+                      <TableHead>{t('Date')}</TableHead>
+                      <TableHead>{t('Status')}</TableHead>
+                      <TableHead className="text-right">{t('Total')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {recentOrders.data.map((order) => (
                       <TableRow key={order.id}>
                         <TableCell>
-                          <Link href={`/orders/${order.id}`} className="font-mono text-xs hover:underline">
+                          <Link href={`/orders?view=${order.id}`} className="font-mono text-xs hover:underline">
                             {order.orderNumber}
                           </Link>
                         </TableCell>
                         <TableCell className="max-w-36 truncate text-sm">{order.customerName}</TableCell>
                         <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                          {formatDate(order.placedAt)}
+                          {t.date(order.placedAt)}
                         </TableCell>
                         <TableCell>
                           <StatusBadge status={order.status} />
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-right text-sm tabular-nums">
-                          {formatMoney(order.grandTotal, order.currency || currency)}
+                          {t.money(order.grandTotal, order.currency || currency)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -395,11 +401,11 @@ export default async function DashboardPage({
         <div className="space-y-5 xl:row-span-2">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Quick actions</CardTitle>
+              <CardTitle className="text-base">{t('Quick actions')}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               {quickActions.length === 0 ? (
-                <PanelNote icon={Lock}>Your account has no sections it can write to.</PanelNote>
+                <PanelNote icon={Lock}>{t('Your account has no sections it can write to.')}</PanelNote>
               ) : (
                 quickActions.map((action) => {
                   const body = (
@@ -451,16 +457,19 @@ export default async function DashboardPage({
                   <TrendingUp className="size-5" aria-hidden />
                 </span>
                 <div className="space-y-1">
-                  <p className="text-sm font-semibold">Grow your store</p>
+                  <p className="text-sm font-semibold">{t('Grow your store')}</p>
                   <p className="text-sm text-muted-foreground">
                     {totals
-                      ? `${formatNumber(totals.activeProducts)} of ${formatNumber(totals.totalProducts)} products are live. Add more and run a promotion to lift sales.`
-                      : 'Add more products and run a promotion to lift sales.'}
+                      ? t('{active} of {total} products are live. Add more and run a promotion to lift sales.', {
+                          active: totals.activeProducts,
+                          total: totals.totalProducts,
+                        })
+                      : t('Add more products and run a promotion to lift sales.')}
                   </p>
                 </div>
                 <Button asChild size="sm" variant="secondary">
                   <Link href={can(admin, 'marketing.manage') ? '/discounts' : '/products'}>
-                    {can(admin, 'marketing.manage') ? 'Create discount' : 'Review products'}
+                    {can(admin, 'marketing.manage') ? t('Create discount') : t('Review products')}
                   </Link>
                 </Button>
               </CardContent>
@@ -468,7 +477,7 @@ export default async function DashboardPage({
           ) : (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Finish setting up</CardTitle>
+                <CardTitle className="text-base">{t('Finish setting up')}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-1">
                 {SETUP_STEPS.map((step) => (
@@ -478,7 +487,7 @@ export default async function DashboardPage({
                     className="flex items-center gap-3 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-muted"
                   >
                     <step.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="min-w-0 flex-1 truncate">{step.label}</span>
+                    <span className="min-w-0 flex-1 truncate">{t(step.label)}</span>
                     <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                   </Link>
                 ))}
@@ -490,11 +499,11 @@ export default async function DashboardPage({
         {/* --------------------------------------------------- low stock alerts --- */}
         <Card className="flex flex-col">
           <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
-            <CardTitle className="text-base">Low stock alerts</CardTitle>
-            {can(admin, 'inventory.view') ? (
+            <CardTitle className="text-base">{t('Low stock alerts')}</CardTitle>
+            {can(admin, 'products.view') ? (
               <Button asChild variant="ghost" size="sm">
-                <Link href="/inventory?status=low">
-                  View all <ArrowRight aria-hidden />
+                <Link href="/products?stock=low">
+                  {t('View all')} <ArrowRight aria-hidden />
                 </Link>
               </Button>
             ) : null}
@@ -504,7 +513,7 @@ export default async function DashboardPage({
               <SectionNote section={lowStock} />
             ) : lowStock.data.items.length === 0 ? (
               <PanelNote icon={PackageCheck} tone="success">
-                Every tracked variant is above its reorder point.
+                {t('Every tracked variant is above its reorder point.')}
               </PanelNote>
             ) : (
               lowStock.data.items.map((item) => {
@@ -538,7 +547,7 @@ export default async function DashboardPage({
                           <span className="text-muted-foreground"> · {item.variantTitle}</span>
                         ) : null}
                       </p>
-                      <p className="truncate font-mono text-xs text-muted-foreground">SKU: {item.sku}</p>
+                      <p className="truncate font-mono text-xs text-muted-foreground">{t('SKU: {sku}', { sku: item.sku })}</p>
                     </div>
                     <div className="w-24 shrink-0 space-y-1.5 text-right">
                       <p
@@ -547,7 +556,7 @@ export default async function DashboardPage({
                           out ? 'text-destructive' : 'text-warning',
                         )}
                       >
-                        {out ? 'Out of stock' : `${formatNumber(item.available)} left`}
+                        {out ? t('Out of stock') : t('{count} left', { count: item.available })}
                       </p>
                       <span className="block h-1.5 w-full overflow-hidden rounded-full bg-muted">
                         <span
@@ -556,7 +565,7 @@ export default async function DashboardPage({
                         />
                       </span>
                       <p className="text-xs text-muted-foreground tabular-nums">
-                        Reorder at {formatNumber(item.threshold)}
+                        {t('Reorder at {count}', { count: item.threshold })}
                       </p>
                     </div>
                   </Link>
@@ -570,26 +579,19 @@ export default async function DashboardPage({
         <Card className="flex flex-col">
           <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
             <div>
-              <CardTitle className="text-base">Top products</CardTitle>
+              <CardTitle className="text-base">{t('Top products')}</CardTitle>
               <p className="text-xs text-muted-foreground">
                 {topProducts.ok && topProducts.data.scope === 'all_time'
-                  ? 'Nothing sold in this period — showing best sellers of all time'
-                  : 'By units sold in this period'}
+                  ? t('Nothing sold in this period — showing best sellers of all time')
+                  : t('By units sold in this period')}
               </p>
             </div>
-            {can(admin, 'reports.view') ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`/reports?days=${days}`}>
-                  View all <ArrowRight aria-hidden />
-                </Link>
-              </Button>
-            ) : null}
           </CardHeader>
           <CardContent className="flex-1 space-y-1">
             {!topProducts.ok ? (
               <SectionNote section={topProducts} />
             ) : topProducts.data.products.length === 0 ? (
-              <PanelNote icon={Inbox}>Nothing has sold yet.</PanelNote>
+              <PanelNote icon={Inbox}>{t('Nothing has sold yet.')}</PanelNote>
             ) : (
               topProducts.data.products.map((product) => {
                 const row = (
@@ -602,7 +604,7 @@ export default async function DashboardPage({
                     />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">{product.name}</span>
                     <span className="w-20 shrink-0 text-right text-sm tabular-nums text-muted-foreground">
-                      {formatNumber(product.units)} sold
+                      {t('{count} sold', { count: product.units })}
                     </span>
                     {/* Null on an all-time row: `sold_count` counts units, and what
                         they were charged at is not recoverable from it. */}

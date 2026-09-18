@@ -3,15 +3,14 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { getStoreConfig } from '@/lib/api/store';
 import { getCategories } from '@/lib/api/catalog';
-import { Breadcrumbs } from '@/components/layout/breadcrumbs';
 import { EmptyState } from '@/components/ui/empty-state';
-import { pluralise } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const config = await getStoreConfig();
+  const [config, t] = await Promise.all([getStoreConfig(), getT()]);
   return {
-    title: 'Categories',
-    description: `Browse every department at ${config.store.name}.`,
+    title: t('Categories'),
+    description: t('Browse every department at {store}.', { store: config.store.name }),
     alternates: { canonical: '/categories' },
   };
 }
@@ -24,24 +23,24 @@ export async function generateMetadata(): Promise<Metadata> {
  * catalogue that second click is where people give up.
  */
 export default async function CategoriesPage() {
-  const categories = await getCategories();
+  const [categories, t] = await Promise.all([getCategories(), getT()]);
 
   if (categories.length === 0) {
     return (
       <div className="container-store py-6">
-        <Breadcrumbs items={[{ label: 'Categories' }]} className="mb-6" />
-        <EmptyState title="No categories yet" description="This store has not published any categories." />
+        <EmptyState
+          title={t('No categories yet')}
+          description={t('This store has not published any categories.')}
+        />
       </div>
     );
   }
 
   return (
     <div className="container-store py-6">
-      <Breadcrumbs items={[{ label: 'Categories' }]} className="mb-6" />
-      <h1 className="text-2xl font-semibold sm:text-3xl">Categories</h1>
-      <p className="mt-2 text-muted">Everything we sell, grouped by department.</p>
+      <h1 className="sr-only">{t('Categories')}</h1>
 
-      <ul className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {categories.map((category) => (
           <li
             key={category.id}
@@ -64,7 +63,7 @@ export default async function CategoriesPage() {
               <span className="block p-4">
                 <span className="block font-semibold group-hover:text-primary">{category.name}</span>
                 <span className="mt-0.5 block text-xs text-subtle">
-                  {category.productCount} {pluralise(category.productCount, 'product')}
+                  {t.plural(category.productCount, '{count} product', '{count} products')}
                 </span>
               </span>
             </Link>

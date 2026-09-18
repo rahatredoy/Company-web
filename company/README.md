@@ -217,4 +217,5 @@ Against the live PostgreSQL and Redis instances, with all three apps running:
 - Forged webhook signature rejected; replay returned `duplicate` without
   re-applying; cross-origin write blocked; a second `company_admin` insert
   rejected by the database; duplicate slug rejected; no commerce tables in the
-  control plane; passwords `$argon2id$`, tokens only SHA-256.
+  control plane; passwords `$argon2id$`, and session tokens are signed JWTs that
+  are never stored at all — revocation is the Redis record each one names.

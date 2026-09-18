@@ -225,8 +225,7 @@ async function main() {
     ['Reviews', '/api/v1/admin/reviews'],
     ['Returns', '/api/v1/admin/returns'],
     ['Refunds', '/api/v1/admin/refunds'],
-    ['Coupons', '/api/v1/admin/coupons'],
-    ['Newsletter', '/api/v1/admin/newsletter'],
+    ['Discounts', '/api/v1/admin/discounts'],
     ['Contact messages', '/api/v1/admin/contact-messages'],
     ['Website pages', '/api/v1/admin/website/pages'],
   ];

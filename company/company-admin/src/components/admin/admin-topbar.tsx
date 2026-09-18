@@ -116,7 +116,7 @@ export function AdminTopbar({
                 </Avatar>
                 <span className="hidden flex-col items-start leading-tight sm:flex">
                   <span className="text-sm font-medium">Company Admin</span>
-                  <span className="text-[11px] text-muted-foreground">Super Admin</span>
+                  <span className="text-[10.5px] text-muted-foreground">Super Admin</span>
                 </span>
               </button>
             </DropdownMenuTrigger>

@@ -2,12 +2,14 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Heart, ShoppingCart, User } from 'lucide-react';
+import { ShoppingCart, User } from 'lucide-react';
+import { WishlistIcon } from '@/lib/commerce/wishlist-icon';
 import { useCart } from '@/lib/commerce/cart';
 import { useWishlist } from '@/lib/commerce/collections';
 import { useHydrated } from '@/lib/hooks/use-hydrated';
 import { CartDrawer, opensElsewhere } from '@/components/cart/cart-drawer';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * Account, wishlist and cart — the three controls every template's header has.
@@ -22,6 +24,7 @@ import { cn } from '@/lib/utils';
  * mismatch — and showing a fabricated zero would be worse than showing nothing.
  */
 export function HeaderActions({ className, locale = 'en' }: { className?: string; locale?: string }) {
+  const t = useT();
   const { cart } = useCart();
   const wishlist = useWishlist();
   const hydrated = useHydrated();
@@ -34,7 +37,7 @@ export function HeaderActions({ className, locale = 'en' }: { className?: string
     <div className={cn('flex items-center gap-0.5', className)}>
       <Link
         href="/account"
-        aria-label="Your account"
+        aria-label={t('Your account')}
         className="grid size-11 place-items-center rounded-(--radius-button) text-foreground transition-colors hover:bg-surface-alt"
       >
         <User className="size-5" aria-hidden />
@@ -42,10 +45,10 @@ export function HeaderActions({ className, locale = 'en' }: { className?: string
 
       <Link
         href="/wishlist"
-        aria-label={wishlistCount ? `Wishlist, ${wishlistCount} items` : 'Wishlist'}
+        aria-label={wishlistCount ? t('Wishlist, {count} items', { count: wishlistCount }) : t('Wishlist')}
         className="relative grid size-11 place-items-center rounded-(--radius-button) text-foreground transition-colors hover:bg-surface-alt"
       >
-        <Heart className="size-5" aria-hidden />
+        <WishlistIcon className="size-5" aria-hidden />
         {wishlistCount ? <Badge count={wishlistCount} /> : null}
       </Link>
 
@@ -59,7 +62,7 @@ export function HeaderActions({ className, locale = 'en' }: { className?: string
       */}
       <Link
         href="/cart"
-        aria-label={cartCount ? `Cart, ${cartCount} items` : 'Cart'}
+        aria-label={cartCount ? t('Cart, {count} items', { count: cartCount }) : t('Cart')}
         aria-haspopup="dialog"
         onClick={(event) => {
           if (opensElsewhere(event)) return;
@@ -78,12 +81,14 @@ export function HeaderActions({ className, locale = 'en' }: { className?: string
 }
 
 function Badge({ count }: { count: number }) {
+  const t = useT();
+
   return (
     <span
       aria-hidden
       className="absolute right-1.5 top-1.5 grid min-w-4.5 place-items-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-4 text-primary-foreground"
     >
-      {count > 99 ? '99+' : count}
+      {count > 99 ? `${t.number(99)}+` : t.number(count)}
     </span>
   );
 }

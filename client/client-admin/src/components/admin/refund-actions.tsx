@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import type { RefundRow, RefundStatus } from '@/lib/types';
 import { api, errorMessage } from '@/lib/api';
-import { formatMoney } from '@/lib/format';
+import { useT, type MessageKey } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -18,13 +18,23 @@ import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/toaster';
 
-const LABELS: Record<RefundStatus, string> = {
+const LABELS: Record<RefundStatus, MessageKey> = {
   requested: 'Requested',
   approved: 'Approve',
   rejected: 'Reject',
   processing: 'Mark processing',
   completed: 'Mark paid',
   failed: 'Mark failed',
+};
+
+/** A status as it reads in the middle of a sentence, lower case in English. */
+const STATUS_WORD: Record<RefundStatus, MessageKey> = {
+  requested: 'requested::status',
+  approved: 'approved::status',
+  rejected: 'rejected::status',
+  processing: 'processing::status',
+  completed: 'completed::status',
+  failed: 'failed::status',
 };
 
 /**
@@ -38,6 +48,7 @@ const LABELS: Record<RefundStatus, string> = {
  */
 export function RefundActions({ refund, canApprove }: { refund: RefundRow; canApprove: boolean }) {
   const router = useRouter();
+  const t = useT();
   const [busy, setBusy] = React.useState(false);
   const [payOpen, setPayOpen] = React.useState(false);
 
@@ -48,7 +59,7 @@ export function RefundActions({ refund, canApprove }: { refund: RefundRow; canAp
 
     try {
       await api.patch(`/api/v1/admin/refunds/${refund.id}`, { status, ...body });
-      toast.success(`${refund.refundNumber} is now ${status}.`);
+      toast.success(t('{number} is now {status}.', { number: refund.refundNumber, status: t(STATUS_WORD[status]) }));
       setPayOpen(false);
       router.refresh();
     } catch (caught) {
@@ -80,7 +91,7 @@ export function RefundActions({ refund, canApprove }: { refund: RefundRow; canAp
               else void move(status);
             }}
           >
-            {LABELS[status]}
+            {t(LABELS[status])}
           </Button>
         ))}
       </div>
@@ -89,25 +100,32 @@ export function RefundActions({ refund, canApprove }: { refund: RefundRow; canAp
         <DialogContent>
           <form onSubmit={onPay}>
             <DialogHeader>
-              <DialogTitle>Record the refund</DialogTitle>
+              <DialogTitle>{t('Record the refund')}</DialogTitle>
               <DialogDescription>
-                {formatMoney(refund.amount, refund.currency)} back to {refund.customerName} for order{' '}
-                {refund.orderNumber}. Do this once the money has actually gone.
+                {t('{amount} back to {customer} for order {order}. Do this once the money has actually gone.', {
+                  amount: t.money(refund.amount, refund.currency),
+                  customer: refund.customerName,
+                  order: refund.orderNumber,
+                })}
               </DialogDescription>
             </DialogHeader>
 
             <div className="py-4">
-              <Field label="How it was refunded" htmlFor="method" hint="Cash, bank transfer, bKash, store credit…">
+              <Field
+                label={t('How it was refunded')}
+                htmlFor="method"
+                hint={t('Cash, bank transfer, bKash, store credit…')}
+              >
                 <Input id="method" name="method" maxLength={40} defaultValue="cash" />
               </Field>
             </div>
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setPayOpen(false)}>
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button type="submit" loading={busy}>
-                Mark as paid
+                {t('Mark as paid')}
               </Button>
             </DialogFooter>
           </form>

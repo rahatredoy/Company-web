@@ -12,6 +12,21 @@ const profileSchema = z.object({
   fullName: z.string().trim().min(2, 'Enter your name.').max(120).optional(),
   phone: z.string().trim().max(24).nullable().optional(),
   acceptsMarketing: z.boolean().optional(),
+  /**
+   * A real calendar date in the past. Checked as a date rather than a pattern,
+   * because 2026-02-30 matches the pattern and a birthday offer would then look
+   * for a day that never comes.
+   */
+  birthDate: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a date like 1994-07-21.')
+    .refine((value) => {
+      const at = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === value && at.getTime() < Date.now() && at.getUTCFullYear() >= 1900;
+    }, 'Enter your real date of birth.')
+    .nullable()
+    .optional(),
 });
 
 const addressSchema = z.object({
@@ -72,6 +87,7 @@ export default async function accountRoutes(app: FastifyInstance) {
         ...(body.fullName === undefined ? {} : { fullName: body.fullName }),
         ...(body.phone === undefined ? {} : { phone: body.phone }),
         ...(body.acceptsMarketing === undefined ? {} : { acceptsMarketing: body.acceptsMarketing }),
+        ...(body.birthDate === undefined ? {} : { birthDate: body.birthDate }),
         updatedAt: new Date(),
       })
       .where(eq(customers.id, customerId))

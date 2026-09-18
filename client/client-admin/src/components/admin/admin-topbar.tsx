@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
+import { useT } from '@/lib/i18n';
 import { useSession } from './session-provider';
 
 function initials(name: string): string {
@@ -26,10 +27,11 @@ function initials(name: string): string {
 
 export function AdminTopbar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const { admin, store, signOut } = useSession();
+  const t = useT();
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6">
-      <Button variant="ghost" size="icon-sm" className="lg:hidden" onClick={onOpenMenu} aria-label="Open menu">
+      <Button variant="ghost" size="icon-sm" className="lg:hidden" onClick={onOpenMenu} aria-label={t('Open menu')}>
         <Menu />
       </Button>
 
@@ -37,7 +39,7 @@ export function AdminTopbar({ onOpenMenu }: { onOpenMenu: () => void }) {
         {/* The trial banner is the one thing an owner must never miss. */}
         {store.trial && store.trial.status === 'active' ? (
           <Badge variant="warning">
-            Trial · {store.trial.daysRemaining} day{store.trial.daysRemaining === 1 ? '' : 's'} left
+            {t.plural(store.trial.daysRemaining, 'Trial · {count} day left', 'Trial · {count} days left')}
           </Badge>
         ) : null}
         {store.planName ? <Badge variant="neutral">{store.planName}</Badge> : null}
@@ -50,7 +52,7 @@ export function AdminTopbar({ onOpenMenu }: { onOpenMenu: () => void }) {
           <button
             type="button"
             className="flex items-center gap-2 rounded-full py-1 pl-1 pr-2.5 transition-colors hover:bg-secondary"
-            aria-label="Account menu"
+            aria-label={t('Account menu')}
           >
             <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary-soft text-xs font-semibold text-primary">
               {initials(admin.fullName)}
@@ -68,28 +70,28 @@ export function AdminTopbar({ onOpenMenu }: { onOpenMenu: () => void }) {
 
           <DropdownMenuItem asChild>
             <Link href="/account">
-              <User /> My profile
+              <User /> {t('My profile')}
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <Link href="/account/security">
-              <ShieldCheck /> Security
+              <ShieldCheck /> {t('Security')}
               {!admin.mfaEnabled ? (
                 <Badge variant="warning" className="ml-auto">
-                  2FA off
+                  {t('2FA off')}
                 </Badge>
               ) : null}
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
             <Link href="/settings">
-              <Settings /> Store settings
+              <Settings /> {t('Store settings')}
             </Link>
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
           <DropdownMenuItem destructive onSelect={() => void signOut()}>
-            <LogOut /> Sign out
+            <LogOut /> {t('Sign out')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

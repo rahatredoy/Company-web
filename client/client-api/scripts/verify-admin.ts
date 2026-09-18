@@ -203,7 +203,7 @@ async function main(): Promise<void> {
     'customer-login',
     'order-track',
     'return-request',
-    'coupon-validate',
+    'discount-quote',
     'upload',
   ];
 
@@ -252,13 +252,18 @@ async function main(): Promise<void> {
   const productId = product.body?.data?.id as string;
   const variantId = product.body?.data?.variants?.[0]?.id as string;
 
+  /*
+   * Stocked in the store's **default** warehouse, which is where `POST /products`
+   * has already written this variant's level row.
+   *
+   * A warehouse of the script's own would leave the variant with *two* level
+   * rows, and every assertion below reads the level without naming one — so the
+   * checks would measure the empty shelf instead of the stocked one and report
+   * it as a stock bug. The shop this stands in for has one warehouse.
+   */
   const [warehouse] = await sql<{ id: string }>(
-    `insert into warehouses (name, code) values ('ZZADM WH', 'ZZADMWH')
-     on conflict (code) do update set name = excluded.name returning id`,
+    `select id from warehouses where is_active order by is_default desc, name asc limit 1`,
   );
-
-  const shipping = await shop('/checkout/shipping-methods?country=Bangladesh');
-  const shippingMethodId = shipping.body?.data?.[0]?.id as string;
 
   console.log('\n2. Inventory moves only through the ledger');
   {
@@ -303,7 +308,6 @@ async function main(): Promise<void> {
           city: 'Dhaka',
           country: 'Bangladesh',
         },
-        shippingMethodId,
         paymentProvider: 'cod',
       },
     });
@@ -347,14 +351,18 @@ async function main(): Promise<void> {
       method: 'POST',
       body: { carrier: 'Pathao', trackingNumber: 'ZZADM-1', trackingUrl: null, note: null },
     });
-    check('tracking can be recorded', shipment.status === 201, shipment.body);
+    check('there is no shipment tracking endpoint', shipment.status === 404, shipment.status);
 
     const customerView = await shop('/orders/track', {
       method: 'POST',
       body: { orderNumber: delivered.body?.data?.orderNumber, email: BUYER },
     });
     check('and the customer sees the new status', customerView.body?.data?.status === 'delivered', customerView.body?.data?.status);
-    check('with the tracking attached', customerView.body?.data?.tracking?.number === 'ZZADM-1', customerView.body?.data?.tracking);
+    check(
+      'with no tracking or delivery charge on it',
+      !('tracking' in (customerView.body?.data ?? {})) && !('shipping' in (customerView.body?.data?.totals ?? {})),
+      customerView.body?.data,
+    );
   }
 
   console.log('\n4. Customers can be read and blocked, never deleted');
@@ -435,40 +443,15 @@ async function main(): Promise<void> {
     check('and the rating with it', unrated?.rating_count === 0, unrated);
   }
 
-  console.log('\n6. Shipping zones are what checkout quotes from');
+  console.log('\n6. There is no shipping: no delivery options, no delivery charge');
   {
-    const before = await admin('/shipping/zones');
-    const catchAll = (before.body?.data ?? []).find((zone: any) => zone.isDefault);
-    check('the store has a catch-all zone', Boolean(catchAll), before.body?.data?.length);
+    // Shipping zones, methods and the delivery charge were removed; an order is
+    // its subtotal less discounts, and its progress is its status alone.
+    const quoted = await shop('/checkout/shipping-methods?country=Bangladesh&city=Sylhet');
+    check('checkout offers no delivery options', quoted.status === 404, quoted.status);
 
-    const cannotDelete = await admin(`/shipping/zones/${catchAll?.id}`, { method: 'DELETE' });
-    check('which cannot be deleted', cannotDelete.status === 409, cannotDelete.status);
-
-    const created = await admin('/shipping/zones', {
-      method: 'POST',
-      body: { name: `${TAG} Dhaka`, countries: [], cities: ['Dhaka'], isDefault: false, isActive: true },
-    });
-    check('a city zone can be added', created.status === 201, created.body);
-
-    const method = await admin('/shipping/methods', {
-      method: 'POST',
-      body: { zoneId: created.body?.data?.id, name: `${TAG} Same day`, price: '99.00', isActive: true },
-    });
-    check('with its own rate', method.status === 201, method.body);
-
-    const dhaka = await shop('/checkout/shipping-methods?country=Bangladesh&city=Dhaka');
-    check(
-      'and a Dhaka address is quoted it instead of the catch-all',
-      (dhaka.body?.data ?? []).some((m: any) => m.name === `${TAG} Same day`),
-      (dhaka.body?.data ?? []).map((m: any) => m.name),
-    );
-
-    const elsewhere = await shop('/checkout/shipping-methods?country=Bangladesh&city=Sylhet');
-    check(
-      'while everywhere else still falls back',
-      !(elsewhere.body?.data ?? []).some((m: any) => m.name === `${TAG} Same day`),
-      (elsewhere.body?.data ?? []).map((m: any) => m.name),
-    );
+    const editor = await admin('/shipping/zones');
+    check('and the admin shipping endpoints are gone', editor.status === 404, editor.status);
   }
 
   console.log('\n7. A return becomes a refund, and only once');
@@ -538,35 +521,44 @@ async function main(): Promise<void> {
     );
   }
 
-  console.log('\n8. Coupons are the storefront’s rules, not the browser’s');
+  console.log('\n8. Discounts are the storefront’s rules, not the browser’s');
   {
-    const created = await admin('/coupons', {
-      method: 'POST',
-      body: { code: 'ZZADM25', type: 'percentage', value: '25', minOrderAmount: '100', status: 'active' },
-    });
+    /*
+     * A basket to price. The discount rules themselves are proved exhaustively
+     * by `verify-discounts.ts`; this is the admin section's own round trip —
+     * the panel writes a code, the storefront honours it, pausing withdraws it.
+     */
+    const [basketLine] = await sql<{ product_id: string; variant_id: string; price: string }>(
+      `select p.id as product_id, v.id as variant_id, v.price
+         from products p join product_variants v on v.product_id = p.id
+        where p.status = 'active' and v.is_active and v.price >= 100
+        order by v.price asc limit 1`,
+    );
+    const lines = basketLine ? [{ productId: basketLine.product_id, variantId: basketLine.variant_id, quantity: 1 }] : [];
+    const worth = basketLine ? (Number(basketLine.price) * 0.25).toFixed(2) : '0.00';
+
+    const body = { kind: 'coupon', name: 'zz admin 25', code: 'ZZADM25', valueType: 'percentage', value: '25', minOrderAmount: '100', status: 'active' };
+    const created = await admin('/discounts', { method: 'POST', body });
     check('a code can be created', created.status === 201, created.body);
 
-    const clash = await admin('/coupons', {
-      method: 'POST',
-      body: { code: 'zzadm25', type: 'percentage', value: '5', status: 'active' },
-    });
+    const clash = await admin('/discounts', { method: 'POST', body: { ...body, code: 'zzadm25', value: '5' } });
     check('the same code cannot be created twice', clash.status === 409, clash.status);
 
-    const good = await shop('/coupons/validate', { method: 'POST', body: { code: 'ZZADM25', subtotal: 200 } });
-    check('the storefront validates it against the store', good.body?.data?.valid === true, good.body?.data);
-    check('and gets the discount the rule says', good.body?.data?.discount === '50.00', good.body?.data);
+    const good = await shop('/discounts/quote', { method: 'POST', body: { lines, codes: ['ZZADM25'] } });
+    check('the storefront prices it against the store', good.body?.data?.applied?.[0]?.code === 'ZZADM25', good.body?.data);
+    check('and gets the discount the rule says', good.body?.data?.itemDiscount === worth, good.body?.data);
 
-    const under = await shop('/coupons/validate', { method: 'POST', body: { code: 'ZZADM25', subtotal: 10 } });
-    check('under the minimum it is refused', under.body?.data?.reason === 'minimum_not_met', under.body?.data);
-
-    const off = await admin(`/coupons/${created.body?.data?.id}`, {
-      method: 'PUT',
-      body: { code: 'ZZADM25', type: 'percentage', value: '25', minOrderAmount: '100', status: 'disabled' },
+    const under = await shop('/discounts/quote', {
+      method: 'POST',
+      body: { lines, codes: ['ZZADMMIN'] },
     });
-    check('switching it off works', off.status === 200, off.status);
+    check('an unknown code is refused', under.body?.data?.refused?.[0]?.reason === 'unknown', under.body?.data);
 
-    const refused = await shop('/coupons/validate', { method: 'POST', body: { code: 'ZZADM25', subtotal: 200 } });
-    check('and the storefront stops accepting it', refused.body?.data?.valid === false, refused.body?.data);
+    const off = await admin(`/discounts/${created.body?.data?.id}/status`, { method: 'PATCH', body: { status: 'paused' } });
+    check('pausing it works', off.status === 200, off.status);
+
+    const refused = await shop('/discounts/quote', { method: 'POST', body: { lines, codes: ['ZZADM25'] } });
+    check('and the storefront stops accepting it', refused.body?.data?.refused?.[0]?.reason === 'paused', refused.body?.data);
   }
 
   console.log('\n9. Pages are published, and sanitised on the way in');
@@ -608,25 +600,80 @@ async function main(): Promise<void> {
     check('an ordinary one can be', removed.status === 204, removed.status);
   }
 
-  console.log('\n10. Settings, attributes and reports');
+  console.log('\n10. Settings and attributes');
   {
     const settings = await admin('/settings');
     check('settings read back', settings.status === 200, settings.status);
 
-    const currency = settings.body?.data?.currency;
-    const locked = await admin('/settings', {
-      method: 'PUT',
-      body: {
-        storeName: settings.body?.data?.storeName,
-        currency: currency === 'USD' ? 'EUR' : 'USD',
-        language: settings.body?.data?.language,
-        timezone: settings.body?.data?.timezone,
-      },
-    });
+    /*
+     * The currency, end to end. Every write sends the settings back whole — a
+     * PUT that names only the currency would null the store's contact details —
+     * and the last one puts the original currency back.
+     */
+    const current = settings.body?.data ?? {};
+    const currency: string = current.currency;
+    const other = currency === 'BDT' ? 'USD' : 'BDT';
+    const orderCount = Number(current.orderCount ?? 0);
+    const saveSettings = (body: Record<string, unknown>) =>
+      admin('/settings', { method: 'PUT', body: { ...current, ...body } });
+
     check(
-      'currency cannot change once the store has taken orders',
-      settings.body?.data?.orderCount > 0 ? locked.status === 409 : locked.status === 200,
-      { orders: settings.body?.data?.orderCount, status: locked.status },
+      'settings report the orders taken in each currency',
+      Array.isArray(current.orderCurrencies) &&
+        current.orderCurrencies.reduce((total: number, row: any) => total + row.orders, 0) === orderCount,
+      current.orderCurrencies,
+    );
+
+    const bogus = await saveSettings({ currency: 'XYZ', confirmCurrencyChange: true });
+    check(
+      'a code that is not a currency is refused, on the field',
+      bogus.status === 422 && Array.isArray(bogus.body?.details?.currency),
+      { status: bogus.status, body: bogus.body },
+    );
+
+    if (orderCount > 0) {
+      const unconfirmed = await saveSettings({ currency: other });
+      check(
+        'a store with orders is not re-labelled without confirmation',
+        unconfirmed.status === 409 && unconfirmed.body?.code === 'CURRENCY_CHANGE_UNCONFIRMED',
+        { status: unconfirmed.status, code: unconfirmed.body?.code },
+      );
+    }
+
+    const switched = await saveSettings({ currency: other, confirmCurrencyChange: true });
+    check('a confirmed switch is taken', switched.status === 200, { status: switched.status, body: switched.body });
+
+    const session = await admin('/auth/session');
+    check(
+      'the panel session follows it at once, not the control plane’s copy',
+      session.body?.data?.store?.currency === other,
+      session.body?.data?.store?.currency,
+    );
+
+    const dashboard = await admin('/dashboard?days=7');
+    check('the dashboard labels its totals with it', dashboard.body?.data?.currency === other, dashboard.body?.data?.currency);
+    if (orderCount > 0 && !(current.orderCurrencies ?? []).some((row: any) => row.currency === other)) {
+      check(
+        'and adds up no order taken in the old one',
+        dashboard.body?.data?.sections?.metrics?.ok !== true ||
+          Number(dashboard.body.data.sections.metrics.data.totals.revenue) === 0,
+        dashboard.body?.data?.sections?.metrics,
+      );
+    }
+
+    // The storefront cache is dropped in an `onResponse` hook, so give it a beat.
+    let shopCurrency: string | undefined;
+    for (let attempt = 0; attempt < 10 && shopCurrency !== other; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 300));
+      shopCurrency = (await shop('/config')).body?.data?.store?.currency;
+    }
+    check('the storefront follows it', shopCurrency === other, shopCurrency);
+
+    const reverted = await saveSettings({ currency, confirmCurrencyChange: true });
+    check(
+      'and it switches back',
+      reverted.status === 200 && (await admin('/auth/session')).body?.data?.store?.currency === currency,
+      reverted.status,
     );
 
     const attribute = await admin('/attributes', {
@@ -641,10 +688,6 @@ async function main(): Promise<void> {
 
     const removed = await admin(`/attributes/${mine?.id}`, { method: 'DELETE' });
     check('an unused attribute can be removed', removed.status === 204, removed.status);
-
-    const reports = await admin('/reports?days=30');
-    check('reports compute', reports.status === 200, reports.status);
-    check('and count the orders this run placed', Number(reports.body?.data?.totals?.orders) >= 1, reports.body?.data?.totals);
   }
 
   console.log('\n11. File uploads');
@@ -709,26 +752,20 @@ async function main(): Promise<void> {
 async function cleanup(sql: (text: string, params?: unknown[]) => Promise<any[]>): Promise<void> {
   const scoped = `select id from orders where email in ('${BUYER}', 'panel-demo@example.test')`;
 
-  for (const table of ['payments', 'order_status_history', 'order_addresses', 'order_items', 'shipments']) {
+  for (const table of ['payments', 'order_status_history', 'order_addresses', 'order_items']) {
     await sql(`delete from ${table} where order_id in (${scoped})`);
   }
   await sql(`delete from orders where email in ($1, 'panel-demo@example.test')`, [BUYER]);
   await sql(`delete from reviews where customer_name = 'Zz Admin Reviewer'`);
-  await sql(`delete from customer_sessions where customer_id in (select id from customers where email = $1)`, [BUYER]);
   await sql(`delete from customers where email = $1`, [BUYER]);
-  await sql(`delete from inventory_transactions where warehouse_id in (select id from warehouses where code = 'ZZADMWH')`);
-  await sql(`delete from inventory_levels where warehouse_id in (select id from warehouses where code = 'ZZADMWH')`);
   await sql(`delete from refunds where order_id in (${scoped})`);
   await sql(`delete from return_history where return_id in (select id from returns where order_id in (${scoped}))`);
   await sql(`delete from return_items where return_id in (select id from returns where order_id in (${scoped}))`);
   await sql(`delete from returns where order_id in (${scoped})`);
-  await sql(`delete from coupons where code like 'ZZADM%'`);
+  await sql(`delete from discounts where code like 'ZZADM%'`);
   await sql(`delete from attribute_values where attribute_id in (select id from attributes where name like $1)`, [`${TAG}%`]);
   await sql(`delete from attributes where name like $1`, [`${TAG}%`]);
   await sql(`delete from pages where title like $1`, [`${TAG}%`]);
-  await sql(`delete from shipping_methods where name like $1`, [`${TAG}%`]);
-  await sql(`delete from shipping_zones where name like $1`, [`${TAG}%`]);
-  await sql(`delete from warehouses where code = 'ZZADMWH'`);
   // Variants, media and stock rows cascade from the product.
   await sql(`delete from products where name like $1`, [`${TAG}%`]);
 }

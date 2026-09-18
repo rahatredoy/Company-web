@@ -12,14 +12,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { api, errorMessage } from '@/lib/api';
+import { useT, type Translator } from '@/lib/i18n';
 
-const schema = z.object({
-  email: z.string().trim().min(1, 'Enter your email address.').email('Enter a valid email address.'),
-});
+/** Built per render language, so a validation message is in the store's language. */
+const forgotSchema = (t: Translator) =>
+  z.object({
+    email: z.string().trim().min(1, t('Enter your email address.')).email(t('Enter a valid email address.')),
+  });
 
-type Values = z.input<typeof schema>;
+type Values = z.input<ReturnType<typeof forgotSchema>>;
 
 export function ForgotPasswordForm() {
+  const t = useT();
+  const schema = React.useMemo(() => forgotSchema(t), [t]);
   const [sent, setSent] = React.useState(false);
   const [formError, setFormError] = React.useState<string | null>(null);
   const form = useForm<Values>({ resolver: zodResolver(schema), defaultValues: { email: '' } });
@@ -41,15 +46,15 @@ export function ForgotPasswordForm() {
           <span className="mb-3 grid size-10 place-items-center rounded-xl bg-success-soft text-success">
             <MailCheck className="size-5" />
           </span>
-          <CardTitle>Check your email</CardTitle>
+          <CardTitle>{t('Check your email')}</CardTitle>
           {/* Never confirms whether the address has an account. */}
           <CardDescription>
-            If that address has an account, a reset link is on its way. It expires in 60 minutes.
+            {t('If that address has an account, a reset link is on its way. It expires in 60 minutes.')}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button asChild variant="secondary" className="w-full">
-            <Link href="/sign-in">Back to sign in</Link>
+            <Link href="/sign-in">{t('Back to sign in')}</Link>
           </Button>
         </CardContent>
       </Card>
@@ -59,28 +64,28 @@ export function ForgotPasswordForm() {
   return (
     <Card className="shadow-[var(--shadow-raised)]">
       <CardHeader>
-        <CardTitle>Reset your password</CardTitle>
-        <CardDescription>We will email you a link to choose a new one.</CardDescription>
+        <CardTitle>{t('Reset your password')}</CardTitle>
+        <CardDescription>{t('We will email you a link to choose a new one.')}</CardDescription>
       </CardHeader>
 
       <CardContent>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5" noValidate>
           {formError ? <Alert variant="danger">{formError}</Alert> : null}
 
-          <Field label="Email address" htmlFor="email" error={form.formState.errors.email?.message}>
+          <Field label={t('Email address')} htmlFor="email" error={form.formState.errors.email?.message}>
             <Input id="email" type="email" autoComplete="username" autoFocus {...form.register('email')} />
           </Field>
 
           <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? <Loader2 className="animate-spin" /> : null}
-            Send reset link
+            {t('Send reset link')}
           </Button>
         </form>
       </CardContent>
 
       <div className="border-t border-border px-6 py-4 text-center text-sm text-muted-foreground">
         <Link href="/sign-in" className="font-medium text-primary underline-offset-4 hover:underline">
-          Back to sign in
+          {t('Back to sign in')}
         </Link>
       </div>
     </Card>

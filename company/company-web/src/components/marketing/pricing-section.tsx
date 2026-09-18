@@ -128,7 +128,7 @@ export function PricingSection({
               <article className="rounded-xl border border-primary bg-primary-soft/25 p-6 shadow-[0_0_0_1px_var(--primary)]">
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                   <div className="space-y-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-0.5 text-[11px] font-semibold text-primary-foreground">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-0.5 text-[10.5px] font-semibold text-primary-foreground">
                       <Sparkles className="size-3" aria-hidden />
                       Free trial
                     </span>
@@ -172,7 +172,7 @@ export function PricingSection({
                     )}
                   >
                     {highlighted ? (
-                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-1 text-[11px] font-semibold text-primary-foreground">
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-1 text-[10.5px] font-semibold text-primary-foreground">
                         Most Popular
                       </span>
                     ) : null}

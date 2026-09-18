@@ -4,6 +4,7 @@ import { Zap } from 'lucide-react';
 import type { ProductSummary } from '@/types';
 import type { TemplatePreset } from '@/templates/meta';
 import type { ProductCardVariant } from '@/components/commerce/product-card';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { Countdown } from './countdown';
 import { ProductCarousel } from './product-carousel';
@@ -36,6 +37,8 @@ export function FlashSaleRail({
   locale: string;
   className?: string;
 }) {
+  const t = useT();
+
   if (products.length === 0) return null;
 
   return (
@@ -51,7 +54,7 @@ export function FlashSaleRail({
           </div>
         </div>
 
-        <Countdown deadline={deadline} size="sm" tone="surface" expiredLabel="Deals have ended" />
+        <Countdown deadline={deadline} size="sm" tone="surface" expiredLabel={t('Deals have ended')} />
       </div>
 
       <div className="bg-surface p-4 sm:p-5">
@@ -60,7 +63,7 @@ export function FlashSaleRail({
           perView={perView}
           cardVariant={cardVariant}
           locale={locale}
-          label={title ?? 'Flash sale'}
+          label={title ?? t('Flash sale')}
         />
       </div>
     </div>

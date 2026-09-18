@@ -56,7 +56,7 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
               </div>
               <div className="shrink-0 text-right">
                 <p className="max-w-36 truncate text-sm text-muted-foreground">{item.subject}</p>
-                <p className="text-[11px] text-muted-foreground/70">{formatRelative(item.createdAt)}</p>
+                <p className="text-[10.5px] text-muted-foreground/70">{formatRelative(item.createdAt)}</p>
               </div>
             </li>
           );

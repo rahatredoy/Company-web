@@ -3,6 +3,7 @@
 import * as React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 export const Dialog = DialogPrimitive.Root;
@@ -51,6 +52,8 @@ export const DialogContent = React.forwardRef<
     overlayClassName?: string;
   }
 >(function DialogContent({ className, children, size = 'sm', hideClose, overlayClassName, ...props }, ref) {
+  const t = useT();
+
   return (
     <DialogPrimitive.Portal>
       <DialogOverlay className={overlayClassName} />
@@ -70,7 +73,7 @@ export const DialogContent = React.forwardRef<
         {hideClose ? null : (
           <DialogPrimitive.Close className="absolute top-4 right-4 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none">
             <X className="size-4" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t('Close')}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Content>

@@ -9,12 +9,16 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/badge';
 import { OrderTimeline } from '@/components/account/order-timeline';
 import { OrderLines, OrderTotals, AddressBlock } from '@/components/account/order-detail-parts';
+import { getT } from '@/lib/i18n/server';
 import { formatDate } from '@/lib/utils';
 
-export const metadata: Metadata = {
-  title: 'Order confirmed',
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return {
+    title: t('Order confirmed'),
+    robots: { index: false, follow: false },
+  };
+}
 
 /**
  * Order confirmation.
@@ -34,7 +38,7 @@ export default async function CheckoutSuccessPage({
   if (!order) notFound();
 
   const config = await getStoreConfig();
-  const locale = await readLocalePreference(config);
+  const [locale, t] = await Promise.all([readLocalePreference(config), getT()]);
 
   return (
     <div className="container-store max-w-3xl py-10">
@@ -43,17 +47,18 @@ export default async function CheckoutSuccessPage({
           <CheckCircle2 className="size-7" aria-hidden />
         </span>
 
-        <h1 className="text-2xl font-semibold sm:text-3xl">Order confirmed</h1>
+        <h1 className="text-2xl font-semibold sm:text-3xl">{t('Order confirmed')}</h1>
         <p className="mt-2 text-muted">
-          Thank you. We have emailed a confirmation to{' '}
-          <span className="font-medium text-foreground">{order.email}</span>.
+          {t.rich('Thank you. We have emailed a confirmation to {email}.', {
+            email: <span className="font-medium text-foreground">{order.email}</span>,
+          })}
         </p>
       </div>
 
       <div className="mt-8 rounded-(--radius-card) border border-border bg-surface p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
           <div>
-            <p className="text-xs uppercase tracking-wide text-subtle">Order number</p>
+            <p className="text-xs uppercase tracking-wide text-subtle">{t('Order number')}</p>
             <p className="font-mono text-lg font-semibold">{order.orderNumber}</p>
           </div>
 
@@ -63,22 +68,14 @@ export default async function CheckoutSuccessPage({
           </div>
         </div>
 
-        <dl className="grid gap-4 border-b border-border py-4 text-sm sm:grid-cols-3">
+        <dl className="grid gap-4 border-b border-border py-4 text-sm sm:grid-cols-2">
           <div>
-            <dt className="text-subtle">Placed</dt>
+            <dt className="text-subtle">{t('Placed')}</dt>
             <dd className="mt-0.5 font-medium">{formatDate(order.placedAt, locale.language)}</dd>
           </div>
           <div>
-            <dt className="text-subtle">Payment</dt>
+            <dt className="text-subtle">{t('Payment')}</dt>
             <dd className="mt-0.5 font-medium">{order.paymentMethodLabel ?? '—'}</dd>
-          </div>
-          <div>
-            <dt className="text-subtle">Delivery</dt>
-            <dd className="mt-0.5 font-medium">
-              {order.estimatedDeliveryAt
-                ? `Estimated ${formatDate(order.estimatedDeliveryAt, locale.language)}`
-                : (order.shippingMethodLabel ?? '—')}
-            </dd>
           </div>
         </dl>
 
@@ -88,22 +85,22 @@ export default async function CheckoutSuccessPage({
 
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <div className="rounded-(--radius-card) border border-border bg-surface p-5">
-          <h2 className="text-sm font-semibold">Delivery address</h2>
+          <h2 className="text-sm font-semibold">{t('Delivery address')}</h2>
           <AddressBlock address={order.shippingAddress} className="mt-3" />
         </div>
 
         <div className="rounded-(--radius-card) border border-border bg-surface p-5">
-          <h2 className="text-sm font-semibold">What happens next</h2>
+          <h2 className="text-sm font-semibold">{t('What happens next')}</h2>
           <OrderTimeline timeline={order.timeline} locale={locale.language} className="mt-4" />
         </div>
       </div>
 
       <div className="mt-8 flex flex-wrap justify-center gap-3">
         <Button asChild size="lg">
-          <Link href={`/account/orders/${order.orderNumber}`}>View order</Link>
+          <Link href={`/account/orders/${order.orderNumber}`}>{t('View order')}</Link>
         </Button>
         <Button asChild size="lg" variant="outline">
-          <Link href="/shop">Continue shopping</Link>
+          <Link href="/shop">{t('Continue shopping')}</Link>
         </Button>
       </div>
     </div>

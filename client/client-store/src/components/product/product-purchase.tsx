@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, ShoppingCart, Truck } from 'lucide-react';
+import { Check, ShoppingCart } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ProductDetail } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import {
   defaultOption,
   minimumNote,
   priceForMeasure,
+  pricingLabelOf,
   startingQuantity,
 } from '@/lib/commerce/measure';
 import { PriceDisplay } from '@/components/commerce/price-display';
@@ -19,6 +20,7 @@ import { RatingStars } from '@/components/commerce/rating-stars';
 import { WishlistButton } from '@/components/commerce/wishlist-button';
 import { useCart } from '@/lib/commerce/cart';
 import { useRecentlyViewed } from '@/lib/commerce/collections';
+import { useT } from '@/lib/i18n';
 import { cn, formatMoney } from '@/lib/utils';
 import { ProductGallery } from './product-gallery';
 import { VariantSelector, findVariant, initialSelection } from './variant-selector';
@@ -43,6 +45,7 @@ export function ProductPurchase({
   product: ProductDetail;
   locale: string;
 }) {
+  const t = useT();
   const router = useRouter();
   const { add } = useCart();
   const recentlyViewed = useRecentlyViewed();
@@ -114,7 +117,7 @@ export function ProductPurchase({
   const addToCart = (): boolean => {
     if (!inStock) return false;
     if (hasVariants && !variant) {
-      toast.error('That combination is not available. Please choose another.');
+      toast.error(t('That combination is not available. Please choose another.'));
       return false;
     }
 
@@ -143,9 +146,9 @@ export function ProductPurchase({
     setJustAdded(true);
     window.setTimeout(() => setJustAdded(false), 2200);
 
-    toast.success(`${product.name} added to your cart`, {
+    toast.success(t('{name} added to your cart', { name: product.name }), {
       description: variant?.title ?? undefined,
-      action: { label: 'View cart', onClick: () => router.push('/cart') },
+      action: { label: t('View cart'), onClick: () => router.push('/cart') },
     });
   };
 
@@ -186,7 +189,7 @@ export function ProductPurchase({
           />
           {product.discountPercent ? (
             <Badge tone="sale" size="lg">
-              Save {product.discountPercent}%
+              {t('Save {percent}%', { percent: product.discountPercent })}
             </Badge>
           ) : null}
         </div>
@@ -198,14 +201,13 @@ export function ProductPurchase({
         */}
         {measure && option ? (
           <p className="mt-1 text-sm text-muted">
-            {option.label} &middot; {measure.pricingLabel} is{' '}
-            {formatMoney(saleRate ?? rate, product.currency, locale)}
-            {minimumNote(measure) ? ' · ' + minimumNote(measure) : ''}
+            {t('{size} · {rate} is {price}', {
+              size: option.label,
+              rate: pricingLabelOf(measure, t),
+              price: formatMoney(saleRate ?? rate, product.currency, locale),
+            })}
+            {minimumNote(measure, t) ? ' · ' + minimumNote(measure, t) : ''}
           </p>
-        ) : null}
-
-        {product.shortDescription ? (
-          <p className="mt-4 text-sm leading-relaxed text-muted">{product.shortDescription}</p>
         ) : null}
 
         <div className="mt-6">
@@ -220,7 +222,7 @@ export function ProductPurchase({
         */}
         {measure && measure.options.length > 1 ? (
           <div className="mt-6">
-            <p className="text-xs font-medium uppercase tracking-wide text-subtle">Size</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-subtle">{t('Size')}</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {measure.options.map((entry) => {
                 const active = entry.measure === option?.measure;
@@ -289,7 +291,7 @@ export function ProductPurchase({
             className={cn('flex-1 sm:flex-none sm:min-w-48', justAdded && 'bg-success')}
           >
             {justAdded ? <Check aria-hidden /> : <ShoppingCart aria-hidden />}
-            {justAdded ? 'Added to cart' : inStock ? 'Add to cart' : 'Out of stock'}
+            {justAdded ? t('Added to cart') : inStock ? t('Add to cart') : t('Out of stock')}
           </Button>
         </div>
 
@@ -301,7 +303,7 @@ export function ProductPurchase({
             disabled={!inStock}
             className="flex-1 sm:flex-none sm:min-w-48"
           >
-            Buy now
+            {t('Buy now')}
           </Button>
 
           <WishlistButton
@@ -318,14 +320,16 @@ export function ProductPurchase({
 
         {!inStock ? (
           <p className="mt-4 text-sm text-muted">
-            This item is out of stock. Add it to your wishlist and we will let you know when it is
-            back.
+            {t(
+              'This item is out of stock. Add it to your wishlist and we will let you know when it is back.',
+            )}
           </p>
         ) : null}
 
         <dl className="mt-8 space-y-3 border-t border-border pt-6 text-sm">
           {sku ? (
             <div className="flex gap-2">
+              {/* i18n-ignore */}
               <dt className="text-subtle">SKU</dt>
               <dd className="font-mono text-xs leading-5">{sku}</dd>
             </div>
@@ -333,20 +337,11 @@ export function ProductPurchase({
 
           {product.category ? (
             <div className="flex gap-2">
-              <dt className="text-subtle">Category</dt>
+              <dt className="text-subtle">{t('Category')}</dt>
               <dd>{product.category.name}</dd>
             </div>
           ) : null}
 
-          {product.shippingInfo ? (
-            <div className="flex items-start gap-2">
-              <dt className="sr-only">Delivery</dt>
-              <dd className="flex items-start gap-2 text-muted">
-                <Truck className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-                {product.shippingInfo}
-              </dd>
-            </div>
-          ) : null}
         </dl>
       </div>
     </div>

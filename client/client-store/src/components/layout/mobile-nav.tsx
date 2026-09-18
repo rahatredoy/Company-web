@@ -7,6 +7,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { ChevronDown, Menu, X } from 'lucide-react';
 import type { StoreConfig } from '@/types';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * Mobile navigation drawer.
@@ -19,6 +20,7 @@ import { cn } from '@/lib/utils';
  * Categories are read from store configuration; nothing here is hard-coded.
  */
 export function MobileNav({ config }: { config: StoreConfig }) {
+  const t = useT();
   const pathname = usePathname();
   const [open, setOpen] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);
@@ -37,7 +39,7 @@ export function MobileNav({ config }: { config: StoreConfig }) {
       <Dialog.Trigger asChild>
         <button
           type="button"
-          aria-label="Open menu"
+          aria-label={t('Open menu')}
           className="grid size-11 place-items-center rounded-(--radius-button) text-foreground transition-colors hover:bg-surface-alt lg:hidden"
         >
           <Menu className="size-5" />
@@ -52,7 +54,7 @@ export function MobileNav({ config }: { config: StoreConfig }) {
             <Dialog.Close asChild>
               <button
                 type="button"
-                aria-label="Close menu"
+                aria-label={t('Close menu')}
                 className="grid size-10 place-items-center rounded-(--radius-button) text-foreground hover:bg-surface-alt"
               >
                 <X className="size-5" />
@@ -60,10 +62,10 @@ export function MobileNav({ config }: { config: StoreConfig }) {
             </Dialog.Close>
           </div>
           <Dialog.Description className="sr-only">
-            Browse categories and shop links for {config.store.name}.
+            {t('Browse categories and shop links for {store}.', { store: config.store.name })}
           </Dialog.Description>
 
-          <nav aria-label="Mobile" className="flex-1 overflow-y-auto px-2 py-3">
+          <nav aria-label={t('Mobile')} className="flex-1 overflow-y-auto px-2 py-3">
             <ul className="space-y-0.5">
               {config.navigation.header.map((item) => (
                 <li key={item.id}>
@@ -71,7 +73,7 @@ export function MobileNav({ config }: { config: StoreConfig }) {
                     href={item.href}
                     className="block rounded-(--radius-button) px-3 py-2.5 text-sm font-medium hover:bg-surface-alt"
                   >
-                    {item.label}
+                    {t.loose(item.label)}
                   </Link>
                 </li>
               ))}
@@ -79,8 +81,8 @@ export function MobileNav({ config }: { config: StoreConfig }) {
 
             {config.categoryMenu.length > 0 ? (
               <>
-                <p className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-subtle">
-                  Categories
+                <p className="px-3 pb-1 pt-5 text-[10.5px] font-semibold uppercase tracking-wider text-subtle">
+                  {t('Categories')}
                 </p>
                 <ul className="space-y-0.5">
                   {config.categoryMenu.map((category) => {
@@ -99,7 +101,11 @@ export function MobileNav({ config }: { config: StoreConfig }) {
                           {hasChildren ? (
                             <button
                               type="button"
-                              aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${category.name}`}
+                              aria-label={
+                                isOpen
+                                  ? t('Collapse {name}', { name: category.name })
+                                  : t('Expand {name}', { name: category.name })
+                              }
                               aria-expanded={isOpen}
                               onClick={() => setExpanded(isOpen ? null : category.id)}
                               className="grid size-10 place-items-center rounded-(--radius-button) text-subtle hover:bg-surface-alt"

@@ -21,6 +21,7 @@ import { PriceDisplay } from '@/components/commerce/price-display';
 import { StockStatus } from '@/components/product/stock-status';
 import { VariantSelector, findVariant, initialSelection } from '@/components/product/variant-selector';
 import { useCart } from '@/lib/commerce/cart';
+import { useT } from '@/lib/i18n';
 
 /**
  * Choosing which one, without leaving the listing.
@@ -50,6 +51,7 @@ export function QuickAddDialog({
   locale: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const router = useRouter();
   const { add } = useCart();
 
@@ -106,9 +108,9 @@ export function QuickAddDialog({
     });
 
     onClose();
-    toast.success(`${data.name} added to your cart`, {
+    toast.success(t('{name} added to your cart', { name: data.name }), {
       description: variant.title ?? undefined,
-      action: { label: 'View cart', onClick: () => router.push('/cart') },
+      action: { label: t('View cart'), onClick: () => router.push('/cart') },
     });
   };
 
@@ -117,22 +119,22 @@ export function QuickAddDialog({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="pr-8 text-base">{product.name}</DialogTitle>
-          <DialogDescription>Choose what you would like, then add it to your cart.</DialogDescription>
+          <DialogDescription>{t('Choose what you would like, then add it to your cart.')}</DialogDescription>
         </DialogHeader>
 
         {failed ? (
           <div className="mt-4 space-y-4">
             <p className="text-sm text-muted">
-              We could not load the options just now.
+              {t('We could not load the options just now.')}
             </p>
             <Button asChild className="w-full">
-              <Link href={`/product/${product.slug}`}>Open the product page</Link>
+              <Link href={`/product/${product.slug}`}>{t('Open the product page')}</Link>
             </Button>
           </div>
         ) : !data ? (
           <div className="mt-6 flex items-center justify-center gap-2 py-8 text-sm text-muted">
             <Loader2 className="size-4 animate-spin" aria-hidden />
-            Loading options…
+            {t('Loading options…')}
           </div>
         ) : (
           <div className="mt-4 space-y-5">
@@ -175,14 +177,18 @@ export function QuickAddDialog({
                 href={`/product/${product.slug}`}
                 className="text-sm text-muted underline-offset-4 hover:text-primary hover:underline"
               >
-                Full details
+                {t('Full details')}
               </Link>
             </div>
 
             <Button className="w-full" onClick={onAdd} disabled={!variant || !inStock}>
               {/* A combination that does not exist is said plainly, rather than
                   being refused by a button that gives no reason. */}
-              {!variant ? 'Not available in that combination' : inStock ? 'Add to cart' : 'Out of stock'}
+              {!variant
+                ? t('Not available in that combination')
+                : inStock
+                  ? t('Add to cart')
+                  : t('Out of stock')}
             </Button>
           </div>
         )}

@@ -1,7 +1,11 @@
 import type { Metadata } from 'next';
+import { getT } from '@/lib/i18n/server';
 import { ResetPasswordForm } from './reset-password-form';
 
-export const metadata: Metadata = { title: 'Reset password' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Reset password') };
+}
 export const dynamic = 'force-dynamic';
 
 export default async function ResetPasswordPage({

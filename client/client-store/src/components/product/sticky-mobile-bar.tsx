@@ -4,6 +4,7 @@ import * as React from 'react';
 import { ShoppingCart } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatMoney } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * The mobile price + Add to Cart bar.
@@ -33,6 +34,7 @@ export function StickyMobileBar({
   watchRef: React.RefObject<HTMLElement | null>;
   hasBottomNav?: boolean;
 }) {
+  const t = useT();
   const [visible, setVisible] = React.useState(false);
 
   React.useEffect(() => {
@@ -75,7 +77,7 @@ export function StickyMobileBar({
           )}
         >
           <ShoppingCart className="size-4" aria-hidden />
-          {inStock ? 'Add to cart' : 'Out of stock'}
+          {inStock ? t('Add to cart') : t('Out of stock')}
         </button>
       </div>
     </div>

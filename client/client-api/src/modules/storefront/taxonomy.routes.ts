@@ -347,9 +347,7 @@ export default async function taxonomyRoutes(app: FastifyInstance) {
             parentId: categories.parentId,
             name: categories.name,
             slug: categories.slug,
-            description: categories.description,
             imageUrl: categories.imageUrl,
-            bannerUrl: categories.bannerUrl,
             seoTitle: categories.seoTitle,
             seoDescription: categories.seoDescription,
           })
@@ -373,9 +371,7 @@ export default async function taxonomyRoutes(app: FastifyInstance) {
               id: row.id,
               name: row.name,
               slug: row.slug,
-              description: row.description,
               imageUrl: row.imageUrl,
-              bannerUrl: row.bannerUrl,
               productCount: descendantIds(flat, row.id).reduce(
                 (total, id) => total + (directCount.get(id) ?? 0),
                 0,
@@ -471,17 +467,13 @@ export default async function taxonomyRoutes(app: FastifyInstance) {
       id: row.id,
       name: row.name,
       slug: row.slug,
-      description: row.description,
       imageUrl: row.imageUrl,
-      bannerUrl: row.bannerUrl,
       productCount: Number(tally?.total ?? 0),
       children: children.map((child) => ({
         id: child.id,
         name: child.name,
         slug: child.slug,
-        description: null,
         imageUrl: null,
-        bannerUrl: null,
         productCount: 0,
         children: [],
         breadcrumb: [],
@@ -506,8 +498,6 @@ export default async function taxonomyRoutes(app: FastifyInstance) {
             slug: brands.slug,
             description: brands.description,
             logoUrl: brands.logoUrl,
-            seoTitle: brands.seoTitle,
-            seoDescription: brands.seoDescription,
             productCount: sql<number>`(
               select count(*)::int from products p
               where p.brand_id = ${brands.id} and p.status = 'active'
@@ -515,7 +505,7 @@ export default async function taxonomyRoutes(app: FastifyInstance) {
           })
           .from(brands)
           .where(eq(brands.isActive, true))
-          .orderBy(asc(brands.sortOrder), asc(brands.name));
+          .orderBy(asc(brands.name));
 
         return rows.map(
           (row) =>
@@ -526,7 +516,6 @@ export default async function taxonomyRoutes(app: FastifyInstance) {
               description: row.description,
               logoUrl: row.logoUrl,
               productCount: Number(row.productCount),
-              seo: { title: row.seoTitle, description: row.seoDescription },
             }) satisfies BrandView,
         );
       },
@@ -559,7 +548,6 @@ export default async function taxonomyRoutes(app: FastifyInstance) {
       description: row.description,
       logoUrl: row.logoUrl,
       productCount: Number(tally?.total ?? 0),
-      seo: { title: row.seoTitle, description: row.seoDescription },
     } satisfies BrandView);
   });
 }

@@ -25,16 +25,17 @@ import {
   loadMeasureDefaults,
   descendantIds,
   discountPercent,
-  effectiveSale,
   listingConditions,
   loadCategoryTree,
-  loadStoreCurrency,
   orderFor,
+  parseOfferKeys,
+  parsePriceBands,
   productBaseColumns,
   PUBLISHED_PRODUCT,
   stockBandFor,
   type ListingFilters,
 } from './service';
+import { loadStoreCurrency } from '../../lib/store-currency';
 import type {
   ProductDetail,
   ProductListResult,
@@ -95,12 +96,16 @@ const listQuerySchema = z.object({
   sort: z.enum(SORTS).default('relevance'),
   q: z.string().trim().max(120).optional(),
   category: z.string().trim().max(220).optional(),
-  /** Child categories ticked from the chips; the page stays on the parent. */
+  /** Categories ticked in the sidebar; the page stays on the department it is in. */
   sub: listValue,
   brand: listValue,
   ids: listValue,
   minPrice: z.coerce.number().min(0).optional(),
   maxPrice: z.coerce.number().min(0).optional(),
+  /** The sidebar's price ladder — `?price=200-500`. See `parsePriceBands`. */
+  price: listValue,
+  /** The sidebar's Offers group — `?offer=on_sale`. See `parseOfferKeys`. */
+  offer: listValue,
   rating: ratingValue,
   inStock: flagValue,
   sale: flagValue,
@@ -140,33 +145,52 @@ function attributeFiltersOf(query: unknown): Record<string, string[]> {
   return parsed;
 }
 
-/** Resolves `?category=` and `?sub=` into the set of category ids to match. */
-async function resolveCategoryIds(
+/**
+ * Resolves `?category=` and `?sub=` into the two sets of category ids to match,
+ * and the node whose children the sidebar's Category group should list.
+ *
+ * The two stay apart all the way down to `listingConditions`, because the
+ * Category facet is counted with the ticked boxes lifted and the page's own
+ * department still applied — see `ListingFilters.categoryIds`.
+ */
+async function resolveCategoryScope(
   store: StoreContext,
   categorySlug: string | undefined,
   subSlugs: string[] | undefined,
-): Promise<string[] | undefined> {
-  if (!categorySlug && !subSlugs?.length) return undefined;
-
+): Promise<{
+  tree: Awaited<ReturnType<typeof loadCategoryTree>>;
+  categoryIds?: string[];
+  subCategoryIds?: string[];
+  parentId: string | null;
+}> {
   const tree = await loadCategoryTree(store);
   const bySlug = new Map(tree.map((node) => [node.slug, node]));
 
-  // Chips narrow the page rather than replacing it, so when any are ticked they
-  // are the filter — the parent's other children are what the shopper excluded.
-  if (subSlugs?.length) {
-    const ids = subSlugs.flatMap((slug) => {
-      const node = bySlug.get(slug);
-      return node ? descendantIds(tree, node.id) : [];
-    });
-    if (ids.length > 0) return [...new Set(ids)];
-  }
+  const root = categorySlug ? bySlug.get(categorySlug) : undefined;
+  const categoryIds = categorySlug
+    ? // An unknown or inactive category must return nothing rather than
+      // everything — silently dropping the filter would answer a 404 page with
+      // the whole shop.
+      root
+      ? descendantIds(tree, root.id)
+      : ['00000000-0000-0000-0000-000000000000']
+    : undefined;
 
-  if (!categorySlug) return undefined;
+  // Ticked categories narrow the page rather than replacing it, and each is
+  // taken as a whole subtree: "Men → Shirts" belongs under a ticked "Men".
+  const subIds = (subSlugs ?? []).flatMap((slug) => {
+    const node = bySlug.get(slug);
+    return node ? descendantIds(tree, node.id) : [];
+  });
 
-  const root = bySlug.get(categorySlug);
-  // An unknown or inactive category must return nothing rather than everything —
-  // silently dropping the filter would answer a 404 page with the whole shop.
-  return root ? descendantIds(tree, root.id) : ['00000000-0000-0000-0000-000000000000'];
+  return {
+    tree,
+    categoryIds,
+    subCategoryIds: subIds.length > 0 ? [...new Set(subIds)] : undefined,
+    // Null on `/shop` and `/search`, where the departments themselves are what
+    // the Category group has to offer.
+    parentId: root?.id ?? null,
+  };
 }
 
 export default async function storefrontProductRoutes(app: FastifyInstance) {
@@ -216,14 +240,17 @@ export default async function storefrontProductRoutes(app: FastifyInstance) {
       return ok(reply, summaries);
     }
 
-    const categoryIds = await resolveCategoryIds(store, query.category, query.sub);
+    const scope = await resolveCategoryScope(store, query.category, query.sub);
 
     const filters: ListingFilters = {
       q: query.q,
-      categoryIds,
+      categoryIds: scope.categoryIds,
+      subCategoryIds: scope.subCategoryIds,
       brandSlugs: query.brand,
       minPrice: query.minPrice,
       maxPrice: query.maxPrice,
+      priceBands: parsePriceBands(query.price),
+      offers: parseOfferKeys(query.offer),
       rating: query.rating,
       inStock: query.inStock,
       sale: query.sale,
@@ -275,7 +302,7 @@ export default async function storefrontProductRoutes(app: FastifyInstance) {
         },
       ),
       cached(tenantKey(store.tenantRef, 'storefront', 'facets', filterKey), CACHE_TTL.facets, () =>
-        buildFacets(store.db, filters),
+        buildFacets(store.db, filters, { tree: scope.tree, parentId: scope.parentId }),
       ),
     ]);
 
@@ -285,7 +312,7 @@ export default async function storefrontProductRoutes(app: FastifyInstance) {
       filters: facets,
       // Derived from what was asked for, not from what was found — no reason to
       // hold it in a cache entry.
-      appliedFilters: appliedFiltersOf(filters, query.category),
+      appliedFilters: appliedFiltersOf(filters, query.category, query.sub),
     } satisfies ProductListResult);
   });
 
@@ -405,7 +432,6 @@ async function loadProductDetail(
   const [row] = await store.db
     .select({
       ...productBaseColumns,
-      shortDescription: products.shortDescription,
       description: products.description,
       categoryId: products.categoryId,
       isReturnable: products.isReturnable,
@@ -455,8 +481,6 @@ async function loadProductDetail(
         title: productVariants.title,
         price: productVariants.price,
         salePrice: productVariants.salePrice,
-        saleStartsAt: productVariants.saleStartsAt,
-        saleEndsAt: productVariants.saleEndsAt,
         imageUrl: productVariants.imageUrl,
         isDefault: productVariants.isDefault,
         /*
@@ -545,7 +569,7 @@ async function loadProductDetail(
   }
 
   const variants: ProductVariantView[] = variantRows.map((variant) => {
-    const sale = effectiveSale(variant.salePrice, variant.saleStartsAt, variant.saleEndsAt);
+    const sale = variant.salePrice;
     // Tracked means both that the owner lets stock refuse a sale and that there
     // is a level to refuse it with. `inStockSql` reads it the same way, and the
     // two have to agree or the listing would offer what this page then denies.
@@ -574,7 +598,6 @@ async function loadProductDetail(
 
   return {
     ...summary,
-    shortDescription: row.shortDescription,
     description: row.description,
     images: mediaRows
       .filter((media) => media.type === 'image')
@@ -589,7 +612,6 @@ async function loadProductDetail(
     specifications: specRows,
     // Store-wide policy copy; the storefront renders the store's own pages for
     // the detail, so these stay null until a per-product override exists.
-    shippingInfo: null,
     returnInfo: null,
     isReturnable: row.isReturnable,
     minOrderQuantity: row.minOrderQuantity,

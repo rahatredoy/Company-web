@@ -43,18 +43,18 @@ const EXPECTED = [
   // inventory
   'warehouses', 'inventory_levels', 'inventory_transactions',
   // customers
-  'customers', 'customer_sessions', 'customer_tokens', 'customer_addresses', 'customer_stats',
+  'customers', 'customer_tokens', 'customer_addresses', 'customer_stats',
   'back_in_stock_requests',
   // cart
   'carts', 'cart_items', 'wishlists', 'wishlist_items',
   // orders
   'orders', 'order_items', 'order_addresses', 'order_status_history',
   // money
-  'payments', 'payment_webhook_events', 'payment_methods', 'shipping_zones', 'shipping_methods',
-  'shipments', 'returns', 'return_items', 'return_attachments', 'return_history', 'refunds',
+  'payments', 'payment_webhook_events', 'payment_methods',
+  'returns', 'return_items', 'return_attachments', 'return_history', 'refunds',
   // marketing
-  'discounts', 'coupons', 'coupon_redemptions', 'flash_sales', 'flash_sale_products', 'reviews',
-  'review_images', 'banners', 'newsletter_subscribers', 'contact_messages',
+  'discounts', 'discount_redemptions', 'discount_customers', 'payment_banks', 'flash_sales', 'flash_sale_products', 'reviews',
+  'review_images', 'banners', 'contact_messages',
   // content
   'pages', 'faqs', 'homepage_sections', 'navigation_menus', 'navigation_items',
   // metrics

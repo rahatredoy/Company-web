@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { StoreConfig, StorefrontLocale } from '@/types';
 import { cn } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
 import { LocaleSelects } from './locale-selects';
 
 /**
@@ -17,7 +18,7 @@ import { LocaleSelects } from './locale-selects';
  * Hidden below `lg`. On a phone these live in the drawer instead, where there
  * is room to tap them.
  */
-export function UtilityBar({
+export async function UtilityBar({
   config,
   locale,
   className,
@@ -31,6 +32,8 @@ export function UtilityBar({
   const hasSelects = config.store.languages.length > 1 || config.store.currencies.length > 1;
   if (config.utility.length === 0 && !config.contact.phone && !hasSelects) return null;
 
+  const t = await getT();
+
   return (
     <div className={cn('hidden border-b border-border bg-surface-alt lg:block', className)}>
       <div className="container-store flex h-9 items-center justify-between gap-4 text-xs">
@@ -38,16 +41,19 @@ export function UtilityBar({
           {config.utility.map((link) => (
             <li key={`${link.href}-${link.label}`}>
               <Link href={link.href} className="hover:text-primary">
-                {link.label}
+                {t.loose(link.label)}
               </Link>
             </li>
           ))}
           {config.contact.phone ? (
             <li className="hidden xl:block">
-              Call us:{' '}
-              <Link href={`tel:${config.contact.phone}`} className="font-medium text-foreground hover:text-primary">
-                {config.contact.phone}
-              </Link>
+              {t.rich('Call us: {phone}', {
+                phone: (
+                  <Link href={`tel:${config.contact.phone}`} className="font-medium text-foreground hover:text-primary">
+                    {config.contact.phone}
+                  </Link>
+                ),
+              })}
             </li>
           ) : null}
         </ul>

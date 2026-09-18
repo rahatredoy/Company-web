@@ -101,8 +101,7 @@ function computeTotals(cart: StoredCart): CartTotals {
    * applying a code can only ever make the estimate too small, never negative.
    *
    * Checkout re-derives all of it from the database, and that is the number
-   * charged; like the shipping line above, this is an estimate and the page says
-   * so.
+   * charged; this is an estimate and the page says so.
    */
   const claimed = cart.coupon?.discount ?? '0.00';
   const discount = Number(claimed) > Number(subtotal) ? subtotal : claimed;
@@ -110,9 +109,6 @@ function computeTotals(cart: StoredCart): CartTotals {
   return {
     subtotal,
     discount,
-    // Null, not zero: shipping is not known until an address exists, and
-    // showing "Free" before that would be a promise nobody made.
-    shipping: null,
     tax: '0.00',
     total: subtract(subtotal, discount),
     currency: cart.currency,
@@ -258,4 +254,24 @@ export function useCart() {
   );
 
   return { cart, add, updateQuantity, remove, clear, applyCoupon, removeCoupon, has };
+}
+
+/**
+ * Keeps the basket's currency on the store's.
+ *
+ * The basket stores a currency beside its lines because it is totalled here,
+ * and until now only an add ever moved it — so a shopper whose basket was filled
+ * before the owner switched the store from USD to BDT went on seeing dollars in
+ * the drawer, on the cart page and at checkout, until they happened to add
+ * something. Re-labelling is the whole fix, not half of it: a currency switch
+ * converts nothing, so every number in the basket is already the shop's number
+ * in the new currency, and checkout re-prices all of it from the database
+ * regardless. It also gives a never-used basket the store's currency rather
+ * than the `USD` placeholder `EMPTY` starts with.
+ */
+export function useSyncCartCurrency(currency: string) {
+  React.useEffect(() => {
+    if (!currency) return;
+    store.set((current) => (current.currency === currency ? current : { ...current, currency }));
+  }, [currency]);
 }

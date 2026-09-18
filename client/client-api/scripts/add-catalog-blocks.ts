@@ -68,7 +68,7 @@ interface Block {
 
 /**
  * Where the catalogue feed belongs: after the last block that shows products,
- * and above the trailing furniture — brands, quotes, the newsletter band —
+ * and above the trailing furniture — brands, quotes, the Instagram strip —
  * which reads as the foot of the page and would bury a grid placed under it.
  */
 const PRODUCT_BLOCKS = new Set(['product_grid', 'product_carousel', 'collection', 'deal', 'flash_sale']);

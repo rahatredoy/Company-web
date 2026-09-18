@@ -11,10 +11,9 @@ export default async function ProfilePage() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold sm:text-3xl">Profile</h1>
-      <p className="mt-2 text-muted">Your details, and what we may email you about.</p>
+      <h1 className="sr-only">Profile</h1>
 
-      <div className="mt-8 max-w-lg">
+      <div className="max-w-lg">
         <ProfileForm customer={customer} />
       </div>
     </>

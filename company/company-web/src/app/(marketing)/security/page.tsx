@@ -30,7 +30,7 @@ export default function SecurityPage() {
                 <span className="mb-4 grid size-10 place-items-center rounded-lg bg-primary-soft text-accent-foreground">
                   <Icon className="size-5" aria-hidden />
                 </span>
-                <h3 className="text-[15px] font-semibold">{point.title}</h3>
+                <h3 className="text-[14px] font-semibold">{point.title}</h3>
                 <p className="mt-1.5 text-sm text-pretty text-muted-foreground">{point.description}</p>
               </article>
             );

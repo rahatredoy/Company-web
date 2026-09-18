@@ -22,7 +22,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
 import { api, ApiError, errorMessage } from '@/lib/api';
-import { isoFromLocalInput, localInputValue } from '@/lib/local-datetime';
+import { useT } from '@/lib/i18n';
 import type { BrandRow, CategoryRow, ProductRow, ProductStatus } from '@/lib/types';
 import { ImageUpload } from './image-upload';
 import { SELECT_CLASS } from './category-tree';
@@ -55,9 +55,6 @@ interface Draft {
   barcode: string;
   price: string;
   salePrice: string;
-  /** Local-clock strings for the two `datetime-local` boxes; '' means no bound. */
-  saleStartsAt: string;
-  saleEndsAt: string;
   costPrice: string;
   imageUrl: string;
   isFeatured: boolean;
@@ -75,8 +72,6 @@ function draftFrom(product: ProductRow): Draft {
     barcode: product.barcode ?? '',
     price: product.priceFrom ?? '',
     salePrice: product.salePriceFrom ?? '',
-    saleStartsAt: localInputValue(product.saleStartsAt),
-    saleEndsAt: localInputValue(product.saleEndsAt),
     costPrice: product.costPrice ?? '',
     imageUrl: product.imageUrl ?? '',
     isFeatured: product.isFeatured,
@@ -102,6 +97,7 @@ export function ProductQuickEdit({
   currency: string;
   onSaved: () => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = React.useState<Draft | null>(product ? draftFrom(product) : null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -139,13 +135,6 @@ export function ProductQuickEdit({
       barcode: draft.barcode.trim() || null,
       price: draft.price.trim(),
       salePrice: draft.salePrice.trim() || null,
-      /*
-       * Sent whether or not they were touched, which is right here: the panel
-       * renders both boxes seeded from the row, so an empty one is the owner
-       * saying "no bound" rather than the form having no opinion.
-       */
-      saleStartsAt: isoFromLocalInput(draft.saleStartsAt),
-      saleEndsAt: isoFromLocalInput(draft.saleEndsAt),
       costPrice: draft.costPrice.trim() || null,
       imageUrl: draft.imageUrl.trim() || null,
       isFeatured: draft.isFeatured,
@@ -160,7 +149,7 @@ export function ProductQuickEdit({
 
     try {
       await api.patch(`/api/v1/admin/products/${product.id}`, payload);
-      toast.success('Product saved.');
+      toast.success(t('Product saved.'));
       onOpenChange(false);
       onSaved();
     } catch (caught) {
@@ -181,10 +170,11 @@ export function ProductQuickEdit({
         {product && draft ? (
           <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
             <SheetHeader>
-              <SheetTitle>Quick Edit</SheetTitle>
+              <SheetTitle>{t('Quick Edit')}</SheetTitle>
               <SheetDescription>
-                Money, stock codes and where it files. The full editor has the description,
-                variants, gallery, specifications and SEO.
+                {t(
+                  'Money, stock codes and where it files. The full editor has the description, variants, gallery, specifications and SEO.',
+                )}
               </SheetDescription>
             </SheetHeader>
 
@@ -195,7 +185,7 @@ export function ProductQuickEdit({
                   files and how it is shown on the right. */}
               <SheetColumns>
                 <SheetColumn>
-                  <Field label="Product Name" htmlFor="qe-name" required error={fieldErrors.name}>
+                  <Field label={t('Product Name')} htmlFor="qe-name" required error={fieldErrors.name}>
                     <Input
                       id="qe-name"
                       value={draft.name}
@@ -207,9 +197,9 @@ export function ProductQuickEdit({
                   </Field>
 
                   <Field
-                    label="Slug"
+                    label={t('Slug')}
                     htmlFor="qe-slug"
-                    hint="The storefront address. Changing it breaks existing links."
+                    hint={t('The storefront address. Changing it breaks existing links.')}
                     error={fieldErrors.slug}
                   >
                     <Input
@@ -222,20 +212,20 @@ export function ProductQuickEdit({
                   </Field>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Status" htmlFor="qe-status" error={fieldErrors.status}>
+                    <Field label={t('Status')} htmlFor="qe-status" error={fieldErrors.status}>
                       <select
                         id="qe-status"
                         value={draft.status}
                         onChange={(event) => set('status', event.target.value as ProductStatus)}
                         className={SELECT_CLASS}
                       >
-                        <option value="draft">Draft</option>
-                        <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
+                        <option value="draft">{t('Draft')}</option>
+                        <option value="active">{t('Active')}</option>
+                        <option value="inactive">{t('Inactive')}</option>
                       </select>
                     </Field>
 
-                    <Field label="SKU" htmlFor="qe-sku" required error={fieldErrors.sku}>
+                    <Field label={t('SKU')} htmlFor="qe-sku" required error={fieldErrors.sku}>
                       <Input
                         id="qe-sku"
                         value={draft.sku}
@@ -248,7 +238,12 @@ export function ProductQuickEdit({
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label={`Price (${currency})`} htmlFor="qe-price" required error={fieldErrors.price}>
+                    <Field
+                      label={t('Price ({currency})', { currency })}
+                      htmlFor="qe-price"
+                      required
+                      error={fieldErrors.price}
+                    >
                       <Input
                         id="qe-price"
                         value={draft.price}
@@ -260,9 +255,9 @@ export function ProductQuickEdit({
                     </Field>
 
                     <Field
-                      label={`Sale Price (${currency})`}
+                      label={t('Sale Price ({currency})', { currency })}
                       htmlFor="qe-sale"
-                      hint="Empty when not on sale."
+                      hint={t('Empty when not on sale.')}
                       error={fieldErrors.salePrice}
                     >
                       <Input
@@ -274,51 +269,11 @@ export function ProductQuickEdit({
                     </Field>
                   </div>
 
-                  {/*
-                    When the sale price applies.
-
-                    The storefront and checkout both price through
-                    `effectiveSale`, which ignores a sale price outside its
-                    window — so a sale that has not started charges full price
-                    and an expired one ends itself. Without these boxes every
-                    sale was permanent from the moment its price was typed, and
-                    ending one meant remembering to come back and clear it.
-                  */}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field
-                      label="Sale Starts"
-                      htmlFor="qe-sale-starts"
-                      hint="Empty starts it at once."
-                      error={fieldErrors.saleStartsAt}
-                    >
-                      <Input
-                        id="qe-sale-starts"
-                        type="datetime-local"
-                        value={draft.saleStartsAt}
-                        onChange={(event) => set('saleStartsAt', event.target.value)}
-                      />
-                    </Field>
-
-                    <Field
-                      label="Sale Ends"
-                      htmlFor="qe-sale-ends"
-                      hint="Empty runs until cleared."
-                      error={fieldErrors.saleEndsAt}
-                    >
-                      <Input
-                        id="qe-sale-ends"
-                        type="datetime-local"
-                        value={draft.saleEndsAt}
-                        onChange={(event) => set('saleEndsAt', event.target.value)}
-                      />
-                    </Field>
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field
-                      label={`Cost Price (${currency})`}
+                      label={t('Cost Price ({currency})', { currency })}
                       htmlFor="qe-cost"
-                      hint="Never shown to a shopper."
+                      hint={t('Never shown to a shopper.')}
                       error={fieldErrors.costPrice}
                     >
                       <Input
@@ -329,7 +284,7 @@ export function ProductQuickEdit({
                       />
                     </Field>
 
-                    <Field label="Barcode" htmlFor="qe-barcode" error={fieldErrors.barcode}>
+                    <Field label={t('Barcode')} htmlFor="qe-barcode" error={fieldErrors.barcode}>
                       <Input
                         id="qe-barcode"
                         value={draft.barcode}
@@ -343,14 +298,14 @@ export function ProductQuickEdit({
 
                 <SheetColumn>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Category" htmlFor="qe-category" error={fieldErrors.categoryId}>
+                    <Field label={t('Category')} htmlFor="qe-category" error={fieldErrors.categoryId}>
                       <select
                         id="qe-category"
                         value={draft.categoryId}
                         onChange={(event) => set('categoryId', event.target.value)}
                         className={SELECT_CLASS}
                       >
-                        <option value="">No category</option>
+                        <option value="">{t('No category')}</option>
                         {categories.map((category) => (
                           <option key={category.id} value={category.id}>
                             {category.name}
@@ -359,14 +314,14 @@ export function ProductQuickEdit({
                       </select>
                     </Field>
 
-                    <Field label="Brand" htmlFor="qe-brand" error={fieldErrors.brandId}>
+                    <Field label={t('Brand')} htmlFor="qe-brand" error={fieldErrors.brandId}>
                       <select
                         id="qe-brand"
                         value={draft.brandId}
                         onChange={(event) => set('brandId', event.target.value)}
                         className={SELECT_CLASS}
                       >
-                        <option value="">No brand</option>
+                        <option value="">{t('No brand')}</option>
                         {brands.map((brand) => (
                           <option key={brand.id} value={brand.id}>
                             {brand.name}
@@ -377,10 +332,10 @@ export function ProductQuickEdit({
                   </div>
 
                   <Field
-                    label="Main Image"
+                    label={t('Main Image')}
                     hint={
                       product.variantCount > 1
-                        ? 'This is the default variant’s picture. Each variant can have its own in the editor.'
+                        ? t('This is the default variant’s picture. Each variant can have its own in the editor.')
                         : undefined
                     }
                     error={fieldErrors.imageUrl}
@@ -390,12 +345,12 @@ export function ProductQuickEdit({
                       purpose="products"
                       defaultValue={draft.imageUrl}
                       onChange={(url) => set('imageUrl', url)}
-                      label="Change"
+                      label={t('Change')}
                     />
                   </Field>
 
                   <div className="flex items-center justify-between gap-3">
-                    <Label htmlFor="qe-featured">Featured Product</Label>
+                    <Label htmlFor="qe-featured">{t('Featured Product')}</Label>
                     <Switch
                       id="qe-featured"
                       checked={draft.isFeatured}
@@ -404,7 +359,7 @@ export function ProductQuickEdit({
                   </div>
 
                   <div className="flex items-center justify-between gap-3">
-                    <Label htmlFor="qe-new">New Arrival</Label>
+                    <Label htmlFor="qe-new">{t('New Arrival')}</Label>
                     <Switch
                       id="qe-new"
                       checked={draft.isNewArrival}
@@ -414,7 +369,7 @@ export function ProductQuickEdit({
 
                   <Button asChild variant="outline" className="w-full">
                     <Link href={`/products/${product.id}`}>
-                      Open full editor <ArrowUpRight />
+                      {t('Open full editor')} <ArrowUpRight />
                     </Link>
                   </Button>
                 </SheetColumn>
@@ -423,10 +378,10 @@ export function ProductQuickEdit({
 
             <SheetFooter>
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button type="submit" loading={busy}>
-                Save Product
+                {t('Save Product')}
               </Button>
             </SheetFooter>
           </form>

@@ -1,5 +1,6 @@
 import type { StoreConfig } from '@/types';
 import { cn } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
 
 /**
  * Floating WhatsApp contact button.
@@ -14,10 +15,10 @@ import { cn } from '@/lib/utils';
  * Positioned above the mobile bottom bar so it never covers Add to Cart, which
  * is the one control on the page that must always be reachable.
  */
-export function WhatsAppButton({
+export async function WhatsAppButton({
   contact,
   offset = false,
-  message = 'Hello! I have a question about a product.',
+  message,
 }: {
   contact: StoreConfig['contact'];
   offset?: boolean;
@@ -28,12 +29,16 @@ export function WhatsAppButton({
   const number = contact.whatsappNumber.replace(/\D/g, '');
   if (number.length < 8) return null;
 
+  // The opening line of the chat, so it is written in the language the shopper is reading.
+  const t = await getT();
+  const text = message ?? t('Hello! I have a question about a product.');
+
   return (
     <a
-      href={`https://wa.me/${number}?text=${encodeURIComponent(message)}`}
+      href={`https://wa.me/${number}?text=${encodeURIComponent(text)}`}
       target="_blank"
       rel="noreferrer noopener"
-      aria-label="Chat with us on WhatsApp"
+      aria-label={t('Chat with us on WhatsApp')}
       className={cn(
         'fixed left-5 z-30 grid size-12 place-items-center rounded-full',
         'bg-[#25D366] text-white shadow-[var(--shadow-raised)]',

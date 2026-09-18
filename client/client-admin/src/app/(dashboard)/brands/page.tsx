@@ -3,8 +3,13 @@ import { BrandManager, type BrandFilterState } from '@/components/admin/brand-ma
 import { currentStoreSlug, serverGet, serverGetAll } from '@/lib/server-api';
 import { storefrontUrl } from '@/lib/env';
 import { can, type BrandRow, type SessionResponse } from '@/lib/types';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = { title: 'Brands' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Brands') };
+}
+
 export const dynamic = 'force-dynamic';
 
 export default async function BrandsPage({

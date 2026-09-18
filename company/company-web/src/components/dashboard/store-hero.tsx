@@ -63,7 +63,7 @@ export function StoreHero({ store }: { store: StoreView }) {
                   label="Tenant ID"
                   value={
                     <span className="inline-flex items-center gap-1">
-                      <span className="font-mono text-[13px]">{store.tenantId}</span>
+                      <span className="font-mono text-[12px]">{store.tenantId}</span>
                       <CopyButton value={store.tenantId} label="" />
                     </span>
                   }

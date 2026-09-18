@@ -16,6 +16,9 @@ export function slugify(input: string, maxLength = 150): string {
     .replace(/\p{M}/gu, '')
     .toLowerCase()
     .trim()
+    // Apostrophes are dropped rather than separated on — see the note on the
+    // API's copy. "Men's Clothing" would otherwise preview as `men-s-clothing`.
+    .replace(/['‘’ʼ´`]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-')

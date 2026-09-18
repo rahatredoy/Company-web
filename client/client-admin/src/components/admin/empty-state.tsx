@@ -7,8 +7,9 @@ export function EmptyState({
   action,
 }: {
   icon: LucideIcon;
-  title: string;
-  description?: string;
+  /** Shown as given — the caller translates it. */
+  title: React.ReactNode;
+  description?: React.ReactNode;
   action?: React.ReactNode;
 }) {
   return (

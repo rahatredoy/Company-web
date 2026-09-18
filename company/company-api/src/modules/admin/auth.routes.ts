@@ -343,6 +343,9 @@ export default async function adminAuthRoutes(app: FastifyInstance) {
 
     // Rotate the token on elevation, then move the cookie across.
     const promoted = await promoteAdminSession(session.id);
+    // The challenge expired between being read and being promoted — rare, and
+    // indistinguishable to the caller from having taken too long over the code.
+    if (!promoted) throw unauthorized('Your session has expired. Sign in again.', ERROR_CODES.SESSION_EXPIRED);
     clearSessionCookie(reply, 'adminOtp');
     setSessionCookie(reply, 'admin', promoted);
 

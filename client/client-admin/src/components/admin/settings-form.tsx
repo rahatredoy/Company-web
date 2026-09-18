@@ -2,92 +2,149 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2 } from 'lucide-react';
 import type { PaymentMethodRow, StoreSettingsRow } from '@/lib/types';
 import { api, ApiError, errorMessage } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
-import { DEFAULT_MEASURE_OPTIONS, MAX_MEASURE_OPTIONS, type MeasureOption } from '@/lib/measure';
+import { COMMON_CURRENCY_CODES, CURRENCIES, currencyByCode, type CurrencyOption } from '@/lib/currencies';
+import { useT } from '@/lib/i18n';
+import { LANGUAGES, resolveLanguage } from '@/lib/i18n/languages';
+import { DICTIONARIES } from '@/lib/i18n/messages';
+import { createTranslator } from '@/lib/i18n/translator';
+import { SELECT_CLASS } from './category-tree';
+import { PageHeader } from './page-header';
+import { AnnouncementSection, StorefrontSection, designPayloadFrom, type DesignPayload } from './design-picker';
+import { SETTINGS_CONTROL, SettingsSection } from './settings-section';
 
 /**
- * Store settings.
+ * The Settings screen: the store, its contact details, how the storefront looks
+ * and how customers pay — one form and one Save.
  *
- * Currency is the field with teeth. Prices are stored as plain decimals with no
- * currency of their own, so changing the code re-labels every existing price and
- * every past order's total rather than converting them — which is why the API
- * refuses once the shop has taken an order, and why the input says so instead of
- * failing after the fact.
+ * Save writes two resources, `PUT /settings` and then `PUT /website/design`,
+ * because they are two tables under two permissions. Each is sent only when the
+ * admin may write it, and each omits the keys this screen does not draw (the
+ * SEO copy, the sizes and stock alert products carry for themselves, category
+ * icons, the footer) — the API keeps what is stored for a key it is not sent, so
+ * nothing this screen does not show can be reset by it. Payment methods are not
+ * part of the save: each switch is its own write, as it always was.
+ *
+ * Currency is the field with teeth, and it is the store's currency everywhere:
+ * the panel prints every figure in it, the storefront prices every shelf in it
+ * and checkout charges in it. Prices are plain decimals with no currency of
+ * their own, so changing the code **re-labels** every price rather than
+ * converting it — 40 stays 40, in the new symbol. On a shop that has taken
+ * orders the save stops and says so in a dialog before it goes through; the API
+ * refuses it without that confirmation too.
+ *
+ * Language is the other field that reaches past this screen: it is what the
+ * whole panel, the storefront and the API's messages are shown in. It is a
+ * picker of the languages there is a dictionary for — a free-text code would
+ * save "fr" and change nothing anyone could see — and a save that moves it is
+ * confirmed by a toast in the language just chosen, since `router.refresh()`
+ * redraws everything else in it a moment later.
  */
+
+type SettingsPayload = Record<string, unknown> & { currency: string };
+
+/** Everything one Save sends. A `null` half is one this admin may not write. */
+interface PendingSave {
+  settings: SettingsPayload | null;
+  design: ReturnType<typeof designPayloadFrom> | null;
+}
+
+const currencyLabel = (option: CurrencyOption) =>
+  `${option.code} — ${option.name}${option.symbol ? ` (${option.symbol})` : ''}`;
+
+const COMMON_CURRENCIES = COMMON_CURRENCY_CODES.map((code) => currencyByCode(code)).filter(
+  (option): option is CurrencyOption => Boolean(option),
+);
+
 export function SettingsForm({
   settings,
   paymentMethods,
+  design,
   canUpdate,
+  canManageDesign,
 }: {
   settings: StoreSettingsRow;
   paymentMethods: PaymentMethodRow[];
+  /** `null` when this admin may not read the design. */
+  design: DesignPayload | null;
   canUpdate: boolean;
+  canManageDesign: boolean;
 }) {
   const router = useRouter();
+  const t = useT();
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
 
-  const currencyLocked = settings.orderCount > 0;
-
   /*
-   * The shop's default size picker, held in state rather than read off the form:
-   * it is a list with rows that are added and removed, and numbered field names
-   * would leave a hole in the sequence on every removal.
+   * Controlled, unlike the rest of the form, because the field describes its own
+   * consequences as it changes: the price preview and the warning under it both
+   * follow the selection before anything is saved.
    */
-  const [measureOptions, setMeasureOptions] = React.useState<MeasureOption[]>(
-    settings.measureOptions.length > 0
-      ? settings.measureOptions
-      : (settings.defaultMeasureOptions ?? DEFAULT_MEASURE_OPTIONS),
-  );
+  const [currency, setCurrency] = React.useState(settings.currency);
+  /** A save that is waiting on the owner to confirm a currency change. */
+  const [pendingSave, setPendingSave] = React.useState<PendingSave | null>(null);
 
-  const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (saving) return;
+  const currencyChanged = currency !== settings.currency;
+  const savedCurrencyListed = Boolean(currencyByCode(settings.currency));
+  const ordersElsewhere = settings.orderCurrencies.filter((row) => row.currency !== settings.currency);
 
-    const data = new FormData(event.currentTarget);
-    const text = (name: string) => String(data.get(name) ?? '').trim();
-    const optional = (name: string) => text(name) || null;
+  const designWritable = design !== null && canManageDesign;
+  const pendingCurrency = pendingSave?.settings?.currency ?? currency;
 
+  const save = async (pending: PendingSave, confirmCurrencyChange = false) => {
     setSaving(true);
     setError('');
     setFieldErrors({});
+    let wrote = false;
 
     try {
-      await api.put('/api/v1/admin/settings', {
-        storeName: text('storeName'),
-        // A disabled input contributes nothing to FormData, so the current value
-        // is sent back explicitly rather than arriving as an empty string.
-        currency: currencyLocked ? settings.currency : text('currency'),
-        language: text('language'),
-        timezone: text('timezone'),
-        businessName: optional('businessName'),
-        businessEmail: optional('businessEmail'),
-        businessPhone: optional('businessPhone'),
-        businessAddress: optional('businessAddress'),
-        seoTitle: optional('seoTitle'),
-        seoDescription: optional('seoDescription'),
-        whatsappNumber: optional('whatsappNumber'),
-        whatsappEnabled: data.get('whatsappEnabled') === 'on',
-        lowStockThreshold: Number(data.get('lowStockThreshold') ?? 5),
-        // Half-typed rows are dropped rather than refused: the owner is mid-
-        // thought, and a validation error on a row they are still filling in
-        // would block a save that has nothing to do with it.
-        measureOptions: measureOptions.filter((option) => option.measure > 0 && option.label.trim() !== ''),
-      });
+      if (pending.settings) {
+        await api.put('/api/v1/admin/settings', { ...pending.settings, confirmCurrencyChange });
+        wrote = true;
+      }
+      if (pending.design) {
+        await api.put('/api/v1/admin/website/design', pending.design);
+        wrote = true;
+      }
 
-      toast.success('Settings saved.');
-      router.refresh();
+      setPendingSave(null);
+      // Said in the language just saved, which is what the panel is about to become.
+      const language = resolveLanguage(String(pending.settings?.language ?? t.language));
+      const next = language === t.language ? t : createTranslator(language, DICTIONARIES[language]);
+      toast.success(
+        pending.settings && pending.settings.currency !== settings.currency
+          ? next('Settings saved. Your store now uses {currency}.', { currency: pending.settings.currency })
+          : next('Settings saved.'),
+      );
     } catch (caught) {
+      /*
+       * The first order can arrive while this page is open, so the page's
+       * `orderCount` is not the last word. The API refuses in that case, and the
+       * answer is the same dialog a known order count would have opened.
+       */
+      if (caught instanceof ApiError && caught.code === 'CURRENCY_CHANGE_UNCONFIRMED' && !confirmCurrencyChange) {
+        setPendingSave(pending);
+        return;
+      }
+
+      setPendingSave(null);
       if (caught instanceof ApiError && caught.details) {
         setFieldErrors(
           Object.fromEntries(Object.entries(caught.details).map(([key, messages]) => [key, messages[0] ?? ''])),
@@ -96,7 +153,45 @@ export function SettingsForm({
       setError(errorMessage(caught));
     } finally {
       setSaving(false);
+      // Re-reads the session too, which is what moves every other screen of the
+      // panel onto a new currency. Also after a half-finished save: the store
+      // settings may have landed even though the design did not.
+      if (wrote) router.refresh();
     }
+  };
+
+  const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (saving) return;
+
+    const data = new FormData(event.currentTarget);
+    const text = (name: string) => String(data.get(name) ?? '').trim();
+    const optional = (name: string) => text(name) || null;
+
+    const pending: PendingSave = {
+      settings: canUpdate
+        ? {
+            storeName: text('storeName'),
+            currency,
+            language: text('language'),
+            timezone: text('timezone'),
+            businessName: optional('businessName'),
+            businessEmail: optional('businessEmail'),
+            businessPhone: optional('businessPhone'),
+            businessAddress: optional('businessAddress'),
+            whatsappNumber: optional('whatsappNumber'),
+            whatsappEnabled: data.get('whatsappEnabled') === 'on',
+          }
+        : null,
+      design: designWritable && design ? designPayloadFrom(data, design) : null,
+    };
+
+    if (pending.settings && currencyChanged && settings.orderCount > 0) {
+      setPendingSave(pending);
+      return;
+    }
+
+    void save(pending);
   };
 
   const togglePayment = async (method: PaymentMethodRow) => {
@@ -110,234 +205,338 @@ export function SettingsForm({
         sortOrder: method.sortOrder,
       });
 
-      toast.success(method.isEnabled ? `${method.label} switched off.` : `${method.label} switched on.`);
+      toast.success(
+        method.isEnabled
+          ? t('{method} switched off.', { method: method.label })
+          : t('{method} switched on.', { method: method.label }),
+      );
       router.refresh();
     } catch (caught) {
       toast.error(errorMessage(caught));
     }
   };
 
+  const payments = (
+    <SettingsSection title={t('Payment methods')}>
+      {paymentMethods.length === 0 ? (
+        <Alert variant="warning">{t('No payment method is set up, so nobody can check out.')}</Alert>
+      ) : (
+        <ul className="divide-y divide-border/60">
+          {paymentMethods.map((method) => (
+            <li key={method.id} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{method.label}</p>
+                {method.description ? (
+                  <p className="truncate text-xs text-muted-foreground">{method.description}</p>
+                ) : null}
+              </div>
+              <Switch
+                checked={method.isEnabled}
+                disabled={!canUpdate}
+                onCheckedChange={() => togglePayment(method)}
+                aria-label={
+                  method.isEnabled
+                    ? t('Disable {method}', { method: method.label })
+                    : t('Enable {method}', { method: method.label })
+                }
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </SettingsSection>
+  );
+
   return (
-    <form onSubmit={onSubmit} className="space-y-6">
+    <form onSubmit={onSubmit} className="space-y-4">
+      <PageHeader
+        title={t('Settings')}
+        description={t('Your store at {slug}.', { slug: settings.slug })}
+        actions={
+          canUpdate || designWritable ? (
+            <Button type="submit" loading={saving}>
+              {t('Save settings')}
+            </Button>
+          ) : null
+        }
+      />
+
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Your store</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Field label="Store name" htmlFor="storeName" required error={fieldErrors.storeName}>
-            <Input id="storeName" name="storeName" defaultValue={settings.storeName} disabled={!canUpdate} />
-          </Field>
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <div className="space-y-4">
+          <SettingsSection title={t('Store')}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t('Store name')} htmlFor="storeName" required error={fieldErrors.storeName} className="space-y-1.5">
+                <Input
+                  id="storeName"
+                  name="storeName"
+                  defaultValue={settings.storeName}
+                  disabled={!canUpdate}
+                  className={SETTINGS_CONTROL}
+                />
+              </Field>
 
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field
-              label="Currency"
-              htmlFor="currency"
-              error={fieldErrors.currency}
-              hint={
-                currencyLocked
-                  ? 'Locked — your prices and past orders are all recorded in this currency.'
-                  : 'Three-letter code, e.g. BDT.'
-              }
-            >
-              <Input
-                id="currency"
-                name="currency"
-                maxLength={3}
-                defaultValue={settings.currency}
-                disabled={!canUpdate || currencyLocked}
-                className="uppercase"
-              />
-            </Field>
-            <Field label="Language" htmlFor="language">
-              <Input id="language" name="language" maxLength={8} defaultValue={settings.language} disabled={!canUpdate} />
-            </Field>
-            <Field label="Timezone" htmlFor="timezone">
-              <Input id="timezone" name="timezone" defaultValue={settings.timezone} disabled={!canUpdate} />
-            </Field>
-          </div>
-
-          <Field label="Low-stock warning at" htmlFor="lowStockThreshold" hint="Used for new stock records.">
-            <Input
-              id="lowStockThreshold"
-              name="lowStockThreshold"
-              type="number"
-              min={0}
-              defaultValue={settings.lowStockThreshold}
-              disabled={!canUpdate}
-            />
-          </Field>
-
-          {/*
-            Set once for the whole shop, because a greengrocer sells most of its
-            catalogue the same four ways. A product may still name its own list
-            on its Details tab; this is what every other one uses.
-          */}
-          <div className="space-y-2 border-t border-border/60 pt-4">
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium">Default sizes for products sold by weight</p>
-              <p className="text-xs text-muted-foreground">
-                The picker a shopper sees on the card — 1kg, 500gm, 250gm. The amount is in the
-                product&apos;s own base unit: grams for weight, millilitres for volume.
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              {measureOptions.map((option, index) => (
-                <div key={index} className="flex items-center gap-2">
-                  <Input
-                    value={option.label}
-                    onChange={(event) =>
-                      setMeasureOptions((rows) =>
-                        rows.map((row, i) => (i === index ? { ...row, label: event.target.value } : row)),
-                      )
-                    }
-                    placeholder="500gm"
-                    maxLength={24}
-                    disabled={!canUpdate}
-                    aria-label={'Size ' + (index + 1) + ' label'}
-                    className="flex-1"
-                  />
-                  <Input
-                    value={option.measure > 0 ? String(option.measure) : ''}
-                    onChange={(event) =>
-                      setMeasureOptions((rows) =>
-                        rows.map((row, i) =>
-                          i === index
-                            ? { ...row, measure: Number(event.target.value.replace(/[^0-9]/g, '')) || 0 }
-                            : row,
-                        ),
-                      )
-                    }
-                    placeholder="500"
-                    inputMode="numeric"
-                    disabled={!canUpdate}
-                    aria-label={'Size ' + (index + 1) + ' amount'}
-                    className="w-28"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-9 shrink-0 text-muted-foreground"
-                    disabled={!canUpdate}
-                    onClick={() => setMeasureOptions((rows) => rows.filter((_, i) => i !== index))}
-                    aria-label={'Remove size ' + (index + 1)}
-                  >
-                    <Trash2 className="size-4" aria-hidden />
-                  </Button>
-                </div>
-              ))}
-            </div>
-
-            {canUpdate && measureOptions.length < MAX_MEASURE_OPTIONS ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setMeasureOptions((rows) => [...rows, { label: '', measure: 0 }])}
+              <Field
+                label={t('Currency')}
+                htmlFor="currency"
+                error={fieldErrors.currency}
+                className="space-y-1.5"
+                hint={
+                  <>
+                    {t('Prices show as')}{' '}
+                    {/*
+                      Formatted by this browser's Intl, which is not always the
+                      server's build — the one text node here allowed to differ.
+                    */}
+                    <span className="font-medium text-foreground tabular-nums" suppressHydrationWarning>
+                      {t.money('1299.50', currency)}
+                    </span>
+                  </>
+                }
               >
-                <Plus className="mr-1 size-4" aria-hidden /> Add a size
-              </Button>
+                <select
+                  id="currency"
+                  name="currency"
+                  value={currency}
+                  onChange={(event) => setCurrency(event.target.value)}
+                  disabled={!canUpdate}
+                  className={cn(SELECT_CLASS, SETTINGS_CONTROL)}
+                >
+                  {/*
+                    A store provisioned with a code that has since left circulation
+                    still sees what it has, rather than a select that silently
+                    shows the first option and saves it.
+                  */}
+                  {savedCurrencyListed ? null : (
+                    <option value={settings.currency}>{t('{currency} — current', { currency: settings.currency })}</option>
+                  )}
+                  <optgroup label={t('Most used')}>
+                    {COMMON_CURRENCIES.map((option) => (
+                      <option key={`common-${option.code}`} value={option.code}>
+                        {currencyLabel(option)}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label={t('All currencies')}>
+                    {CURRENCIES.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {currencyLabel(option)}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </Field>
+
+              <Field
+                label={t('Language')}
+                htmlFor="language"
+                error={fieldErrors.language}
+                className="space-y-1.5"
+                hint={t('The admin panel and your storefront are shown in this language.')}
+              >
+                <select
+                  id="language"
+                  name="language"
+                  defaultValue={resolveLanguage(settings.language)}
+                  disabled={!canUpdate}
+                  className={cn(SELECT_CLASS, SETTINGS_CONTROL)}
+                >
+                  {LANGUAGES.map((language) => (
+                    <option key={language.code} value={language.code}>
+                      {/* Each in its own script, so an owner finds theirs whatever the panel is in. */}
+                      {language.nativeName === language.name ? language.name : `${language.nativeName} — ${language.name}`}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={t('Timezone')} htmlFor="timezone" error={fieldErrors.timezone} className="space-y-1.5">
+                <Input
+                  id="timezone"
+                  name="timezone"
+                  defaultValue={settings.timezone}
+                  disabled={!canUpdate}
+                  className={SETTINGS_CONTROL}
+                />
+              </Field>
+            </div>
+
+            {currencyChanged && settings.orderCount > 0 ? (
+              <Alert
+                variant="warning"
+                title={t('Switching from {from} to {to}', { from: settings.currency, to: currency })}
+              >
+                {t.plural(
+                  settings.orderCount,
+                  'Prices are not converted — each keeps its number and takes the new symbol. The {count} order already taken keeps its own currency. You will be asked to confirm.',
+                  'Prices are not converted — each keeps its number and takes the new symbol. The {count} orders already taken keep their own currency. You will be asked to confirm.',
+                )}
+              </Alert>
             ) : null}
-          </div>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Contact details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Shown on your storefront and printed on invoices.
-          </p>
+            {!currencyChanged && ordersElsewhere.length > 0 ? (
+              <Alert variant="info">
+                {t(
+                  'Orders taken before a currency switch ({orders}) are left out of revenue totals, which add up {currency} orders only.',
+                  {
+                    orders: ordersElsewhere
+                      .map((row) => t('{count} in {currency}', { count: row.orders, currency: row.currency }))
+                      .join(', '),
+                    currency: settings.currency,
+                  },
+                )}
+              </Alert>
+            ) : null}
+          </SettingsSection>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Business name" htmlFor="businessName">
-              <Input id="businessName" name="businessName" defaultValue={settings.businessName ?? ''} disabled={!canUpdate} />
-            </Field>
-            <Field label="Email" htmlFor="businessEmail">
-              <Input id="businessEmail" name="businessEmail" type="email" defaultValue={settings.businessEmail ?? ''} disabled={!canUpdate} />
-            </Field>
-          </div>
+          <SettingsSection
+            title={t('Contact')}
+            action={
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                {t('WhatsApp button')}
+                <Switch name="whatsappEnabled" defaultChecked={settings.whatsappEnabled} disabled={!canUpdate} />
+              </label>
+            }
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t('Business name')} htmlFor="businessName" error={fieldErrors.businessName} className="space-y-1.5">
+                <Input
+                  id="businessName"
+                  name="businessName"
+                  defaultValue={settings.businessName ?? ''}
+                  disabled={!canUpdate}
+                  className={SETTINGS_CONTROL}
+                />
+              </Field>
+              <Field label={t('Email')} htmlFor="businessEmail" error={fieldErrors.businessEmail} className="space-y-1.5">
+                <Input
+                  id="businessEmail"
+                  name="businessEmail"
+                  type="email"
+                  defaultValue={settings.businessEmail ?? ''}
+                  disabled={!canUpdate}
+                  className={SETTINGS_CONTROL}
+                />
+              </Field>
+              <Field label={t('Phone')} htmlFor="businessPhone" error={fieldErrors.businessPhone} className="space-y-1.5">
+                <Input
+                  id="businessPhone"
+                  name="businessPhone"
+                  defaultValue={settings.businessPhone ?? ''}
+                  disabled={!canUpdate}
+                  className={SETTINGS_CONTROL}
+                />
+              </Field>
+              <Field label={t('WhatsApp number')} htmlFor="whatsappNumber" error={fieldErrors.whatsappNumber} className="space-y-1.5">
+                <Input
+                  id="whatsappNumber"
+                  name="whatsappNumber"
+                  defaultValue={settings.whatsappNumber ?? ''}
+                  disabled={!canUpdate}
+                  className={SETTINGS_CONTROL}
+                />
+              </Field>
+              <Field
+                label={t('Address')}
+                htmlFor="businessAddress"
+                error={fieldErrors.businessAddress}
+                className="space-y-1.5 sm:col-span-2"
+              >
+                <Textarea
+                  id="businessAddress"
+                  name="businessAddress"
+                  rows={2}
+                  defaultValue={settings.businessAddress ?? ''}
+                  disabled={!canUpdate}
+                  className="min-h-0"
+                />
+              </Field>
+            </div>
+          </SettingsSection>
 
-          <Field label="Phone" htmlFor="businessPhone">
-            <Input id="businessPhone" name="businessPhone" defaultValue={settings.businessPhone ?? ''} disabled={!canUpdate} />
-          </Field>
+          {design ? payments : null}
+        </div>
 
-          <Field label="Address" htmlFor="businessAddress">
-            <Textarea id="businessAddress" name="businessAddress" rows={3} defaultValue={settings.businessAddress ?? ''} disabled={!canUpdate} />
-          </Field>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="WhatsApp number" htmlFor="whatsappNumber">
-              <Input id="whatsappNumber" name="whatsappNumber" defaultValue={settings.whatsappNumber ?? ''} disabled={!canUpdate} />
-            </Field>
-            <label className="flex items-center gap-3 self-end pb-2 text-sm">
-              <Switch name="whatsappEnabled" defaultChecked={settings.whatsappEnabled} disabled={!canUpdate} />
-              Show the WhatsApp button
-            </label>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Search engines</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Field label="Title" htmlFor="seoTitle">
-            <Input id="seoTitle" name="seoTitle" maxLength={160} defaultValue={settings.seoTitle ?? ''} disabled={!canUpdate} />
-          </Field>
-          <Field label="Description" htmlFor="seoDescription">
-            <Textarea id="seoDescription" name="seoDescription" rows={2} maxLength={300} defaultValue={settings.seoDescription ?? ''} disabled={!canUpdate} />
-          </Field>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Payment methods</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Only what is switched on here is offered at checkout.
-          </p>
-
-          {paymentMethods.length === 0 ? (
-            <Alert variant="warning">
-              Nothing is switched on, so nobody can check out. Cash on delivery needs no account.
-            </Alert>
+        <div className="space-y-4">
+          {design ? (
+            <>
+              <StorefrontSection design={design} disabled={!canManageDesign} />
+              <AnnouncementSection design={design} disabled={!canManageDesign} />
+            </>
           ) : (
-            <ul className="divide-y">
-              {paymentMethods.map((method) => (
-                <li key={method.id} className="flex items-center justify-between gap-3 py-3">
-                  <div className="min-w-0">
-                    <p className="font-medium">{method.label}</p>
-                    {method.description ? (
-                      <p className="text-xs text-muted-foreground">{method.description}</p>
-                    ) : null}
-                  </div>
-                  <Switch
-                    checked={method.isEnabled}
-                    disabled={!canUpdate}
-                    onCheckedChange={() => togglePayment(method)}
-                    aria-label={`${method.isEnabled ? 'Disable' : 'Enable'} ${method.label}`}
-                  />
-                </li>
-              ))}
-            </ul>
+            payments
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {canUpdate ? (
-        <Button type="submit" loading={saving}>
-          Save settings
-        </Button>
-      ) : null}
+      <Dialog
+        open={pendingSave !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) setPendingSave(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('Switch your store to {currency}?', { currency: pendingCurrency })}</DialogTitle>
+            <DialogDescription>
+              {t('This store has taken orders in {currency}. Here is what the switch does and does not do.', {
+                currency: settings.currency,
+              })}
+            </DialogDescription>
+          </DialogHeader>
+
+          <ul className="list-disc space-y-2 pl-5 text-sm text-muted-foreground">
+            <li>
+              {t.rich(
+                '{lead} Nothing is converted: {before} becomes {after}. Products and coupon amounts all change symbol the same way.',
+                {
+                  lead: <span className="text-foreground">{t('Every price keeps its number.')}</span>,
+                  before: (
+                    <span className="tabular-nums" suppressHydrationWarning>
+                      {t.money('1299.50', settings.currency)}
+                    </span>
+                  ),
+                  after: (
+                    <span className="tabular-nums" suppressHydrationWarning>
+                      {t.money('1299.50', pendingCurrency)}
+                    </span>
+                  ),
+                },
+              )}
+            </li>
+            <li>
+              {t.rich('{lead} show {currency} straight away, and new orders are charged in it.', {
+                lead: <span className="text-foreground">{t('The admin panel and your storefront')}</span>,
+                currency: pendingCurrency,
+              })}
+            </li>
+            <li>
+              {t.rich(
+                '{lead} They stay in the currency they were charged in, and revenue totals count {currency} orders only.',
+                {
+                  lead: <span className="text-foreground">{t('Orders already taken are not touched.')}</span>,
+                  currency: pendingCurrency,
+                },
+              )}
+            </li>
+          </ul>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPendingSave(null)} disabled={saving}>
+              {t('Keep {currency}', { currency: settings.currency })}
+            </Button>
+            <Button
+              type="button"
+              loading={saving}
+              onClick={() => {
+                if (pendingSave) void save(pendingSave, true);
+              }}
+            >
+              {t('Switch to {currency}', { currency: pendingCurrency })}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

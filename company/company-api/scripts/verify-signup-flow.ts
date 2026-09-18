@@ -18,10 +18,11 @@
 import pg from 'pg';
 import { and, eq } from 'drizzle-orm';
 import { db, pool } from '../src/db/client';
-import { clientAccounts, clientSessions, plans, subscriptions, tenants } from '../src/db/schema/index';
+import { clientAccounts, plans, subscriptions, tenants } from '../src/db/schema/index';
 import { config } from '../src/config/index';
 import { resolveShard, shardClientOptions } from '../src/services/tenant-shards';
 import { generateToken, sha256 } from '../src/lib/crypto';
+import { createClientSession } from '../src/lib/session';
 import { hashOtp } from '../src/lib/otp';
 import { hashPassword, verifyPassword } from '../src/lib/password';
 import { addHours } from '../src/lib/utils';
@@ -157,14 +158,13 @@ async function main(): Promise<void> {
     })
     .returning({ id: clientAccounts.id });
 
-  const token = generateToken(32);
-  await db.insert(clientSessions).values({
-    clientAccountId: account!.id,
-    tokenHash: sha256(token),
-    otpVerified: true,
-    expiresAt: addHours(new Date(), 2),
-  });
-  const cookie = `company_client_session=${token}`;
+  /*
+   * Minted through the API's own session module: the cookie carries a signed
+   * JWT now, so there is no row to plant and a hand-rolled token would simply
+   * fail to verify.
+   */
+  const session = await createClientSession(null, account!.id, false, { otpVerified: true });
+  const cookie = `company_client_session=${session.token}`;
 
   console.log('\nStep 1 — a fresh account starts at the plan step');
   const initial = await call('/api/v1/client/onboarding', { cookie });

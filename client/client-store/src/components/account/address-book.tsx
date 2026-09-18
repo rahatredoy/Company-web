@@ -20,8 +20,10 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { AddressBlock } from '@/components/account/order-detail-parts';
+import { useT, type MessageKey } from '@/lib/i18n';
 
-const COUNTRIES = ['Bangladesh', 'India', 'Pakistan', 'Sri Lanka', 'Nepal'];
+/** Sent to the API as written; only the option's label is translated. */
+const COUNTRIES: MessageKey[] = ['Bangladesh', 'India', 'Pakistan', 'Sri Lanka', 'Nepal'];
 
 /**
  * The saved address book.
@@ -31,6 +33,7 @@ const COUNTRIES = ['Bangladesh', 'India', 'Pakistan', 'Sri Lanka', 'Nepal'];
  * address reappears on the next render.
  */
 export function AddressBook({ addresses }: { addresses: Address[] }) {
+  const t = useT();
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Address | null>(null);
@@ -84,7 +87,7 @@ export function AddressBook({ addresses }: { addresses: Address[] }) {
         | null;
 
       if (!response.ok) {
-        setError(body?.error ?? 'We could not save that address.');
+        setError(body?.error ?? t('We could not save that address.'));
         if (body?.details) setFieldErrors(body.details);
         setSaving(false);
         return;
@@ -93,14 +96,15 @@ export function AddressBook({ addresses }: { addresses: Address[] }) {
       setOpen(false);
       router.refresh();
     } catch {
-      setError('We could not reach the store. Check your connection and try again.');
+      setError(t('We could not reach the store. Check your connection and try again.'));
     } finally {
       setSaving(false);
     }
   };
 
   const onDelete = async (address: Address) => {
-    if (!window.confirm(`Remove ${address.label ?? 'this address'}?`)) return;
+    const question = address.label ? t('Remove {name}?', { name: address.label }) : t('Remove this address?');
+    if (!window.confirm(question)) return;
 
     const response = await fetch(`/api/account/addresses?id=${encodeURIComponent(address.id)}`, {
       method: 'DELETE',
@@ -111,22 +115,22 @@ export function AddressBook({ addresses }: { addresses: Address[] }) {
 
   return (
     <>
-      <div className="mt-8 flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4">
         <p className="text-sm text-muted">
           {addresses.length === 0
-            ? 'Nothing saved yet.'
-            : `${addresses.length} saved ${addresses.length === 1 ? 'address' : 'addresses'}.`}
+            ? t('Nothing saved yet.')
+            : t.plural(addresses.length, '{count} saved address.', '{count} saved addresses.')}
         </p>
         <Button size="sm" onClick={() => openFor(null)}>
-          <Plus aria-hidden /> Add address
+          <Plus aria-hidden /> {t('Add address')}
         </Button>
       </div>
 
       {addresses.length === 0 ? (
         <EmptyState
           icon={MapPin}
-          title="No saved addresses"
-          description="Add one here, or the address you enter at checkout will be saved for you."
+          title={t('No saved addresses')}
+          description={t('Add one here, or the address you enter at checkout will be saved for you.')}
           className="mt-4 rounded-(--radius-card) border border-dashed border-border"
         />
       ) : (
@@ -134,21 +138,21 @@ export function AddressBook({ addresses }: { addresses: Address[] }) {
           {addresses.map((address) => (
             <li key={address.id} className="rounded-(--radius-card) border border-border bg-surface p-5">
               <div className="flex items-start justify-between gap-3">
-                <p className="text-sm font-semibold">{address.label ?? 'Address'}</p>
-                {address.isDefault ? <Badge tone="soft">Default</Badge> : null}
+                <p className="text-sm font-semibold">{address.label ?? t('Address')}</p>
+                {address.isDefault ? <Badge tone="soft">{t('Default')}</Badge> : null}
               </div>
               <AddressBlock address={address} className="mt-3" />
               <div className="mt-4 flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => openFor(address)}>
-                  <Pencil aria-hidden /> Edit
+                  <Pencil aria-hidden /> {t('Edit')}
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => onDelete(address)}
-                  aria-label={`Remove ${address.label ?? 'address'}`}
+                  aria-label={address.label ? t('Remove {name}', { name: address.label }) : t('Remove address')}
                 >
-                  <Trash2 aria-hidden /> Remove
+                  <Trash2 aria-hidden /> {t('Remove')}
                 </Button>
               </div>
             </li>
@@ -160,39 +164,39 @@ export function AddressBook({ addresses }: { addresses: Address[] }) {
         <DialogContent className="max-w-lg">
           <form onSubmit={onSubmit}>
             <DialogHeader>
-              <DialogTitle>{editing ? 'Edit address' : 'Add an address'}</DialogTitle>
-              <DialogDescription>Where we should send your orders.</DialogDescription>
+              <DialogTitle>{editing ? t('Edit address') : t('Add an address')}</DialogTitle>
+              <DialogDescription>{t('Where we should send your orders.')}</DialogDescription>
             </DialogHeader>
 
             <div className="max-h-[60vh] space-y-4 overflow-y-auto py-4">
               {error ? <Alert tone="danger">{error}</Alert> : null}
 
-              <Field name="label" label="Name this address" hint="Home, Office — anything you like.">
+              <Field name="label" label={t('Name this address')} hint={t('Home, Office — anything you like.')}>
                 {(props) => <Input {...props} defaultValue={editing?.label ?? ''} maxLength={40} />}
               </Field>
 
-              <Field name="fullName" label="Full name" required error={fieldErrors.fullName}>
+              <Field name="fullName" label={t('Full name')} required error={fieldErrors.fullName}>
                 {(props) => (
                   <Input {...props} defaultValue={editing?.fullName ?? ''} autoComplete="name" />
                 )}
               </Field>
 
-              <Field name="phone" label="Phone" required error={fieldErrors.phone}>
+              <Field name="phone" label={t('Phone')} required error={fieldErrors.phone}>
                 {(props) => <Input {...props} defaultValue={editing?.phone ?? ''} autoComplete="tel" />}
               </Field>
 
-              <Field name="addressLine1" label="Address" required error={fieldErrors.addressLine1}>
+              <Field name="addressLine1" label={t('Address')} required error={fieldErrors.addressLine1}>
                 {(props) => (
                   <Input
                     {...props}
                     defaultValue={editing?.addressLine1 ?? ''}
-                    placeholder="House, road, area"
+                    placeholder={t('House, road, area')}
                     autoComplete="address-line1"
                   />
                 )}
               </Field>
 
-              <Field name="addressLine2" label="Apartment, floor, landmark">
+              <Field name="addressLine2" label={t('Apartment, floor, landmark')}>
                 {(props) => (
                   <Input
                     {...props}
@@ -203,12 +207,12 @@ export function AddressBook({ addresses }: { addresses: Address[] }) {
               </Field>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field name="city" label="City" required error={fieldErrors.city}>
+                <Field name="city" label={t('City')} required error={fieldErrors.city}>
                   {(props) => (
                     <Input {...props} defaultValue={editing?.city ?? ''} autoComplete="address-level2" />
                   )}
                 </Field>
-                <Field name="state" label="District / State">
+                <Field name="state" label={t('District / State')}>
                   {(props) => (
                     <Input {...props} defaultValue={editing?.state ?? ''} autoComplete="address-level1" />
                   )}
@@ -216,7 +220,7 @@ export function AddressBook({ addresses }: { addresses: Address[] }) {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field name="postalCode" label="Postcode">
+                <Field name="postalCode" label={t('Postcode')}>
                   {(props) => (
                     <Input
                       {...props}
@@ -226,7 +230,7 @@ export function AddressBook({ addresses }: { addresses: Address[] }) {
                     />
                   )}
                 </Field>
-                <Field name="country" label="Country" required error={fieldErrors.country}>
+                <Field name="country" label={t('Country')} required error={fieldErrors.country}>
                   {(props) => (
                     <select
                       {...props}
@@ -236,7 +240,7 @@ export function AddressBook({ addresses }: { addresses: Address[] }) {
                     >
                       {COUNTRIES.map((country) => (
                         <option key={country} value={country}>
-                          {country}
+                          {t(country)}
                         </option>
                       ))}
                     </select>
@@ -247,17 +251,17 @@ export function AddressBook({ addresses }: { addresses: Address[] }) {
               <CheckboxField
                 id="isDefault"
                 name="isDefault"
-                label="Use this as my default address"
+                label={t('Use this as my default address')}
                 defaultChecked={editing?.isDefault ?? addresses.length === 0}
               />
             </div>
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button type="submit" disabled={saving}>
-                {saving ? 'Saving…' : editing ? 'Save changes' : 'Add address'}
+                {saving ? t('Saving…') : editing ? t('Save changes') : t('Add address')}
               </Button>
             </DialogFooter>
           </form>

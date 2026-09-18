@@ -5,9 +5,10 @@ import type { Brand } from '@/types';
 import { getStoreConfig } from '@/lib/api/store';
 import { getProductList, parseProductQuery } from '@/lib/api/products';
 import { getTemplate } from '@/templates/registry';
-import { Breadcrumb, ProductListing } from '@/components/catalog/product-listing';
+import { ProductListing } from '@/components/catalog/product-listing';
 import { apiFetch, isStoreNotFound } from '@/lib/api/client';
 import { cookieHeader, storeCall } from '@/lib/tenant';
+import { getT } from '@/lib/i18n/server';
 
 async function getBrand(slug: string): Promise<Brand | null> {
   try {
@@ -30,11 +31,11 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const brand = await getBrand(slug);
-  if (!brand) return { title: 'Brand not found' };
+  if (!brand) return { title: (await getT())('Brand not found') };
 
   return {
-    title: brand.seo.title ?? brand.name,
-    description: brand.seo.description ?? brand.description ?? undefined,
+    title: brand.name,
+    description: brand.description ?? undefined,
     alternates: { canonical: `/brand/${brand.slug}` },
   };
 }
@@ -52,38 +53,47 @@ export default async function BrandPage({
   if (!brand) notFound();
 
   const query = parseProductQuery(search, { brand: [slug] });
-  const [config, result] = await Promise.all([getStoreConfig(), getProductList(query)]);
+  const [config, result, t] = await Promise.all([getStoreConfig(), getProductList(query), getT()]);
   const template = await getTemplate(config.design.templateKey);
 
   return (
     <div className="container-store py-6">
-      <Breadcrumb trail={[{ name: 'Brands', href: '/brands' }, { name: brand.name }]} />
+      <h1 className="sr-only">{brand.name}</h1>
 
-      <div className="mb-8 flex flex-wrap items-center gap-5 rounded-(--radius-card) border border-border bg-surface p-6">
-        {brand.logoUrl ? (
-          <Image
-            src={brand.logoUrl}
-            alt={brand.name}
-            width={120}
-            height={48}
-            className="h-12 w-auto object-contain"
-          />
-        ) : null}
-        <div>
-          <h1 className="text-2xl font-semibold sm:text-3xl">{brand.name}</h1>
+      {/*
+        The brand's own mark and its own words, with nothing framing them.
+
+        A bordered panel wrapping a name the visitor clicked to get here is
+        chrome, and it pushed the products the better part of a card's height
+        down the page. A brand that has supplied neither a logo nor a
+        description now gets no block at all, rather than an empty one.
+      */}
+      {brand.logoUrl || brand.description ? (
+        <div className="mb-5 flex flex-wrap items-center gap-4">
+          {brand.logoUrl ? (
+            <Image
+              src={brand.logoUrl}
+              alt={brand.name}
+              width={120}
+              height={40}
+              className="h-10 w-auto object-contain"
+            />
+          ) : null}
           {brand.description ? (
-            <p className="mt-2 max-w-2xl text-sm text-muted">{brand.description}</p>
+            <p className="max-w-2xl text-sm text-muted">{brand.description}</p>
           ) : null}
         </div>
-      </div>
+      ) : null}
 
       <ProductListing
         result={result}
+        query={query}
         sort={query.sort ?? 'relevance'}
         cardVariant={template.cardVariant}
         gridClassName={template.gridClassName}
         locale={config.store.language}
-        emptyTitle={`No ${brand.name} products match those filters`}
+        currency={config.store.currency}
+        emptyTitle={t('No {name} products match those filters', { name: brand.name })}
       />
     </div>
   );

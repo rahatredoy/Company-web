@@ -71,6 +71,13 @@
       "when": 1786475551031,
       "tag": "0009_past_slipstream",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786475551032,
+      "tag": "0010_drop_session_tables",
+      "breakpoints": true
     }
   ]
 }

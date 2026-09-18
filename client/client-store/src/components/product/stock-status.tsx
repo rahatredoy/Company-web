@@ -1,4 +1,7 @@
+'use client';
+
 import { AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -24,11 +27,13 @@ export function StockStatus({
   remaining?: number | null;
   className?: string;
 }) {
+  const t = useT();
+
   if (!inStock) {
     return (
       <p className={cn('flex items-center gap-2 text-sm font-medium text-error', className)}>
         <XCircle className="size-4 shrink-0" aria-hidden />
-        Out of stock
+        {t('Out of stock')}
       </p>
     );
   }
@@ -37,7 +42,7 @@ export function StockStatus({
     return (
       <p className={cn('flex items-center gap-2 text-sm font-medium text-warning', className)}>
         <AlertCircle className="size-4 shrink-0" aria-hidden />
-        {remaining && remaining > 0 ? `Only ${remaining} left in stock` : 'Low stock'}
+        {remaining && remaining > 0 ? t('Only {count} left in stock', { count: remaining }) : t('Low stock')}
       </p>
     );
   }
@@ -45,7 +50,7 @@ export function StockStatus({
   return (
     <p className={cn('flex items-center gap-2 text-sm font-medium text-success', className)}>
       <CheckCircle2 className="size-4 shrink-0" aria-hidden />
-      In stock
+      {t('In stock')}
     </p>
   );
 }

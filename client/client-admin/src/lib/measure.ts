@@ -12,6 +12,8 @@
  * there, change it here.
  */
 
+import type { MessageKey } from '@/lib/i18n';
+
 export const MEASURE_UNITS = ['g', 'ml', 'pc'] as const;
 export type MeasureUnit = (typeof MEASURE_UNITS)[number];
 
@@ -20,8 +22,11 @@ export interface MeasureOption {
   measure: number;
 }
 
-/** What the unit select offers, in the owner's words rather than the column's. */
-export const MEASURE_UNIT_CHOICES: { value: MeasureUnit; label: string }[] = [
+/**
+ * What the unit select offers, in the owner's words rather than the column's.
+ * The labels are English dictionary keys; the select translates them with `t()`.
+ */
+export const MEASURE_UNIT_CHOICES: { value: MeasureUnit; label: MessageKey }[] = [
   { value: 'g', label: 'Weight (grams / kg)' },
   { value: 'ml', label: 'Volume (ml / litres)' },
   { value: 'pc', label: 'Pieces' },
@@ -75,21 +80,9 @@ export function priceForMeasure(price: string | number, measure: number, pricing
 /**
  * How much of the shelf a quantity of a line takes.
  *
- * Twin of the API's `stockUnitsOf`, and the reason inventory and order screens
- * can say "2 × 500gm (1kg)" without a second request.
+ * Twin of the API's `stockUnitsOf`, and the reason order screens can say
+ * "2 × 500gm (1kg)" without a second request.
  */
 export function stockUnitsOf(line: { quantity: number; measure?: number | null }): number {
   return line.quantity * (line.measure && line.measure > 0 ? line.measure : 1);
-}
-
-/**
- * A stock count as the shop reads it.
- *
- * `inventory_levels.available` counts base units for a measure product, so a
- * pumpkin shelf reads 40000 in the column and "40kg" here. Plain products are
- * untouched and answer with the bare number.
- */
-export function formatStock(amount: number, unit?: string | null): string {
-  if (!unit || !(MEASURE_UNITS as readonly string[]).includes(unit)) return String(amount);
-  return formatMeasure(amount, unit as MeasureUnit);
 }

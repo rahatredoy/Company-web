@@ -16,6 +16,7 @@ import {
   DASHBOARD_RANGES,
   formatDashboardRange,
 } from '@/lib/dashboard';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { DashboardGranularity } from '@/lib/types';
 
@@ -100,10 +101,15 @@ export function RangePicker({
   to?: string;
   timezone?: string;
 }) {
+  const t = useT();
   const { set, pending } = useSetParam();
   const preset = DASHBOARD_RANGES.find((range) => range.days === days);
   const label =
-    from && to && timezone ? formatDashboardRange(from, to, timezone) : (preset?.label ?? `${days} days`);
+    from && to && timezone
+      ? formatDashboardRange(from, to, timezone, t.locale)
+      : preset
+        ? t(preset.label)
+        : t('{count} days', { count: days });
 
   return (
     <DropdownMenu>
@@ -111,7 +117,7 @@ export function RangePicker({
         <span className="tabular-nums">{label}</span>
       </TriggerButton>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel>Date range</DropdownMenuLabel>
+        <DropdownMenuLabel>{t('Date range')}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {DASHBOARD_RANGES.map((range) => (
           <DropdownMenuItem
@@ -119,7 +125,7 @@ export function RangePicker({
             onSelect={() => set('days', String(range.days))}
             className="justify-between"
           >
-            {range.label}
+            {t(range.label)}
             {range.days === days ? <Check className="size-4" aria-hidden /> : null}
           </DropdownMenuItem>
         ))}
@@ -129,17 +135,18 @@ export function RangePicker({
 }
 
 export function GranularityPicker({ granularity }: { granularity: DashboardGranularity }) {
+  const t = useT();
   const { set, pending } = useSetParam();
   const current =
     DASHBOARD_GRANULARITIES.find((item) => item.key === granularity) ?? DASHBOARD_GRANULARITIES[0]!;
 
   return (
     <DropdownMenu>
-      <TriggerButton pending={pending}>{current.label}</TriggerButton>
+      <TriggerButton pending={pending}>{t(current.label)}</TriggerButton>
       <DropdownMenuContent align="end" className="w-36">
         {DASHBOARD_GRANULARITIES.map((item) => (
           <DropdownMenuItem key={item.key} onSelect={() => set('granularity', item.key)} className="justify-between">
-            {item.label}
+            {t(item.label)}
             {item.key === granularity ? <Check className="size-4" aria-hidden /> : null}
           </DropdownMenuItem>
         ))}

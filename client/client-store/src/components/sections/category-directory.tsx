@@ -2,7 +2,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
 import type { Category } from '@/types';
-import { cn, pluralise } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
+import { cn } from '@/lib/utils';
 
 /**
  * Every department, with the aisles inside it, on the homepage itself.
@@ -27,7 +28,7 @@ import { cn, pluralise } from '@/lib/utils';
  */
 const MAX_DEPTH = 2;
 
-export function CategoryDirectory({
+export async function CategoryDirectory({
   categories,
   className,
 }: {
@@ -35,6 +36,8 @@ export function CategoryDirectory({
   className?: string;
 }) {
   if (categories.length === 0) return null;
+
+  const t = await getT();
 
   return (
     <ul className={cn('grid gap-4 sm:grid-cols-2 lg:grid-cols-3', className)}>
@@ -76,7 +79,7 @@ export function CategoryDirectory({
                 />
               </Link>
               <p className="mt-0.5 text-xs text-muted">
-                {category.productCount} {pluralise(category.productCount, 'product')}
+                {t.plural(category.productCount, '{count} product', '{count} products')}
               </p>
             </div>
           </div>

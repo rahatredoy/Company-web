@@ -112,62 +112,6 @@ const BEST_SELLER_MIN_SOLD = 10;
 /** Below this many units a variant is "Only N left" rather than in stock. */
 const DEFAULT_LOW_STOCK_THRESHOLD = 5;
 
-// --------------------------------------------------------------- currency ----
-
-/**
- * The currency this store quotes prices in.
- *
- * Every storefront read accepts a `?currency=` parameter — it is part of the
- * Next.js cache key, so a shared cache entry can never serve one visitor's
- * currency to the next — but the value is **not** honoured here, and that is
- * deliberate rather than unfinished. Converting would mean holding exchange
- * rates and deciding when they are stale, and a price is what the customer is
- * charged; quoting one at yesterday's rate is a pricing bug, not a display one.
- *
- * `store_settings.preferences.currencies` therefore seeds with the single
- * currency the store trades in, the storefront draws no selector when there is
- * only one, and the parameter is inert until there is a rate source to make it
- * mean something.
- */
-export async function loadStoreCurrency(store: {
-  tenantRef: string;
-  currency: string;
-  db: TenantDb;
-}): Promise<string> {
-  /*
-   * Held in this process for a few seconds as well as in Redis.
-   *
-   * Every catalogue read needs the currency before it can do anything else — it
-   * is part of the cache key, so it cannot be fetched alongside the listing it
-   * keys — which made it a serial round trip to a Redis that is not local, on
-   * the front of every product page in the platform. It is also the most
-   * immutable value the store has: `settings` refuses to change it once an order
-   * has been taken, because prices carry no currency of their own and switching
-   * the code would re-label every past total. Seconds of staleness on a field
-   * that is frozen for the life of a trading store is not a real risk, and it
-   * takes a network hop off the critical path of every request.
-   */
-  const memo = currencyMemo.get(store.tenantRef);
-  if (memo && memo.expiresAt > Date.now()) return memo.currency;
-
-  const currency = await cached(
-    tenantKey(store.tenantRef, 'storefront', 'currency'),
-    CACHE_TTL.storefrontConfig,
-    async () => {
-      const [row] = await store.db.select({ currency: storeSettings.currency }).from(storeSettings).limit(1);
-      // The control plane's value is the fallback: it is what provisioning wrote
-      // into `store_settings` in the first place.
-      return row?.currency ?? store.currency;
-    },
-  );
-
-  currencyMemo.set(store.tenantRef, { currency, expiresAt: Date.now() + CURRENCY_MEMO_MS });
-  return currency;
-}
-
-const currencyMemo = new Map<string, { currency: string; expiresAt: number }>();
-const CURRENCY_MEMO_MS = 5_000;
-
 /**
  * The store's default measure picker — the 1kg/500gm/250gm/100gm list.
  *
@@ -198,32 +142,15 @@ export async function loadMeasureDefaults(store: { tenantRef: string; db: Tenant
     },
   );
 
-  measureMemo.set(store.tenantRef, { options, expiresAt: Date.now() + CURRENCY_MEMO_MS });
+  measureMemo.set(store.tenantRef, { options, expiresAt: Date.now() + MEASURE_MEMO_MS });
   return options;
 }
 
 const measureMemo = new Map<string, { options: MeasureOption[]; expiresAt: number }>();
+/** The same span `lib/store-currency.ts` holds the currency for, and for the same reason. */
+const MEASURE_MEMO_MS = 5_000;
 
 // ------------------------------------------------------------------ money ----
-
-/**
- * The price a customer actually pays, given a sale window.
- *
- * A sale price with a window that has not opened or has already closed is not a
- * sale — the column keeps its value so the owner can schedule one without
- * retyping it, which means the dates have to be honoured on read.
- */
-export function effectiveSale(
-  salePrice: string | null,
-  startsAt: Date | null,
-  endsAt: Date | null,
-  now = new Date(),
-): string | null {
-  if (salePrice === null) return null;
-  if (startsAt && startsAt > now) return null;
-  if (endsAt && endsAt < now) return null;
-  return salePrice;
-}
 
 /**
  * Computed here rather than in the browser, so the badge and the price can never
@@ -330,32 +257,40 @@ export function breadcrumbFor(tree: CategoryNode[], categoryId: string): { name:
 
 export interface ListingFilters {
   q?: string;
+  /**
+   * The scope the page itself is in — everything under `?category=`.
+   *
+   * Kept apart from `subCategoryIds` rather than merged into one list, because
+   * the sidebar's Category group has to be counted as if its **own** filter were
+   * not applied (`exclude: 'sub'`) while the page's own scope stays on. A single
+   * merged list cannot have half of itself lifted, and a facet counted with the
+   * whole thing lifted would offer departments this page is not showing.
+   */
   categoryIds?: string[];
+  /** The categories ticked in the sidebar (`?sub=`), each as a whole subtree. */
+  subCategoryIds?: string[];
   brandSlugs?: string[];
   minPrice?: number;
   maxPrice?: number;
+  /**
+   * The price buckets ticked in the sidebar. Unioned, never intersected — two
+   * ticked bands mean "either", exactly as two ticked brands do.
+   */
+  priceBands?: PriceBand[];
   rating?: number;
   inStock?: boolean;
   sale?: boolean;
+  /** The offer badges ticked in the sidebar (`?offer=`). Unioned, as above. */
+  offers?: OfferKey[];
   /** attribute slug → attribute value slugs. */
   attributes?: Record<string, string[]>;
 }
 
 /**
- * The sale price a shopper can actually get **right now**, or null.
+ * The lowest sale price across a product's active variants, or null.
  *
- * `products.sale_price_from` is denormalised from the variants and carries no
- * window, so on its own it advertises a sale that has not started and one that
- * ended last month. The window lives on the variant — `sale_starts_at` /
- * `sale_ends_at` — and `effectiveSale` has always applied it on the product
- * page and at checkout. Everything *else* read the flat column, so a listing
- * card could offer a price the product page then refused; now that the admin
- * panel can set a window, that gap became reachable.
- *
- * `min` over the live ones rather than the cheapest variant's sale price: this
- * is a "from" price, and the lowest sale a shopper can currently get is the
- * honest answer to it. A null bound means "no bound", so a sale with neither
- * behaves exactly as it did before.
+ * Read from the variants rather than `products.sale_price_from`, so a variant
+ * that has been switched off cannot advertise a price nobody can buy.
  */
 export const liveSalePriceSql = sql<string | null>`(
   select min(v.sale_price)
@@ -363,12 +298,10 @@ export const liveSalePriceSql = sql<string | null>`(
    where v.product_id = ${products.id}
      and v.is_active
      and v.sale_price is not null
-     and (v.sale_starts_at is null or v.sale_starts_at <= now())
-     and (v.sale_ends_at is null or v.sale_ends_at >= now())
 )`;
 
 /**
- * Whether any variant is on sale right now — the filter's half of the above.
+ * Whether any active variant is on sale — the filter's half of the above.
  *
  * A semi-join rather than a comparison against `liveSalePriceSql`, because
  * `exists` stops at the first matching variant and can be answered straight from
@@ -382,11 +315,9 @@ export const liveSaleExistsSql = sql`exists (
      and v.is_active
      and v.sale_price is not null
      and v.sale_price < v.price
-     and (v.sale_starts_at is null or v.sale_starts_at <= now())
-     and (v.sale_ends_at is null or v.sale_ends_at >= now())
 )`;
 
-/** What a customer pays, as SQL — the live sale price when there is one. */
+/** What a customer pays, as SQL — the sale price when there is one. */
 const effectivePriceSql = sql<string>`coalesce(${liveSalePriceSql}, ${products.priceFrom}, 0)`;
 
 /**
@@ -416,6 +347,261 @@ const inStockSql = sql`(
     where pv.product_id = ${products.id} and pv.is_active and il.available > 0
   )
 )`;
+
+// ----------------------------------------------------------------- offers ----
+
+/**
+ * How much off counts as "Discounted" rather than as a price that moved.
+ *
+ * The three discount offers are one ladder, not three mechanisms — any live
+ * sale, a real cut, and the deep end — so each is a strict subset of the one
+ * above it. That is what makes Clearance a narrowing of On Sale rather than a
+ * second, competing claim about the same product.
+ */
+const DISCOUNTED_MIN_PERCENT = 10;
+
+/** And where the deep end starts. */
+const CLEARANCE_MIN_PERCENT = 40;
+
+/** A rating high enough to be a recommendation rather than an absence of one. */
+const TOP_RATED_MIN_AVERAGE = '4.5';
+
+/**
+ * How far back "Trending" looks.
+ *
+ * It is measured in **orders**, not views: `products.view_count` and
+ * `product_daily_metrics` are both declared and neither is written by anything
+ * in this API, so a filter built on either would return an empty list for ever
+ * and read as a broken shop rather than as an unwired counter. What people
+ * actually bought this month is a fact the order pipeline keeps current on its
+ * own.
+ */
+const TRENDING_DAYS = 30;
+
+/** Some active variant is on sale, at least `percent` below its list price. */
+function saleAtLeast(percent: number): SQL {
+  const ceiling = ((100 - percent) / 100).toFixed(4);
+
+  return sql`exists (
+    select 1
+      from ${productVariants} v
+     where v.product_id = ${products.id}
+       and v.is_active
+       and v.sale_price is not null
+       and v.price > 0
+       and v.sale_price <= v.price * ${ceiling}::numeric
+  )`;
+}
+
+/** The offer badges a shopper may filter by. This order is the drawing order. */
+export const OFFER_KEYS = [
+  'on_sale',
+  'discounted',
+  'flash_deal',
+  'clearance',
+  'coupon',
+  'best_seller',
+  'trending',
+  'top_rated',
+] as const;
+
+export type OfferKey = (typeof OFFER_KEYS)[number];
+
+/**
+ * What each badge is actually made of.
+ *
+ * **Every one is a fact some other part of the platform already acts on** — a
+ * campaign the homepage is counting down, a coupon checkout would really
+ * accept, the flash the card already prints — rather than a label an owner ticks on a form. A filter that
+ * promises a deal the till does not honour is worse than no filter at all.
+ *
+ * That is also why "Coupon Available" reads a discount's product rules: the
+ * discount engine enforces them at the till, so a code for one category is an
+ * offer on that category's products and on nothing else.
+ */
+const OFFERS: { key: OfferKey; label: string; condition: SQL }[] = [
+  { key: 'on_sale', label: 'On Sale', condition: liveSaleExistsSql },
+  { key: 'discounted', label: 'Discounted', condition: saleAtLeast(DISCOUNTED_MIN_PERCENT) },
+  {
+    /*
+     * A running `flash_sales` campaign — the same rows the homepage's countdown
+     * reads, so the filter and the block cannot disagree about what is in it.
+     * Membership rather than depth: a flash deal is a deal that ends, and the
+     * ending is what is being filtered for.
+     */
+    key: 'flash_deal',
+    label: 'Flash Deal',
+    condition: sql`exists (
+      select 1
+        from flash_sale_products fsp
+        join flash_sales fs on fs.id = fsp.flash_sale_id
+       where fsp.product_id = ${products.id}
+         and fs.is_active
+         and fs.starts_at <= now()
+         and fs.ends_at > now()
+    )`,
+  },
+  { key: 'clearance', label: 'Clearance', condition: saleAtLeast(CLEARANCE_MIN_PERCENT) },
+  {
+    /*
+     * A public code this product could actually be bought with today: live, not
+     * used up, carrying a minimum spend the product's own price already clears —
+     * a "spend 5000, save 10%" code is not an offer on a 300-taka bar of soap —
+     * and applying to this product at all, read from the same product rules the
+     * discount engine enforces at the till. A voucher is somebody's own and a
+     * named-customer code is nobody else's, so neither makes a product "coupon
+     * available" to the shopper reading the filter.
+     */
+    key: 'coupon',
+    label: 'Coupon Available',
+    condition: sql`exists (
+      select 1
+        from discounts d
+       where d.archived_at is null
+         and d.status = 'active'
+         and d.code is not null
+         and d.kind in ('coupon', 'bank_offer', 'payment_offer')
+         and coalesce(d.customer_rules->>'segment', 'all') <> 'selected'
+         and (d.starts_at is null or d.starts_at <= now())
+         and (d.ends_at is null or d.ends_at > now())
+         and (d.usage_limit is null or d.used_count < d.usage_limit)
+         and (d.min_order_amount is null or d.min_order_amount <= ${effectivePriceSql})
+         and (
+           coalesce(d.product_rules->>'appliesTo', 'all') = 'all'
+           or coalesce(d.product_rules->'productIds', '[]'::jsonb) ? ${products.id}::text
+           or coalesce(d.product_rules->'brandIds', '[]'::jsonb) ? ${products.brandId}::text
+           or exists (
+             select 1
+               from categories c0
+               left join categories c1 on c1.id = c0.parent_id
+               left join categories c2 on c2.id = c1.parent_id
+              where c0.id = ${products.categoryId}
+                and coalesce(d.product_rules->'categoryIds', '[]'::jsonb)
+                    ?| array_remove(array[c0.id::text, c1.id::text, c2.id::text], null)
+           )
+           or exists (
+             select 1 from collection_products cp
+              where cp.product_id = ${products.id}
+                and coalesce(d.product_rules->'collectionIds', '[]'::jsonb) ? cp.collection_id::text
+           )
+           or exists (
+             select 1 from product_variants pv
+              where pv.product_id = ${products.id}
+                and pv.is_active
+                and coalesce(d.product_rules->'variantIds', '[]'::jsonb) ? pv.id::text
+           )
+         )
+         and not coalesce(d.product_rules->'excludeProductIds', '[]'::jsonb) ? ${products.id}::text
+         and not (${products.brandId} is not null and coalesce(d.product_rules->'excludeBrandIds', '[]'::jsonb) ? ${products.brandId}::text)
+         and not exists (
+           select 1
+             from categories c0
+             left join categories c1 on c1.id = c0.parent_id
+             left join categories c2 on c2.id = c1.parent_id
+            where c0.id = ${products.categoryId}
+              and coalesce(d.product_rules->'excludeCategoryIds', '[]'::jsonb)
+                  ?| array_remove(array[c0.id::text, c1.id::text, c2.id::text], null)
+         )
+         and not (coalesce((d.product_rules->>'excludeSaleItems')::boolean, false) and ${liveSaleExistsSql})
+    )`,
+  },
+  {
+    // The threshold the card's own "Best seller" flash uses, so a filtered grid
+    // is the badged products and nothing else.
+    key: 'best_seller',
+    label: 'Best Seller',
+    condition: sql`${products.soldCount} >= ${BEST_SELLER_MIN_SOLD}`,
+  },
+  {
+    key: 'trending',
+    label: 'Trending',
+    condition: sql`exists (
+      select 1
+        from order_items oi
+        join orders o on o.id = oi.order_id
+       where oi.product_id = ${products.id}
+         and coalesce(o.placed_at, o.created_at) >= now() - make_interval(days => ${TRENDING_DAYS})
+         and o.status not in ('cancelled', 'returned', 'refunded', 'failed')
+    )`,
+  },
+  {
+    // A rating with nobody behind it is a default, not a recommendation, so the
+    // count has to be there as well as the average.
+    key: 'top_rated',
+    label: 'Top Rated',
+    condition: sql`(${products.ratingAverage} >= ${TOP_RATED_MIN_AVERAGE} and ${products.ratingCount} > 0)`,
+  },
+];
+
+const OFFER_BY_KEY = new Map(OFFERS.map((offer) => [offer.key, offer]));
+
+/** Whitelists `?offer=` against the badges above; anything invented is dropped. */
+export function parseOfferKeys(values: string[] | undefined): OfferKey[] | undefined {
+  if (!values?.length) return undefined;
+
+  const keys = [...new Set(values.map((value) => value.trim().toLowerCase()))].filter(
+    (value): value is OfferKey => OFFER_BY_KEY.has(value as OfferKey),
+  );
+
+  return keys.length > 0 ? keys : undefined;
+}
+
+// ------------------------------------------------------------ price bands ----
+
+export interface PriceBand {
+  min: number;
+  /** Null is the open-ended top band. */
+  max: number | null;
+}
+
+/**
+ * The price buckets the sidebar offers, in the store's own currency.
+ *
+ * A ladder rather than two number boxes, because a shopper filtering by price is
+ * choosing a bracket rather than measuring one — the boxes asked them to type
+ * two numbers to discover the shop sells nothing between them. The bounds are
+ * half-open (`[min, max)`), so nothing can be counted in two bands at once, and
+ * a band the shop has nothing in is dropped rather than drawn as a dead end.
+ *
+ * Fixed thresholds rather than quantiles of the current result set: a bracket
+ * that moves as the listing is filtered is one a shopper cannot learn, and
+ * "Under 200" meaning one thing in Electronics and another in Grocery is how a
+ * filter stops being trusted.
+ */
+const PRICE_BANDS: PriceBand[] = [
+  { min: 0, max: 200 },
+  { min: 200, max: 500 },
+  { min: 500, max: 1000 },
+  { min: 1000, max: null },
+];
+
+/** The wire form of a band: `200-500`, and `1000-` for the open-ended one. */
+export function priceBandValue(band: PriceBand): string {
+  return `${band.min}-${band.max ?? ''}`;
+}
+
+/**
+ * Whitelists `?price=` against the published bands.
+ *
+ * Only a band the facet actually offered is accepted — a hand-edited
+ * `?price=137-999` is dropped rather than honoured, so the panel and the query
+ * can never mean two different things. `minPrice`/`maxPrice` stay accepted
+ * alongside it for a caller that wants an arbitrary range, so the endpoint's
+ * contract did not narrow.
+ */
+export function parsePriceBands(values: string[] | undefined): PriceBand[] | undefined {
+  if (!values?.length) return undefined;
+
+  const wanted = new Set(values.map((value) => value.trim()));
+  const bands = PRICE_BANDS.filter((band) => wanted.has(priceBandValue(band)));
+
+  return bands.length > 0 ? bands : undefined;
+}
+
+function priceBandCondition(band: PriceBand): SQL {
+  const floor = sql`${effectivePriceSql} >= ${band.min}`;
+  return band.max === null ? floor : sql`(${floor} and ${effectivePriceSql} < ${band.max})`;
+}
 
 /**
  * Matches a descriptive attribute value *or* a variant-defining one.
@@ -455,16 +641,23 @@ export function listingConditions(filters: ListingFilters, exclude?: string): SQ
   const conditions: SQL[] = [PUBLISHED_PRODUCT];
 
   if (filters.q) {
-    const term = `%${filters.q}%`;
-    conditions.push(
-      or(
-        sql`${products.name} ilike ${term}`,
-        sql`${products.shortDescription} ilike ${term}`,
-      )!,
-    );
+    // The name only. It also matched the short description until that column
+    // was dropped; the full description is not searched, because an ilike over
+    // unindexed long text is a scan of the whole catalogue on every keystroke.
+    conditions.push(sql`${products.name} ilike ${`%${filters.q}%`}`);
   }
 
-  if (filters.categoryIds?.length) {
+  /*
+   * The page's scope and the sidebar's Category ticks are two filters, not one.
+   *
+   * Ticked categories are always a subtree of the page's own, so applying them
+   * alone is the same set as applying both — and it is what lets `exclude: 'sub'`
+   * count the group as though nothing in it were ticked, while a category page
+   * still counts only its own department.
+   */
+  if (exclude !== 'sub' && filters.subCategoryIds?.length) {
+    conditions.push(inArray(products.categoryId, filters.subCategoryIds));
+  } else if (filters.categoryIds?.length) {
     conditions.push(inArray(products.categoryId, filters.categoryIds));
   }
 
@@ -480,6 +673,12 @@ export function listingConditions(filters: ListingFilters, exclude?: string): SQ
   if (exclude !== 'price') {
     if (filters.minPrice !== undefined) conditions.push(sql`${effectivePriceSql} >= ${filters.minPrice}`);
     if (filters.maxPrice !== undefined) conditions.push(sql`${effectivePriceSql} <= ${filters.maxPrice}`);
+    // Bands are alternatives to each other, so they are one OR'd condition
+    // rather than one condition each — pushed separately they would intersect
+    // to nothing the moment a second box was ticked.
+    if (filters.priceBands?.length) {
+      conditions.push(or(...filters.priceBands.map(priceBandCondition))!);
+    }
   }
 
   if (exclude !== 'rating' && filters.rating !== undefined) {
@@ -488,9 +687,18 @@ export function listingConditions(filters: ListingFilters, exclude?: string): SQ
 
   if (exclude !== 'inStock' && filters.inStock) conditions.push(inStockSql);
 
-  // "On sale" means on sale *now*. Reading the denormalised column instead
-  // would list a product whose window has closed and then show it at full price.
+  // Asked of the active variants rather than the denormalised column.
   if (filters.sale) conditions.push(liveSaleExistsSql);
+
+  // Ticked offers are alternatives, like the price bands: "On Sale or Free
+  // Delivery" is what a row of offer boxes reads as, and intersecting them would
+  // empty the grid on the second click.
+  if (exclude !== 'offer' && filters.offers?.length) {
+    const offers = filters.offers
+      .map((key) => OFFER_BY_KEY.get(key)?.condition)
+      .filter((condition): condition is SQL => condition !== undefined);
+    if (offers.length > 0) conditions.push(or(...offers)!);
+  }
 
   for (const [slug, values] of Object.entries(filters.attributes ?? {})) {
     if (values.length === 0 || exclude === `attr.${slug}`) continue;
@@ -736,18 +944,98 @@ export async function decorateSummaries(
 // ----------------------------------------------------------------- facets ----
 
 /**
+ * What a category facet needs that the filters alone cannot say.
+ *
+ * The tree is already loaded and cached by the route that resolves `?category=`,
+ * so it is handed down rather than read again here.
+ */
+export interface FacetContext {
+  /** Every active category, so a subtree's products can roll up to its head. */
+  tree: CategoryNode[];
+  /**
+   * Whose children the Category group lists: the category this page is scoped
+   * to, or null on `/shop` and `/search`, where the departments are the answer.
+   */
+  parentId: string | null;
+}
+
+/** A band's fallback label. The storefront redraws it in the store's currency. */
+function priceBandLabel(band: PriceBand): string {
+  if (band.max === null) return `${band.min}+`;
+  return band.min === 0 ? `Under ${band.max}` : `${band.min} – ${band.max}`;
+}
+
+/**
  * The filter panel, counted against this result set.
  *
  * Every group is counted with its own filter lifted (`exclude`), so the options a
- * shopper has *not* chosen still show how many products they would return. A
- * group with fewer than two options is dropped: a filter that cannot change the
- * result is a control that does nothing.
+ * shopper has *not* chosen still show how many products they would return. An
+ * option that would return nothing is dropped, and so is one that would return
+ * everything: a filter that cannot change the result is a control that does
+ * nothing, and a count equal to the total is exactly that.
+ *
+ * The push order is the order the sidebar draws in, and it runs from the question
+ * a shopper answers first to the one they answer last — which aisle, which offer,
+ * what price, whose, in stock, and only then the descriptive attributes that vary
+ * from shop to shop.
  */
-/** The rating thresholds offered as facets, highest first. */
-const RATING_STEPS = [4, 3, 2] as const;
+export async function buildFacets(
+  db: TenantDb,
+  filters: ListingFilters,
+  context: FacetContext,
+): Promise<FilterGroup[]> {
+  const [categoryRows, offerRow, priceRow, brandRows, stockRow, attributeRows] = await Promise.all([
+    /*
+     * Counted per category and rolled up in memory.
+     *
+     * A department's count is its whole subtree — "Electronics (36)" has to
+     * include the phones filed two levels beneath it — and asking that as one
+     * query per candidate is six scans of the catalogue for one panel. One
+     * grouped scan plus a walk of a tree that is already cached is the same
+     * answer for the cheaper half of the cost.
+     */
+    db
+      .select({ categoryId: products.categoryId, tally: sql<number>`count(*)::int` })
+      .from(products)
+      .where(and(...listingConditions(filters, 'sub')))
+      .groupBy(products.categoryId),
 
-export async function buildFacets(db: TenantDb, filters: ListingFilters): Promise<FilterGroup[]> {
-  const [brandRows, priceRow, ratingRow, stockRow, attributeRows] = await Promise.all([
+    /*
+     * Nine filtered aggregates in one pass rather than nine queries.
+     *
+     * Each offer is a correlated `exists`, so what costs is the scan rather than
+     * the predicates, and running them together reads the catalogue once for the
+     * whole group. It is also why the panel is cached apart from the page
+     * (`CACHE_TTL.facets`): every page of one filter combination reuses this.
+     */
+    db
+      .select(
+        OFFERS.reduce<Record<string, SQL<number>>>((select, offer) => {
+          select[offer.key] = sql<number>`count(*) filter (where ${offer.condition})::int`;
+          return select;
+        }, {}),
+      )
+      .from(products)
+      .where(and(...listingConditions(filters, 'offer'))),
+
+    /*
+     * Keyed `b0…b3` rather than by the band's own `0-200` form, because these
+     * keys become SQL aliases and a digit-led one has to be quoted to survive.
+     * The order is `PRICE_BANDS`', which is what the index below reads back.
+     */
+    db
+      .select(
+        PRICE_BANDS.reduce<Record<string, SQL<number>>>(
+          (select, band, index) => {
+            select[`b${index}`] = sql<number>`count(*) filter (where ${priceBandCondition(band)})::int`;
+            return select;
+          },
+          { total: sql<number>`count(*)::int` },
+        ),
+      )
+      .from(products)
+      .where(and(...listingConditions(filters, 'price'))),
+
     db
       .select({
         value: brands.slug,
@@ -759,35 +1047,6 @@ export async function buildFacets(db: TenantDb, filters: ListingFilters): Promis
       .where(and(...listingConditions(filters, 'brand'), eq(brands.isActive, true)))
       .groupBy(brands.slug, brands.name)
       .orderBy(asc(brands.name)),
-
-    db
-      .select({
-        min: sql<string>`coalesce(min(${effectivePriceSql}), 0)`,
-        max: sql<string>`coalesce(max(${effectivePriceSql}), 0)`,
-      })
-      .from(products)
-      .where(and(...listingConditions(filters, 'price'))),
-
-    /*
-     * One row of running totals rather than a query per threshold: "3 and up"
-     * includes everything "4 and up" does, so the counts are cumulative and a
-     * single pass answers all of them.
-     */
-    db
-      .select({
-        four: sql<number>`count(*) filter (where ${products.ratingAverage} >= 4)::int`,
-        three: sql<number>`count(*) filter (where ${products.ratingAverage} >= 3)::int`,
-        two: sql<number>`count(*) filter (where ${products.ratingAverage} >= 2)::int`,
-        /*
-         * Counted with the rating filter lifted, like the options themselves.
-         * Comparing against a total that still had the filter applied made every
-         * threshold equal the total the moment one was ticked, so the group
-         * deleted itself and left no way to untick it from the sidebar.
-         */
-        total: sql<number>`count(*)::int`,
-      })
-      .from(products)
-      .where(and(...listingConditions(filters, 'rating'))),
 
     db
       .select({
@@ -804,7 +1063,6 @@ export async function buildFacets(db: TenantDb, filters: ListingFilters): Promis
         inputType: attributes.inputType,
         value: attributeValues.slug,
         label: attributeValues.value,
-        colorHex: attributeValues.colorHex,
         count: sql<number>`count(distinct ${products.id})::int`,
       })
       .from(products)
@@ -825,13 +1083,83 @@ export async function buildFacets(db: TenantDb, filters: ListingFilters): Promis
         attributes.sortOrder,
         attributeValues.slug,
         attributeValues.value,
-        attributeValues.colorHex,
         attributeValues.sortOrder,
       )
       .orderBy(asc(attributes.sortOrder), asc(attributeValues.sortOrder)),
   ]);
 
   const groups: FilterGroup[] = [];
+
+  /*
+   * Which aisle — the first question a shopper asks, and the one this panel had
+   * no answer to at all. On a category page it lists that department's own
+   * children; on `/shop` and `/search` it lists the departments themselves.
+   *
+   * A single option is kept here, unlike everywhere else: a lone child category
+   * is a genuine narrowing, because a department can hold products of its own
+   * that are filed under no child at all.
+   */
+  const categoryCounts = new Map<string, number>();
+  for (const row of categoryRows) {
+    if (row.categoryId) categoryCounts.set(row.categoryId, Number(row.tally));
+  }
+
+  const categoryOptions = context.tree
+    .filter((node) => (node.parentId ?? null) === context.parentId)
+    .map((node) => ({
+      value: node.slug,
+      label: node.name,
+      count: descendantIds(context.tree, node.id).reduce(
+        (total, id) => total + (categoryCounts.get(id) ?? 0),
+        0,
+      ),
+    }))
+    .filter((option) => option.count > 0);
+
+  if (categoryOptions.length > 0) {
+    groups.push({ key: 'sub', label: 'Category', type: 'checkbox', options: categoryOptions });
+  }
+
+  /*
+   * The offers, in the order `OFFERS` declares them — fixed rather than sorted
+   * by count, so the row a shopper learned last week is where they left it.
+   *
+   * Only an offer that matches **nothing** is dropped, and that is a deliberate
+   * departure from the rule the availability group follows. Availability is one
+   * box, so one that cannot narrow is pure noise; here the count beside a name
+   * is itself the answer — "Top Rated 241" out of 241 tells a shopper something
+   * about the whole shop, which is worth more than the click it saves them.
+   * Zero is the one count that says nothing and costs something: it is a box
+   * whose only outcome is an empty grid.
+   */
+  const offerOptions = OFFERS.map((offer) => ({
+    value: offer.key,
+    label: offer.label,
+    count: Number(offerRow[0]?.[offer.key] ?? 0),
+  })).filter((option) => option.count > 0);
+
+  if (offerOptions.length > 0) {
+    groups.push({ key: 'offer', label: 'Offers', type: 'checkbox', options: offerOptions });
+  }
+
+  /*
+   * The price ladder. `min`/`max` travel beside the label because the storefront
+   * is what formats money — it holds the store's currency and the visitor's
+   * locale, and "৳" beats "BDT" by half the width of a card. The label is the
+   * bare-number fallback for any other reader of this contract.
+   */
+  const priceTotal = Number(priceRow[0]?.total ?? 0);
+  const priceOptions = PRICE_BANDS.map((band, index) => ({
+    value: priceBandValue(band),
+    label: priceBandLabel(band),
+    count: Number(priceRow[0]?.[`b${index}`] ?? 0),
+    min: band.min,
+    max: band.max,
+  })).filter((option) => option.count > 0 && option.count < priceTotal);
+
+  if (priceOptions.length > 1) {
+    groups.push({ key: 'price', label: 'Price', type: 'price', options: priceOptions });
+  }
 
   if (brandRows.length > 1) {
     groups.push({
@@ -840,42 +1168,6 @@ export async function buildFacets(db: TenantDb, filters: ListingFilters): Promis
       type: 'checkbox',
       options: brandRows.map((row) => ({ value: row.value, label: row.label, count: row.count })),
     });
-  }
-
-  const min = Math.floor(Number(priceRow[0]?.min ?? 0));
-  const max = Math.ceil(Number(priceRow[0]?.max ?? 0));
-  if (max > min) {
-    groups.push({ key: 'price', label: 'Price', type: 'range', options: [], min, max });
-  }
-
-  /*
-   * Rating and availability were filterable long before they were offerable: the
-   * query has honoured `?rating=` and `?inStock=` from the start, `exclude`
-   * counts them, and the storefront already draws stars for a `rating` group —
-   * but nothing ever published the groups, so no shopper could reach either
-   * filter. These two blocks are the missing half.
-   */
-  const ratingTotal = ratingRow[0]?.total ?? 0;
-  const ratingCounts: Record<number, number> = {
-    4: ratingRow[0]?.four ?? 0,
-    3: ratingRow[0]?.three ?? 0,
-    2: ratingRow[0]?.two ?? 0,
-  };
-  /*
-   * A threshold every product already meets is dropped, by the same rule the
-   * brand and attribute groups follow: on a catalogue where nothing scores below
-   * three, "3 & up" and "2 & up" both read as the whole shop and only "4 & up"
-   * is a choice.
-   */
-  const ratingOptions = RATING_STEPS.filter(
-    (step) => (ratingCounts[step] ?? 0) > 0 && (ratingCounts[step] ?? 0) < ratingTotal,
-  ).map((step) => ({
-    value: String(step),
-    label: `${step} & up`,
-    count: ratingCounts[step] ?? 0,
-  }));
-  if (ratingOptions.length > 0) {
-    groups.push({ key: 'rating', label: 'Rating', type: 'rating', options: ratingOptions });
   }
 
   const inStockCount = stockRow[0]?.inStock ?? 0;
@@ -893,18 +1185,25 @@ export async function buildFacets(db: TenantDb, filters: ListingFilters): Promis
 
   const byAttribute = new Map<string, FilterGroup>();
   for (const row of attributeRows) {
+    /*
+     * Colour is chosen on the product, not in the sidebar.
+     *
+     * A swatch attribute is what picks a *variant* — the thing that carries the
+     * price and the stock a checkout reserves — so the place to choose one is
+     * the product page's selector, where the shopper can see which combinations
+     * exist and which are in stock. In the panel it was a list of names beside
+     * counts, taking the height of six departments to answer a question nobody
+     * asks before they have chosen the product.
+     */
+    if (row.inputType === 'color') continue;
+
     const group = byAttribute.get(row.attributeSlug) ?? {
       key: row.attributeSlug,
       label: row.attributeName,
-      type: row.inputType === 'color' ? ('color' as const) : ('checkbox' as const),
+      type: 'checkbox' as const,
       options: [],
     };
-    group.options.push({
-      value: row.value,
-      label: row.label,
-      count: row.count,
-      ...(row.colorHex ? { colorHex: row.colorHex } : {}),
-    });
+    group.options.push({ value: row.value, label: row.label, count: row.count });
     byAttribute.set(row.attributeSlug, group);
   }
 
@@ -915,19 +1214,30 @@ export async function buildFacets(db: TenantDb, filters: ListingFilters): Promis
   return groups;
 }
 
+
 // ------------------------------------------------------------------ misc ----
 
 /** Reflects the filters back so the UI can render "clear" chips it did not parse. */
-export function appliedFiltersOf(filters: ListingFilters, categorySlug?: string): Record<string, string[]> {
+export function appliedFiltersOf(
+  filters: ListingFilters,
+  categorySlug?: string,
+  subSlugs?: string[],
+): Record<string, string[]> {
   const applied: Record<string, string[]> = {};
 
   if (categorySlug) applied.category = [categorySlug];
+  // Reflected as the slugs that were asked for, not as the subtree they resolved
+  // to: the panel ticks a box by the value it sent, and ids mean nothing to it.
+  if (subSlugs?.length) applied.sub = subSlugs;
   if (filters.brandSlugs?.length) applied.brand = filters.brandSlugs;
   if (filters.rating !== undefined) applied.rating = [String(filters.rating)];
   if (filters.inStock) applied.inStock = ['true'];
   if (filters.sale) applied.sale = ['true'];
+  if (filters.offers?.length) applied.offer = [...filters.offers];
+  if (filters.priceBands?.length) applied.price = filters.priceBands.map(priceBandValue);
   if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
-    applied.price = [String(filters.minPrice ?? 0), String(filters.maxPrice ?? 0)];
+    applied.minPrice = [String(filters.minPrice ?? 0)];
+    applied.maxPrice = [String(filters.maxPrice ?? 0)];
   }
   for (const [slug, values] of Object.entries(filters.attributes ?? {})) {
     if (values.length > 0) applied[slug] = values;

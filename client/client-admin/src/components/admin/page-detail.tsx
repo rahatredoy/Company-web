@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { useDetail } from '@/hooks/use-detail';
-import { formatDateTime, formatNumber } from '@/lib/format';
+import { useT, type MessageKey } from '@/lib/i18n';
 import type { PageDetail as PageDetailPayload, PageRow } from '@/lib/types';
 import {
   DetailBool,
@@ -16,6 +16,11 @@ import {
   DetailSheet,
   DetailStorefrontLink,
 } from './detail-sheet';
+
+const STATUS_LABELS: Record<PageRow['status'], MessageKey> = {
+  draft: 'Draft',
+  published: 'Published',
+};
 
 /**
  * One CMS page.
@@ -43,6 +48,7 @@ export function PageDetail({
   onOpenChange: (open: boolean) => void;
   storefrontBase: string | null;
 }) {
+  const t = useT();
   const detail = useDetail<PageDetailPayload>({
     path: '/api/v1/admin/website/pages',
     id: row?.id ?? null,
@@ -55,12 +61,15 @@ export function PageDetail({
     <DetailSheet
       open={open}
       onOpenChange={onOpenChange}
-      title={page?.title ?? row?.title ?? 'Page'}
+      title={page?.title ?? row?.title ?? t('Page')}
       subtitle={page ? `/page/${page.slug}` : row ? `/page/${row.slug}` : undefined}
       badge={
         <>
-          <StatusBadge status={page?.status ?? row?.status ?? 'draft'} />
-          {(page?.systemKey ?? row?.systemKey) ? <StatusBadge status="info" label="Policy" /> : null}
+          <StatusBadge
+            status={page?.status ?? row?.status ?? 'draft'}
+            label={t(STATUS_LABELS[page?.status ?? row?.status ?? 'draft'])}
+          />
+          {(page?.systemKey ?? row?.systemKey) ? <StatusBadge status="info" label={t('Policy')} /> : null}
         </>
       }
       loading={detail.loading}
@@ -72,11 +81,11 @@ export function PageDetail({
             {storefrontBase && (page?.status ?? row.status) === 'published' ? (
               <DetailStorefrontLink
                 href={`${storefrontBase}/page/${page?.slug ?? row.slug}`}
-                label="Open on the shop"
+                label={t('Open on the shop')}
               />
             ) : null}
             <Button asChild variant="outline" size="sm">
-              <Link href={`/website/pages/${row.id}`}>Open the editor</Link>
+              <Link href={`/website/pages/${row.id}`}>{t('Open the editor')}</Link>
             </Button>
           </>
         ) : null
@@ -84,51 +93,54 @@ export function PageDetail({
     >
       {page ? (
         <div className="space-y-6">
-          <DetailSection title="Page">
+          <DetailSection title={t('Page')}>
             <DetailGrid>
-              <DetailField label="Title" value={page.title} />
-              <DetailField label="Address" value={`/page/${page.slug}`} mono />
-              <DetailField label="Status" value={<StatusBadge status={page.status} />} />
-              <DetailField label="Shown in the footer" value={<DetailBool value={page.showInFooter} />} />
-              <DetailField label="Order in the footer" value={formatNumber(page.sortOrder)} />
+              <DetailField label={t('Title')} value={page.title} />
+              <DetailField label={t('Address')} value={`/page/${page.slug}`} mono />
               <DetailField
-                label="System key"
+                label={t('Status')}
+                value={<StatusBadge status={page.status} label={t(STATUS_LABELS[page.status])} />}
+              />
+              <DetailField label={t('Shown in the footer')} value={<DetailBool value={page.showInFooter} />} />
+              <DetailField label={t('Order in the footer')} value={t.number(page.sortOrder)} />
+              <DetailField
+                label={t('System key')}
                 value={page.systemKey}
                 mono
-                hint={page.systemKey ? 'A policy page. It cannot be deleted.' : undefined}
+                hint={page.systemKey ? t('A policy page. It cannot be deleted.') : undefined}
               />
-              <DetailField label="Page ID" value={<DetailId value={page.id} />} />
-              <DetailField label="Updated" value={formatDateTime(page.updatedAt)} />
+              <DetailField label={t('Page ID')} value={<DetailId value={page.id} />} />
+              <DetailField label={t('Updated')} value={t.dateTime(page.updatedAt)} />
             </DetailGrid>
           </DetailSection>
 
-          <DetailSection title="Excerpt">
+          <DetailSection title={t('Excerpt')}>
             {page.excerpt ? (
               <p className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-sm whitespace-pre-wrap">
                 {page.excerpt}
               </p>
             ) : (
-              <DetailEmpty>None.</DetailEmpty>
+              <DetailEmpty>{t('None.')}</DetailEmpty>
             )}
           </DetailSection>
 
           <DetailSection
-            title="Body"
-            description="Sanitised when it was saved. Shown as source, because that is what is stored."
+            title={t('Body')}
+            description={t('Sanitised when it was saved. Shown as source, because that is what is stored.')}
           >
             {page.bodyHtml ? (
-              <pre className="max-h-96 overflow-auto rounded-lg border border-border bg-muted/30 p-3 font-mono text-[12px] leading-relaxed whitespace-pre-wrap">
+              <pre className="max-h-96 overflow-auto rounded-lg border border-border bg-muted/30 p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
                 {page.bodyHtml}
               </pre>
             ) : (
-              <DetailEmpty>This page has no body.</DetailEmpty>
+              <DetailEmpty>{t('This page has no body.')}</DetailEmpty>
             )}
           </DetailSection>
 
-          <DetailSection title="Search engines">
+          <DetailSection title={t('Search engines')}>
             <DetailGrid>
-              <DetailField label="SEO title" value={page.seoTitle} full />
-              <DetailField label="SEO description" value={page.seoDescription} full />
+              <DetailField label={t('SEO title')} value={page.seoTitle} full />
+              <DetailField label={t('SEO description')} value={page.seoDescription} full />
             </DetailGrid>
           </DetailSection>
         </div>

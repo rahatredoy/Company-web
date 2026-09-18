@@ -1,10 +1,14 @@
 import {
   SORT_OPTIONS,
   type Category,
+  type HeroSlide,
   type HomepageSection,
+  type PromoBanner,
   type SortValue,
   type StoreConfig,
 } from '@/types';
+import type { Translator } from '@/lib/i18n';
+import { getT } from '@/lib/i18n/server';
 import type { TemplatePreset } from '@/templates/meta';
 import type { ProductCardVariant } from '@/components/commerce/product-card';
 import { PAGE_SIZE } from '@/config';
@@ -32,7 +36,6 @@ import { ProductTabCarousel } from '@/components/sections/product-tab-carousel';
 import { BrandStrip } from '@/components/sections/brand-strip';
 import { Lookbook } from '@/components/sections/lookbook';
 import { Testimonials } from '@/components/sections/testimonials';
-import { NewsletterBand } from '@/components/sections/newsletter-band';
 import { CollectionShowcase } from '@/components/sections/collection-showcase';
 import { SocialGallery } from '@/components/sections/social-gallery';
 import { RecentlyViewed } from '@/components/sections/recently-viewed';
@@ -51,6 +54,7 @@ import {
   readTabs,
   readTestimonials,
   readVariant,
+  type BenefitItem,
 } from './parse';
 
 const RATIOS = new Set<BannerRatio>(['wide', 'panel', 'tall', 'strip']);
@@ -62,6 +66,55 @@ function readRatio(value: unknown): BannerRatio | undefined {
 
 function readColumns(value: unknown): 1 | 2 | 3 | undefined {
   return value === 1 || value === 2 || value === 3 ? value : undefined;
+}
+
+// ---------------------------------------------------------------- language ---
+
+/*
+ * Store-written copy, put into the visitor's language where it is still the copy
+ * the store was seeded with.
+ *
+ * `t.loose` translates a string the dictionary holds and returns anything else
+ * exactly as it came, so a heading that still reads "New Arrivals" is shown in
+ * Bangla and one the owner retitled is left in their own words. It is applied
+ * here, once, rather than inside each block, so every component below receives
+ * text that is ready to draw. Product, category, brand and collection names
+ * never go through it — those are the shop's data, not its furniture.
+ */
+const loose = (t: Translator, text: string | null): string | null => (text ? t.loose(text) : null);
+
+function localiseSection(section: HomepageSection, t: Translator): HomepageSection {
+  return { ...section, title: loose(t, section.title), subtitle: loose(t, section.subtitle) };
+}
+
+function localiseSlides(slides: HeroSlide[], t: Translator): HeroSlide[] {
+  return slides.map((slide) => ({
+    ...slide,
+    eyebrow: loose(t, slide.eyebrow),
+    heading: t.loose(slide.heading),
+    // Translated alongside the heading, so the emphasised word is still found
+    // inside it; a pair that no longer matches draws the heading plain.
+    accentWord: loose(t, slide.accentWord),
+    subheading: loose(t, slide.subheading),
+    primaryCta: slide.primaryCta ? { ...slide.primaryCta, label: t.loose(slide.primaryCta.label) } : null,
+    secondaryCta: slide.secondaryCta ? { ...slide.secondaryCta, label: t.loose(slide.secondaryCta.label) } : null,
+    badge: slide.badge ? { ...slide.badge, text: t.loose(slide.badge.text) } : null,
+    socialProof: slide.socialProof ? { ...slide.socialProof, text: t.loose(slide.socialProof.text) } : null,
+  }));
+}
+
+function localiseBanners(banners: PromoBanner[], t: Translator): PromoBanner[] {
+  return banners.map((banner) => ({
+    ...banner,
+    title: loose(t, banner.title),
+    subtitle: loose(t, banner.subtitle),
+    eyebrow: loose(t, banner.eyebrow),
+    buttonLabel: loose(t, banner.buttonLabel),
+  }));
+}
+
+function localiseBenefits(items: BenefitItem[], t: Translator): BenefitItem[] {
+  return items.map((item) => ({ ...item, title: t.loose(item.title), description: loose(t, item.description) }));
 }
 
 /**
@@ -89,7 +142,7 @@ export interface SectionContext {
  * page.
  */
 export async function SectionRenderer({
-  section,
+  section: stored,
   context,
   index,
 }: {
@@ -97,6 +150,9 @@ export async function SectionRenderer({
   context: SectionContext;
   index: number;
 }) {
+  const t = await getT();
+  const section = localiseSection(stored, t);
+
   // Only the first section above the fold gets image priority; everything else
   // lazy-loads, which is what keeps LCP honest.
   const isFirst = index === 0;
@@ -106,14 +162,14 @@ export async function SectionRenderer({
 
   switch (section.type) {
     case 'hero': {
-      const slides = readSlides(section);
+      const slides = localiseSlides(readSlides(section), t);
       if (slides.length === 0) return null;
 
       return (
         <SectionShell
           rhythm="tight"
           bleed={preset.heroVariant === 'fullbleed' || preset.heroVariant === 'tech'}
-          label="Featured"
+          label={t('Featured')}
           className={isFirst ? 'pt-4 sm:pt-6' : undefined}
         >
           <HeroCarousel slides={slides} variant={preset.heroVariant} priority={isFirst} />
@@ -122,13 +178,13 @@ export async function SectionRenderer({
     }
 
     case 'category_circle':
-      return <CategorySection section={section} context={context} style="circle" />;
+      return <CategorySection section={section} context={context} style="circle" t={t} />;
 
     case 'category_grid':
-      return <CategorySection section={section} context={context} style={preset.categoryStyle} />;
+      return <CategorySection section={section} context={context} style={preset.categoryStyle} t={t} />;
 
     case 'benefits':
-      return <BenefitsBlock section={section} rhythm={rhythm} tone={preset.benefitsTone} />;
+      return <BenefitsBlock section={section} rhythm={rhythm} tone={preset.benefitsTone} t={t} />;
 
     case 'product_grid':
     case 'product_carousel':
@@ -140,13 +196,13 @@ export async function SectionRenderer({
        * rather than named. `feed` is what picks between the two.
        */
       return readBoolean(section.config.feed) ? (
-        <CatalogFeedSection section={section} context={context} />
+        <CatalogFeedSection section={section} context={context} t={t} />
       ) : (
-        <ProductSection section={section} context={context} />
+        <ProductSection section={section} context={context} t={t} />
       );
 
     case 'promo_trio': {
-      const banners = readBanners(section.config.banners);
+      const banners = localiseBanners(readBanners(section.config.banners), t);
       if (banners.length === 0) return null;
 
       return (
@@ -158,14 +214,14 @@ export async function SectionRenderer({
     }
 
     case 'deal':
-      return <DealSection section={section} context={context} />;
+      return <DealSection section={section} context={context} t={t} />;
 
     case 'banner': {
       // Sections saved before `deal` and `promo_trio` were types of their own
       // still carry the discriminator in `config.variant`.
-      if (variant === 'deal') return <DealSection section={section} context={context} />;
+      if (variant === 'deal') return <DealSection section={section} context={context} t={t} />;
 
-      const banners = readBanners(section.config.banners);
+      const banners = localiseBanners(readBanners(section.config.banners), t);
       if (banners.length === 0) return null;
 
       /*
@@ -232,7 +288,7 @@ export async function SectionRenderer({
             <SectionHeading
               title={section.title}
               size="sm"
-              action={{ label: 'View all', href: '/brands' }}
+              action={{ label: t('View all'), href: '/brands' }}
             />
             <BrandStrip brands={brands} tone={preset.brandStripTone} />
           </div>
@@ -241,8 +297,11 @@ export async function SectionRenderer({
     }
 
     case 'lookbook': {
-      const tiles = readLookbookTiles(section.config.tiles);
-      const ctaLabel = readString(section.config.ctaLabel);
+      const tiles = readLookbookTiles(section.config.tiles).map((tile) => ({
+        ...tile,
+        caption: loose(t, tile.caption),
+      }));
+      const ctaLabel = loose(t, readString(section.config.ctaLabel));
       const ctaHref = readString(section.config.ctaHref);
       // The copy panel is the block's left half; without a title it is a blank
       // rectangle beside four photographs.
@@ -262,7 +321,12 @@ export async function SectionRenderer({
     }
 
     case 'testimonial': {
-      const testimonials = readTestimonials(section.config.items);
+      // The quote and the name are the customer's own words; only the byline's
+      // label ("Verified buyer") is the store's.
+      const testimonials = readTestimonials(section.config.items).map((item) => ({
+        ...item,
+        authorTitle: loose(t, item.authorTitle),
+      }));
       if (testimonials.length === 0) return null;
 
       return (
@@ -273,24 +337,9 @@ export async function SectionRenderer({
       );
     }
 
-    case 'newsletter':
-      // The band is a heading and a form. Without the heading it is a coloured
-      // strip with an unexplained email field in it.
-      if (!section.title) return null;
-
-      return (
-        <SectionShell rhythm={rhythm}>
-          <NewsletterBand
-            title={section.title}
-            subtitle={section.subtitle}
-            tone={preset.benefitsTone === 'dark' ? 'dark' : 'primary'}
-          />
-        </SectionShell>
-      );
-
     case 'collection': {
       const collection = readCollection(section.config.collection);
-      const ctaLabel = readString(section.config.ctaLabel);
+      const ctaLabel = loose(t, readString(section.config.ctaLabel));
       const href = readString(section.config.href);
       if (!collection || !ctaLabel || !href) return null;
 
@@ -313,7 +362,10 @@ export async function SectionRenderer({
     }
 
     case 'social_gallery': {
-      const tiles = readGalleryTiles(section.config.tiles);
+      const tiles = readGalleryTiles(section.config.tiles).map((tile) => ({
+        ...tile,
+        caption: loose(t, tile.caption),
+      }));
       if (tiles.length === 0) return null;
 
       return (
@@ -343,7 +395,7 @@ export async function SectionRenderer({
     case 'text':
       // The old home of the benefits strip, before it became its own type.
       if (variant === 'benefits') {
-        return <BenefitsBlock section={section} rhythm={rhythm} tone={preset.benefitsTone} />;
+        return <BenefitsBlock section={section} rhythm={rhythm} tone={preset.benefitsTone} t={t} />;
       }
       return <TextBlock section={section} rhythm={rhythm} />;
 
@@ -358,12 +410,14 @@ function BenefitsBlock({
   section,
   rhythm,
   tone,
+  t,
 }: {
   section: HomepageSection;
   rhythm: TemplatePreset['sectionRhythm'];
   tone: TemplatePreset['benefitsTone'];
+  t: Translator;
 }) {
-  const items = readBenefits(section.config.items);
+  const items = localiseBenefits(readBenefits(section.config.items), t);
   if (items.length === 0) return null;
 
   return (
@@ -377,10 +431,12 @@ async function CategorySection({
   section,
   context,
   style,
+  t,
 }: {
   section: HomepageSection;
   context: SectionContext;
   style: TemplatePreset['categoryStyle'];
+  t: Translator;
 }) {
   const ids = readStringArray(section.config.categoryIds);
   const all = await getCategories();
@@ -420,7 +476,7 @@ async function CategorySection({
    * older `config` edited by hand could — shows the products.
    */
   if (readBoolean(section.config.showProducts)) {
-    return <CategoryShowcaseSection section={section} context={context} categories={chosen} />;
+    return <CategoryShowcaseSection section={section} context={context} categories={chosen} t={t} />;
   }
 
   /*
@@ -444,7 +500,7 @@ async function CategorySection({
         <SectionHeading
           title={section.title}
           subtitle={section.subtitle}
-          action={section.title ? { label: 'All categories', href: '/categories' } : null}
+          action={section.title ? { label: t('All categories'), href: '/categories' } : null}
         />
         <CategoryDirectory categories={chosen} />
       </SectionShell>
@@ -488,7 +544,7 @@ async function CategorySection({
         rule={style === 'editorial'}
         action={
           section.title && style !== 'circle'
-            ? { label: 'All categories', href: '/categories' }
+            ? { label: t('All categories'), href: '/categories' }
             : null
         }
       />
@@ -547,10 +603,12 @@ async function CategoryShowcaseSection({
   section,
   context,
   categories,
+  t,
 }: {
   section: HomepageSection;
   context: SectionContext;
   categories: Category[];
+  t: Translator;
 }) {
   const named = readStringArray(section.config.categoryIds);
 
@@ -611,7 +669,7 @@ async function CategoryShowcaseSection({
       <SectionHeading
         title={section.title}
         subtitle={section.subtitle}
-        action={section.title ? { label: 'All categories', href: '/categories' } : null}
+        action={section.title ? { label: t('All categories'), href: '/categories' } : null}
       />
       <CategoryShowcase
         groups={usable}
@@ -650,9 +708,11 @@ function readSort(value: unknown): SortValue {
 async function CatalogFeedSection({
   section,
   context,
+  t,
 }: {
   section: HomepageSection;
   context: SectionContext;
+  t: Translator;
 }) {
   const sort = readSort(section.config.sort);
   const result = await getProductList({ page: 1, pageSize: PAGE_SIZE.home, sort });
@@ -664,7 +724,7 @@ async function CatalogFeedSection({
       <SectionHeading
         title={section.title}
         subtitle={section.subtitle}
-        action={section.title ? { label: 'Open the shop', href: '/shop' } : null}
+        action={section.title ? { label: t('Open the shop'), href: '/shop' } : null}
       />
       {/*
         Keyed on the batch, not on the section: when the first page a visitor
@@ -690,11 +750,13 @@ async function CatalogFeedSection({
 async function ProductSection({
   section,
   context,
+  t,
 }: {
   section: HomepageSection;
   context: SectionContext;
+  t: Translator;
 }) {
-  const tabs = readTabs(section);
+  const tabs = readTabs(section).map((tab) => ({ ...tab, label: t.loose(tab.label) }));
   if (tabs.length === 0) return null;
 
   // Sections store ids rather than embedded copies, so a price or stock change
@@ -732,13 +794,15 @@ async function ProductSection({
 async function DealSection({
   section,
   context,
+  t,
 }: {
   section: HomepageSection;
   context: SectionContext;
+  t: Translator;
 }) {
   const productId = readString(section.config.productId);
   const [product] = productId ? await getProductsByIds([productId]) : [];
-  const banners = readBanners(section.config.banners);
+  const banners = localiseBanners(readBanners(section.config.banners), t);
   const deadline = readDeadline(section.config);
 
   // The deal card is a titled panel; the mosaic's banners carry their own copy

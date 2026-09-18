@@ -3,8 +3,13 @@ import { CategoryManager, type CategoryFilterState } from '@/components/admin/ca
 import { currentStoreSlug, serverGet, serverGetAll } from '@/lib/server-api';
 import { storefrontUrl } from '@/lib/env';
 import { can, type CategoryRow, type SessionResponse } from '@/lib/types';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = { title: 'Categories' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Categories') };
+}
+
 export const dynamic = 'force-dynamic';
 
 export default async function CategoriesPage({

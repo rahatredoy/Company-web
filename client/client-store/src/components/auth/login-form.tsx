@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
+import { useT } from '@/lib/i18n';
 import { safeRedirectPath } from '@/lib/utils';
 
 /**
@@ -18,6 +19,7 @@ import { safeRedirectPath } from '@/lib/utils';
  * afterwards is not.
  */
 export function LoginForm({ next }: { next?: string }) {
+  const t = useT();
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -43,7 +45,7 @@ export function LoginForm({ next }: { next?: string }) {
 
       if (!response.ok) {
         const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? 'Those details do not match an account.');
+        setError(body?.error ?? t('Those details do not match an account.'));
         setSubmitting(false);
         return;
       }
@@ -52,19 +54,19 @@ export function LoginForm({ next }: { next?: string }) {
       // and every server component needs to re-render knowing about it.
       window.location.assign(destination);
     } catch {
-      setError('We could not reach the store. Check your connection and try again.');
+      setError(t('We could not reach the store. Check your connection and try again.'));
       setSubmitting(false);
     }
   };
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-5">
-      <Field name="email" label="Email address" required>
+      <Field name="email" label={t('Email address')} required>
         {(props) => <Input {...props} type="email" autoComplete="email" autoFocus />}
       </Field>
 
       <div>
-        <Field name="password" label="Password" required>
+        <Field name="password" label={t('Password')} required>
           {(props) => <Input {...props} type="password" autoComplete="current-password" />}
         </Field>
         <div className="mt-1.5 text-right">
@@ -72,7 +74,7 @@ export function LoginForm({ next }: { next?: string }) {
             href="/forgot-password"
             className="text-xs text-muted underline-offset-2 hover:text-primary hover:underline"
           >
-            Forgot your password?
+            {t('Forgot your password?')}
           </Link>
         </div>
       </div>
@@ -85,7 +87,7 @@ export function LoginForm({ next }: { next?: string }) {
 
       <Button type="submit" size="lg" className="w-full" disabled={submitting}>
         {submitting ? <Spinner /> : null}
-        Sign in
+        {t('Sign in')}
       </Button>
     </form>
   );

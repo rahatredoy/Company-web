@@ -32,11 +32,6 @@ export type Permission =
   | 'marketing.manage'
   | 'website.view'
   | 'website.manage'
-  | 'reports.view'
-  | 'staff.view'
-  | 'staff.create'
-  | 'staff.update'
-  | 'staff.delete'
   | 'settings.view'
   | 'settings.update';
 
@@ -238,11 +233,7 @@ export interface CategoryRow {
   parentId: string | null;
   name: string;
   slug: string;
-  description: string | null;
   imageUrl: string | null;
-  /** The small mark shown beside the name in the storefront menu. */
-  iconUrl: string | null;
-  bannerUrl: string | null;
   isActive: boolean;
   showInMenu: boolean;
   isFeatured: boolean;
@@ -265,12 +256,8 @@ export interface BrandRow {
   slug: string;
   description: string | null;
   logoUrl: string | null;
-  websiteUrl: string | null;
   isActive: boolean;
   isFeatured: boolean;
-  sortOrder: number;
-  seoTitle: string | null;
-  seoDescription: string | null;
   createdAt: string;
   updatedAt: string;
   productCount: number;
@@ -294,6 +281,10 @@ export interface ProductRow {
   soldCount: number;
   ratingAverage: string;
   ratingCount: number;
+  /** Every review, whatever its status — `ratingCount` is the approved ones only. */
+  reviewCount: number;
+  /** Reviews waiting to be approved or rejected. */
+  pendingReviewCount: number;
   /** Off means stock is still counted but never refuses a sale. */
   trackInventory: boolean;
   createdAt: string;
@@ -306,12 +297,6 @@ export interface ProductRow {
   barcode: string | null;
   /** The default variant's. Never shown to a shopper; it is what margin is from. */
   costPrice: string | null;
-  /**
-   * The default variant's sale window, so the quick-edit panel can offer it
-   * without a second read. Both enforced — see `ProductVariant`.
-   */
-  saleStartsAt: string | null;
-  saleEndsAt: string | null;
   imageUrl: string | null;
   /** Sellable units across every warehouse. */
   stock: number;
@@ -351,15 +336,6 @@ export interface ProductVariant {
   barcode: string | null;
   price: string;
   salePrice: string | null;
-  /**
-   * When the sale price applies. Both nullable, and both **enforced** —
-   * `client-api/src/modules/storefront/service.ts#effectiveSale` ignores a sale
-   * price outside its window at checkout as well as on the product page, so a
-   * sale that has not started is not a sale and an expired one charges full
-   * price. A null bound means "no bound".
-   */
-  saleStartsAt: string | null;
-  saleEndsAt: string | null;
   costPrice: string | null;
   weightGrams: number | null;
   imageUrl: string | null;
@@ -406,7 +382,6 @@ export interface ProductDetail {
   type: 'simple' | 'variable';
   categoryId: string | null;
   brandId: string | null;
-  shortDescription: string | null;
   description: string | null;
   priceFrom: string | null;
   salePriceFrom: string | null;
@@ -625,7 +600,6 @@ export interface OrderRow {
   phone: string | null;
   status: OrderStatus;
   paymentStatus: string;
-  shippingStatus: string;
   paymentProvider: string | null;
   grandTotal: string;
   currency: string;
@@ -703,33 +677,21 @@ export interface OrderHistoryEntry {
   createdAt: string;
 }
 
-export interface OrderShipment {
-  id: string;
-  carrier: string | null;
-  trackingNumber: string | null;
-  trackingUrl: string | null;
-  status: string;
-  shippedAt: string | null;
-}
-
 export interface OrderDetailRow extends OrderRow {
   phone: string | null;
   subtotal: string;
   discountTotal: string;
   taxTotal: string;
-  shippingTotal: string;
   refundedTotal: string;
   couponCode: string | null;
   paymentProvider: string | null;
   paymentMethodLabel: string | null;
-  shippingMethodLabel: string | null;
   customerNote: string | null;
   adminNote: string | null;
   cancelReason: string | null;
   lines: OrderLine[];
   addresses: OrderAddressRow[];
   history: OrderHistoryEntry[];
-  shipments: OrderShipment[];
   customer: { id: string; fullName: string; email: string } | null;
   /** What this order may become next. The panel offers only these. */
   allowedTransitions: OrderStatus[];
@@ -758,6 +720,8 @@ export interface CustomerDetail {
   phone: string | null;
   status: 'active' | 'blocked';
   customerType: string;
+  /** `YYYY-MM-DD`, from the customer's own profile. */
+  birthDate?: string | null;
   acceptsMarketing: boolean;
   emailVerified: boolean;
   adminNote: string | null;
@@ -795,55 +759,6 @@ export interface ReviewRow {
 
 export type InventoryBucket = 'available' | 'reserved' | 'return_pending' | 'damaged' | 'incoming';
 
-export interface InventoryRow {
-  id: string;
-  variantId: string;
-  productId: string;
-  productName: string;
-  productSlug: string;
-  sku: string;
-  variantTitle: string | null;
-  imageUrl: string | null;
-  /** Null when never recorded — it contributes nothing to the stock value. */
-  costPrice: string | null;
-  price: string;
-  warehouseId: string;
-  warehouseName: string;
-  available: number;
-  reserved: number;
-  returnPending: number;
-  damaged: number;
-  incoming: number;
-  lowStockThreshold: number;
-  /**
-   * The unit every count on this row is in.
-   *
-   * Null for an ordinary product, where they are whole items. For one sold by
-   * weight or volume they are **base units** — 40000 means 40kg, and printing
-   * the bare number would tell the owner they have forty thousand pumpkins.
-   * `formatStock` in `lib/measure.ts` is what turns it back into words.
-   */
-  measureUnit: string | null;
-  updatedAt: string;
-}
-
-/** `GET /inventory/stats` — counted over every tracked level. */
-export interface InventoryStats {
-  tracked: number;
-  inStock: number;
-  low: number;
-  out: number;
-  unitsAvailable: number;
-  unitsReserved: number;
-  unitsIncoming: number;
-  unitsDamaged: number;
-  /** Available units × cost price, as a decimal string. */
-  valueAtCost: string;
-  warehouses: number;
-  /** Variants with no stock record at all — unsellable, and easy to miss. */
-  untrackedVariants: number;
-}
-
 export interface WarehouseRow {
   id: string;
   name: string;
@@ -854,64 +769,6 @@ export interface WarehouseRow {
   phone: string | null;
   isDefault: boolean;
   isActive: boolean;
-}
-
-/**
- * One movement from the ledger. `availableAfter` is a snapshot taken inside the
- * same transaction as the move, so the history reads as a running balance
- * without anything having to re-derive it.
- */
-/**
- * One row of the append-only ledger. Every change to a level writes one in the
- * same transaction, which is what makes a level explainable rather than merely
- * current — `availableAfter` is the snapshot taken as the move landed.
- */
-export interface InventoryTransactionRow {
-  id: string;
-  variantId: string;
-  warehouseId: string;
-  type: string;
-  /** Signed. Negative takes units out of the bucket. */
-  quantity: number;
-  fromBucket: string | null;
-  toBucket: string | null;
-  availableAfter: number;
-  reservedAfter: number;
-  referenceType: string | null;
-  referenceId: string | null;
-  damageReason: string | null;
-  note: string | null;
-  /** Null for a system move, such as an order reserving stock. */
-  adminId: string | null;
-  adminLabel: string | null;
-  metadata: Record<string, unknown> | null;
-  createdAt: string;
-}
-
-// --- Shipping ----------------------------------------------------------------
-
-export interface ShippingMethodRow {
-  id: string;
-  zoneId: string;
-  name: string;
-  description: string | null;
-  price: string;
-  freeAboveSubtotal: string | null;
-  estimatedDaysMin: number | null;
-  estimatedDaysMax: number | null;
-  isActive: boolean;
-  sortOrder: number;
-}
-
-export interface ShippingZoneRow {
-  id: string;
-  name: string;
-  countries: string[];
-  cities: string[];
-  isDefault: boolean;
-  isActive: boolean;
-  sortOrder: number;
-  methods: ShippingMethodRow[];
 }
 
 // --- Returns and refunds -----------------------------------------------------
@@ -934,6 +791,8 @@ export interface ReturnRow {
   status: ReturnStatus;
   resolution: string;
   reason: string;
+  /** Photos the customer attached to the request. */
+  photoCount: number;
   refundableAmount: string;
   currency: string;
   createdAt: string;
@@ -982,20 +841,258 @@ export interface RefundRow {
 
 // --- Marketing ---------------------------------------------------------------
 
-export interface CouponRow {
+// --- Discounts ---------------------------------------------------------------
+//
+// The shapes of `client-api/src/lib/discounts/rules.ts`, as the API serves them.
+
+export type DiscountKind = 'coupon' | 'automatic' | 'voucher' | 'campaign' | 'bank_offer' | 'payment_offer';
+export type DiscountValueType = 'percentage' | 'fixed_amount' | 'buy_x_get_y' | 'fixed_price' | 'bundle';
+export type DiscountStatus = 'draft' | 'active' | 'paused';
+export type DiscountState = 'draft' | 'scheduled' | 'active' | 'paused' | 'expired' | 'limit_reached';
+export type DiscountStrategy = 'best' | 'priority' | 'stack';
+export type PaymentChannelChoice = 'cod' | 'card' | 'bkash' | 'nagad' | 'rocket' | 'bank_transfer';
+export type PaymentCondition =
+  | PaymentChannelChoice
+  | 'credit_card'
+  | 'debit_card'
+  | 'visa'
+  | 'mastercard'
+  | 'amex';
+export type CardType = 'credit' | 'debit' | 'prepaid';
+export type CustomerSegment = 'all' | 'new' | 'returning' | 'vip' | 'groups' | 'selected';
+export type CustomerGroup = 'new' | 'repeat' | 'vip' | 'high_value';
+export type CombinableClass = 'coupon' | 'automatic' | 'voucher' | 'bank_offer' | 'product';
+export type IssueEvent = 'registration' | 'first_order' | 'order_count' | 'total_spent' | 'birthday' | 'win_back';
+
+export interface DiscountProductRules {
+  appliesTo: 'all' | 'specific';
+  productIds: string[];
+  variantIds: string[];
+  categoryIds: string[];
+  brandIds: string[];
+  collectionIds: string[];
+  excludeProductIds: string[];
+  excludeCategoryIds: string[];
+  excludeBrandIds: string[];
+  excludeSaleItems: boolean;
+  excludeDiscountedItems: boolean;
+}
+
+export interface DiscountPurchaseRules {
+  requiredProductIds: string[];
+  requiredCategoryIds: string[];
+  requiredBrandIds: string[];
+}
+
+export interface DiscountRewardRules {
+  buyQuantity: number;
+  buyProductIds: string[];
+  buyCategoryIds: string[];
+  getQuantity: number;
+  getProductIds: string[];
+  getCategoryIds: string[];
+  getDiscountPercent: number;
+  maxApplications: number | null;
+}
+
+export interface DiscountCustomerRules {
+  segment: CustomerSegment;
+  groups: CustomerGroup[];
+  minPreviousOrders: number | null;
+  registeredWithinDays: number | null;
+  inactiveDays: number | null;
+  birthdayWindowDays: number | null;
+  limitByIdentity: boolean;
+}
+
+export interface DiscountPaymentRules {
+  channels: PaymentCondition[];
+  bankIds: string[];
+  cardTypes: CardType[];
+  cardPrefixes: string[];
+}
+
+export interface DiscountAreaRules {
+  countries: string[];
+  cities: string[];
+}
+
+export interface DiscountScheduleRules {
+  days: number[];
+  startTime: string | null;
+  endTime: string | null;
+}
+
+export interface DiscountCombinationRules {
+  mode: 'none' | 'selected' | 'all';
+  with: CombinableClass[];
+}
+
+export interface DiscountIssueRules {
+  event: IssueEvent;
+  threshold: number | null;
+  validDays: number | null;
+}
+
+/**
+ * A stored discount. The rule groups arrive exactly as saved, so a row written
+ * before a key existed can be missing it — read them through
+ * `lib/discounts.ts#rulesOf`, which fills the defaults in.
+ */
+export interface DiscountRecord {
   id: string;
-  code: string;
-  description: string | null;
-  type: 'percentage' | 'fixed' | 'free_shipping';
+  kind: DiscountKind;
+  name: string;
+  code: string | null;
+  title: string | null;
+  summary: string | null;
+  notes: string | null;
+  valueType: DiscountValueType;
   value: string;
   maxDiscountAmount: string | null;
   minOrderAmount: string | null;
+  minQuantity: number | null;
+  maxDiscountedQuantity: number | null;
+  minSubtotalAfterDiscount: string | null;
+  productRules: Partial<DiscountProductRules>;
+  purchaseRules: Partial<DiscountPurchaseRules>;
+  rewardRules: Partial<DiscountRewardRules>;
+  customerRules: Partial<DiscountCustomerRules>;
+  paymentRules: Partial<DiscountPaymentRules>;
+  areaRules: Partial<DiscountAreaRules>;
+  scheduleRules: Partial<DiscountScheduleRules>;
+  combinationRules: Partial<DiscountCombinationRules>;
+  issueRules: DiscountIssueRules | null;
   usageLimit: number | null;
   perCustomerLimit: number | null;
   usedCount: number;
+  cooldownAmount: number | null;
+  cooldownUnit: 'day' | 'week' | 'month' | null;
   startsAt: string | null;
   endsAt: string | null;
-  status: 'active' | 'scheduled' | 'expired' | 'disabled';
+  /** The same instants as wall-clock times in `resolvedTimezone`, as the editor's inputs hold them. */
+  startsAtLocal: string | null;
+  endsAtLocal: string | null;
+  /** Null follows the store's timezone. */
+  timezone: string | null;
+  resolvedTimezone: string;
+  priority: number;
+  status: DiscountStatus;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** `GET /discounts` — the record, what the clock says about it, and names for the ids it points at. */
+export interface DiscountRow extends DiscountRecord {
+  state: DiscountState;
+  customerCount: number;
+  labels: Record<string, string>;
+}
+
+export interface DiscountLabel {
+  label: string;
+  sublabel: string | null;
+}
+
+/** `GET /discounts/:id`. */
+export interface DiscountView extends DiscountRecord {
+  state: DiscountState;
+  labels: Record<string, DiscountLabel>;
+  customers: {
+    id: string;
+    customerId: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    source: 'manual' | 'reward';
+    periodKey: string;
+    issuedAt: string;
+    expiresAt: string | null;
+    usedAt: string | null;
+    orderId: string | null;
+  }[];
+  /** The owner's own named customers — what the editor's picker holds. */
+  customerIds: string[];
+  customerCount: number;
+  customersUsed: number;
+  canSeeCustomers: boolean;
+  analytics: {
+    currency: string;
+    uses: number;
+    voidedUses: number;
+    uniqueCustomers: number;
+    orderValue: string;
+    discountGiven: string;
+    averageOrderValue: string;
+    ordersWhileLive: number;
+    /** Uses against every order placed while it was live. Null before any order was. */
+    orderShare: number | null;
+    firstUsedAt: string | null;
+    lastUsedAt: string | null;
+  };
+  redemptions: {
+    id: string;
+    orderId: string;
+    orderNumber: string | null;
+    orderStatus: string | null;
+    customerId: string | null;
+    customerName: string | null;
+    email: string | null;
+    code: string | null;
+    originalAmount: string | null;
+    discountAmount: string;
+    finalAmount: string | null;
+    currency: string | null;
+    voidedAt: string | null;
+    createdAt: string;
+  }[];
+}
+
+export interface DiscountSummary {
+  active: number;
+  scheduled: number;
+  paused: number;
+  expired: number;
+  draft: number;
+  limitReached: number;
+  total: number;
+  redemptions: number;
+  redemptionsLast30Days: number;
+  discountedOrders: number;
+  discountGiven: string;
+  currency: string;
+}
+
+export interface CardPrefix {
+  prefix: string;
+  cardType: CardType | null;
+  label: string | null;
+}
+
+export interface PaymentBank {
+  id: string;
+  name: string;
+  shortName: string | null;
+  country: string;
+  cardPrefixes: CardPrefix[];
+  isActive: boolean;
+  sortOrder: number;
+  /** Only on `GET /discounts/banks`: live discounts that name it. */
+  discountCount?: number;
+}
+
+/** `GET /discounts/reference` — what the editor's pickers and hints are built from. */
+export interface DiscountReference {
+  timezone: string;
+  strategy: DiscountStrategy;
+  currency: string;
+  banks: PaymentBank[];
+  collections: { id: string; name: string }[];
+  paymentMethods: { provider: string; label: string; isEnabled: boolean; channels: PaymentChannelChoice[] }[];
+  customerGroups: CustomerGroup[];
+  customersWithBirthday: number;
+  canSearchCustomers: boolean;
 }
 
 export interface BannerRow {
@@ -1014,15 +1111,6 @@ export interface BannerRow {
   endsAt: string | null;
   isActive: boolean;
   sortOrder: number;
-}
-
-export interface SubscriberRow {
-  id: string;
-  email: string;
-  status: 'subscribed' | 'unsubscribed';
-  source: string | null;
-  subscribedAt: string;
-  unsubscribedAt: string | null;
 }
 
 // --- Website content ---------------------------------------------------------
@@ -1054,44 +1142,6 @@ export interface FaqRow {
   sortOrder: number;
 }
 
-/**
- * The section vocabulary the storefront can render. Kept in step with
- * `client-api/src/lib/constants.ts#HOMEPAGE_SECTION_TYPES` — a key this list
- * knows and the API does not is refused on save.
- */
-export const HOMEPAGE_SECTION_TYPES = [
-  'hero',
-  'category_grid',
-  'category_circle',
-  'product_grid',
-  'product_carousel',
-  'banner',
-  'deal',
-  'promo_trio',
-  'flash_sale',
-  'benefits',
-  'lookbook',
-  'testimonial',
-  'brands',
-  'newsletter',
-  'text',
-  'collection',
-  'social_gallery',
-  'recently_viewed',
-] as const;
-
-export type HomepageSectionType = (typeof HOMEPAGE_SECTION_TYPES)[number];
-
-export interface HomepageSectionRow {
-  id: string;
-  type: HomepageSectionType;
-  title: string | null;
-  subtitle: string | null;
-  config: Record<string, unknown>;
-  isEnabled: boolean;
-  sortOrder: number;
-}
-
 export interface ContactMessageRow {
   id: string;
   name: string;
@@ -1103,7 +1153,7 @@ export interface ContactMessageRow {
   createdAt: string;
 }
 
-// --- Settings, attributes, reports --------------------------------------------
+// --- Settings, attributes -----------------------------------------------------
 
 export interface StoreSettingsRow {
   storeName: string;
@@ -1130,7 +1180,10 @@ export interface StoreSettingsRow {
   measureOptions: { label: string; measure: number }[];
   /** What the platform offers when neither the product nor the shop names a list. */
   defaultMeasureOptions: { label: string; measure: number }[];
+  /** Non-zero means a currency change has to be confirmed. */
   orderCount: number;
+  /** Orders taken in each currency, most first; two entries means it has switched before. */
+  orderCurrencies: { currency: string; orders: number }[];
 }
 
 export interface PaymentMethodRow {
@@ -1168,22 +1221,6 @@ export interface AttributeRow {
   /** Products reached through any of this attribute's values. */
   productCount: number;
   variantCount: number;
-}
-
-export interface ReportsPayload {
-  days: number;
-  currency: string;
-  totals: {
-    orders: number;
-    revenue: string;
-    discounts: string;
-    refunded: string;
-    averageOrderValue: string;
-    newCustomers: number;
-    activeProducts: number;
-  };
-  daily: { day: string; orders: number; revenue: string }[];
-  topProducts: { productId: string | null; name: string; units: number; revenue: string }[];
 }
 
 // --- View panels --------------------------------------------------------------
@@ -1273,7 +1310,6 @@ export interface CustomerView {
     orderNumber: string;
     status: OrderStatus;
     paymentStatus: string;
-    shippingStatus: string;
     itemCount: number;
     grandTotal: string;
     refundedTotal: string;
@@ -1304,8 +1340,6 @@ export interface OrderPaymentRow {
  * is that row typed out, plus the refunds and returns raised against it.
  */
 export interface OrderView extends OrderDetailRow {
-  shippingMethodId: string | null;
-  estimatedDeliveryAt: string | null;
   cancelledAt: string | null;
   confirmedAt: string | null;
   shippedAt: string | null;
@@ -1313,6 +1347,19 @@ export interface OrderView extends OrderDetailRow {
   /** Whether the reservation has been given back. Cancelling is what sets it. */
   inventoryReleased: boolean;
   couponId: string | null;
+  /** What the shopper said they paid with, and a card's first digits — what a bank or wallet offer was granted against. */
+  paymentChannel: string | null;
+  cardBin: string | null;
+  /** Every discount on the order and what each gave. A cancelled order's are voided. */
+  discounts: {
+    id: string;
+    discountId: string;
+    name: string;
+    kind: DiscountKind;
+    code: string | null;
+    amount: string;
+    voidedAt: string | null;
+  }[];
   ipAddress: string | null;
   metadata: Record<string, unknown> | null;
   createdAt: string;
@@ -1489,102 +1536,7 @@ export interface ReturnView {
   allowedTransitions: ReturnStatus[];
 }
 
-/** `GET /inventory/:id`, keyed by the **level** id the list row carries. */
-export interface InventoryView {
-  id: string;
-  variantId: string;
-  warehouseId: string;
-  available: number;
-  reserved: number;
-  returnPending: number;
-  damaged: number;
-  incoming: number;
-  lowStockThreshold: number;
-  updatedAt: string;
-  /** Everything physically in the building, sellable or not. */
-  onHand: number;
-  variant: {
-    id: string;
-    productId: string;
-    sku: string;
-    title: string | null;
-    barcode: string | null;
-    price: string;
-    salePrice: string | null;
-    costPrice: string | null;
-    weightGrams: number | null;
-    imageUrl: string | null;
-    isDefault: boolean;
-    isActive: boolean;
-    sortOrder: number;
-    createdAt: string;
-    updatedAt: string;
-  };
-  product: {
-    id: string;
-    name: string;
-    slug: string;
-    status: ProductStatus;
-    productType: 'simple' | 'variable';
-    /** Off means stock is still counted but never refuses a sale. */
-    trackInventory: boolean;
-    isReturnable: boolean;
-    minOrderQuantity: number;
-    maxOrderQuantity: number | null;
-    soldCount: number;
-    /** `measure` means every count on this record is in base units. */
-    sellBy: 'unit' | 'measure';
-    measureUnit: string | null;
-    pricingLabel: string | null;
-  };
-  warehouse: {
-    id: string;
-    name: string;
-    code: string;
-    address: string | null;
-    city: string | null;
-    country: string | null;
-    phone: string | null;
-    isDefault: boolean;
-    isActive: boolean;
-    createdAt: string;
-    updatedAt: string;
-  };
-  otherWarehouses: {
-    id: string;
-    warehouseId: string;
-    warehouseName: string;
-    warehouseCode: string;
-    available: number;
-    reserved: number;
-    damaged: number;
-    incoming: number;
-    returnPending: number;
-  }[];
-  transactions: InventoryTransactionRow[];
-}
-
 /** `GET /coupons/:id` — the rules, and the ledger `used_count` is made of. */
-export interface CouponView extends CouponRow {
-  scope: string;
-  targetIds: string[] | null;
-  isStackable: boolean;
-  createdAt: string;
-  updatedAt: string;
-  redemptionCount: number;
-  totalDiscounted: string;
-  redemptions: {
-    id: string;
-    orderId: string;
-    orderNumber: string | null;
-    orderStatus: string | null;
-    customerId: string | null;
-    customerName: string | null;
-    email: string | null;
-    discountAmount: string;
-    createdAt: string;
-  }[];
-}
 
 /** `GET /banners/:id`, with the category a `category_top` banner is pinned to. */
 export interface BannerView extends BannerRow {
@@ -1592,16 +1544,6 @@ export interface BannerView extends BannerRow {
   categorySlug: string | null;
   createdAt: string;
   updatedAt: string;
-}
-
-/** `GET /newsletter/:id`. The unsubscribe token is reported as a flag, not a value. */
-export interface SubscriberView extends SubscriberRow {
-  customerId: string | null;
-  hasUnsubscribeToken: boolean;
-  customerName: string | null;
-  customerEmail: string | null;
-  customerStatus: string | null;
-  acceptsMarketing: boolean | null;
 }
 
 /** `GET /contact-messages/:id`, with any account matching the sender's address. */
@@ -1635,4 +1577,6 @@ export interface ProductView extends ProductDetail {
   ratingCount: number;
   /** Null falls back to the store-wide window in settings. */
   returnWindowDays: number | null;
+  /** The owner's private note. Written by `PUT /products/:id/note`; never sent to the storefront. */
+  ownerNote: string | null;
 }

@@ -6,14 +6,20 @@ import { BATCH_SIZE } from '@/lib/list';
 import { EmptyState } from '@/components/admin/empty-state';
 import { MessageList } from '@/components/admin/message-list';
 import { PageHeader } from '@/components/admin/page-header';
+import type { MessageKey } from '@/lib/i18n';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = { title: 'Messages' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Messages') };
+}
+
 export const dynamic = 'force-dynamic';
 
-const STATUS_OPTIONS = [
+const STATUS_OPTIONS: { value: string; label: MessageKey }[] = [
   { value: 'all', label: 'All messages' },
   { value: 'new', label: 'New' },
-  { value: 'read', label: 'Read' },
+  { value: 'read', label: 'Read::message' },
   { value: 'replied', label: 'Replied' },
   { value: 'archived', label: 'Archived' },
 ];
@@ -31,6 +37,7 @@ export default async function MessagesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const t = await getT();
   const params = await searchParams;
   const single = (key: string) => {
     const value = params[key];
@@ -52,8 +59,8 @@ export default async function MessagesPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Messages"
-        description="Sent through the contact form on your storefront. Reply from your own email."
+        title={t('Messages')}
+        description={t('Sent through the contact form on your storefront. Reply from your own email.')}
       />
 
       {/* Links rather than the shared filter bar: this list has no search
@@ -70,7 +77,7 @@ export default async function MessagesPage({
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            {option.label}
+            {t(option.label)}
           </a>
         ))}
       </div>
@@ -78,8 +85,8 @@ export default async function MessagesPage({
       {first.data.length === 0 && !filtered ? (
         <EmptyState
           icon={MessageSquareText}
-          title="No messages yet"
-          description="Anything sent through your storefront’s contact form lands here."
+          title={t('No messages yet')}
+          description={t('Anything sent through your storefront’s contact form lands here.')}
         />
       ) : (
         <MessageList initial={{ rows: first.data, meta: first.meta }} query={query} filtered={filtered} />

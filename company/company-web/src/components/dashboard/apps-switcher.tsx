@@ -109,7 +109,7 @@ export function AppsSwitcher({ store }: { store: StoreView | null }) {
                   </span>
                   <span className="block truncate text-xs text-muted-foreground">{app.description}</span>
                   {app.detail ? (
-                    <span className="block truncate font-mono text-[11px] text-muted-foreground/80">
+                    <span className="block truncate font-mono text-[10.5px] text-muted-foreground/80">
                       {app.detail}
                     </span>
                   ) : null}

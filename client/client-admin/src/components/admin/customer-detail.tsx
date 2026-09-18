@@ -2,7 +2,6 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { useDetail } from '@/hooks/use-detail';
 import { formatDate, formatDateTime, formatMoney, formatNumber, titleCase } from '@/lib/format';
@@ -18,6 +17,7 @@ import {
   DetailSheet,
   DetailTable,
 } from './detail-sheet';
+import { CustomerActions } from './customer-actions';
 
 /**
  * Whether a browser is still signed in.
@@ -56,12 +56,15 @@ export function CustomerDetail({
   open,
   onOpenChange,
   currency,
+  canUpdate = false,
 }: {
   /** The list row, which supplies the header while the record is in flight. */
   row: CustomerRow | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currency: string;
+  /** Whether blocking, marketing consent and the staff note can be changed here. */
+  canUpdate?: boolean;
 }) {
   const detail = useDetail<CustomerView>({
     path: '/api/v1/admin/customers',
@@ -87,13 +90,6 @@ export function CustomerDetail({
       loading={detail.loading}
       error={detail.error}
       onRetry={detail.reload}
-      footer={
-        row ? (
-          <Button asChild variant="outline" size="sm">
-            <Link href={`/customers/${row.id}`}>Open full record</Link>
-          </Button>
-        ) : null
-      }
     >
       {customer ? (
         <div className="space-y-6">
@@ -186,7 +182,7 @@ export function CustomerDetail({
                   key: 'order',
                   header: 'Order',
                   cell: (order) => (
-                    <Link href={`/orders/${order.id}`} className="font-mono text-[13px] hover:underline">
+                    <Link href={`/orders?view=${order.id}`} className="font-mono text-[12px] hover:underline">
                       {order.orderNumber}
                     </Link>
                   ),
@@ -273,13 +269,24 @@ export function CustomerDetail({
             />
           </DetailSection>
 
-          <DetailSection title="Staff note" description="Never shown to the customer.">
-            {customer.adminNote ? (
-              <DetailProse>{customer.adminNote}</DetailProse>
-            ) : (
-              <DetailEmpty>No note.</DetailEmpty>
-            )}
-          </DetailSection>
+          {canUpdate ? (
+            <DetailSection title="Staff actions" description="A customer has no screen of its own; these are the changes staff can make.">
+              <CustomerActions
+                key={customer.id}
+                customer={customer}
+                canUpdate={canUpdate}
+                onChanged={detail.reload}
+              />
+            </DetailSection>
+          ) : (
+            <DetailSection title="Staff note" description="Never shown to the customer.">
+              {customer.adminNote ? (
+                <DetailProse>{customer.adminNote}</DetailProse>
+              ) : (
+                <DetailEmpty>No note.</DetailEmpty>
+              )}
+            </DetailSection>
+          )}
         </div>
       ) : null}
     </DetailSheet>

@@ -30,13 +30,14 @@ import { eq } from 'drizzle-orm';
 import type pg from 'pg';
 import { config } from '../src/config/index';
 import { db, pool } from '../src/db/client';
-import { clientAccounts, clientSessions, plans, tenants } from '../src/db/schema/index';
+import { clientAccounts, plans, tenants } from '../src/db/schema/index';
 import { tenantAdminConnection } from '../src/db/tenant-connection';
 import { resolveShard } from '../src/services/tenant-shards';
-import { generateToken, sha256 } from '../src/lib/crypto';
+import { sha256 } from '../src/lib/crypto';
 import { hashOtp } from '../src/lib/otp';
 import { hashPassword } from '../src/lib/password';
 import { addHours } from '../src/lib/utils';
+import { createClientSession, revokeAllClientSessions } from '../src/lib/session';
 import { runProvisioning } from '../src/services/provisioning';
 
 const API = config.api.publicUrl.replace(/\/$/, '');
@@ -209,16 +210,16 @@ async function ensureAccount(options: Options): Promise<{ id: string; created: b
   return { id: created!.id, created: true };
 }
 
-/** A short-lived signed-in session, used only to drive the setup calls below. */
+/**
+   * A short-lived signed-in session, used only to drive the setup calls below.
+   *
+   * Minted through the API's own session module rather than written anywhere by
+   * hand: the cookie holds a signed JWT now, so there is no row to plant and a
+   * hand-rolled token would simply fail to verify.
+   */
 async function openSession(accountId: string): Promise<string> {
-  const token = generateToken(32);
-  await db.insert(clientSessions).values({
-    clientAccountId: accountId,
-    tokenHash: sha256(token),
-    otpVerified: true,
-    expiresAt: addHours(new Date(), 1),
-  });
-  return `company_client_session=${token}`;
+  const session = await createClientSession(null, accountId, false, { otpVerified: true });
+  return `company_client_session=${session.token}`;
 }
 
 async function plantOtp(tenantId: string): Promise<void> {
@@ -466,7 +467,7 @@ async function main(): Promise<void> {
   } finally {
     // The session existed only to drive setup; a real sign-in issues its own,
     // and leaving it behind would be a live cookie in a script's log.
-    await db.delete(clientSessions).where(eq(clientSessions.clientAccountId, account.id));
+    await revokeAllClientSessions(account.id);
   }
 
   const panel = await applyPanelLogin(options, account.id);

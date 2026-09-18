@@ -7,12 +7,14 @@ import { ExternalLink, Store, X } from 'lucide-react';
 import { NAV_SECTIONS, isActive } from './nav';
 import { useSession } from './session-provider';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/lib/i18n';
 import { storefrontUrl } from '@/lib/env';
 import { cn } from '@/lib/utils';
 
 export function AdminSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname();
   const { store, can } = useSession();
+  const t = useT();
 
   // Sections with nothing the admin may see are dropped entirely, so a limited
   // staff member gets a short, honest menu rather than a wall of dead links.
@@ -20,7 +22,9 @@ export function AdminSidebar({ open, onClose }: { open: boolean; onClose: () => 
     () =>
       NAV_SECTIONS.map((section) => ({
         ...section,
-        items: section.items.filter((item) => can(item.permission)),
+        items: section.items.filter((item) =>
+          Array.isArray(item.permission) ? item.permission.some(can) : can(item.permission),
+        ),
       })).filter((section) => section.items.length > 0),
     [can],
   );
@@ -51,16 +55,16 @@ export function AdminSidebar({ open, onClose }: { open: boolean; onClose: () => 
               <span className="block truncate text-xs text-muted-foreground">{store.slug}</span>
             </span>
           </Link>
-          <Button variant="ghost" size="icon-sm" className="lg:hidden" onClick={onClose} aria-label="Close menu">
+          <Button variant="ghost" size="icon-sm" className="lg:hidden" onClick={onClose} aria-label={t('Close menu')}>
             <X />
           </Button>
         </div>
 
-        <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-5" aria-label="Store admin">
+        <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-5" aria-label={t('Store admin')}>
           {sections.map((section) => (
             <div key={section.label}>
-              <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {section.label}
+              <p className="px-3 pb-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {t(section.label)}
               </p>
               <ul className="space-y-0.5">
                 {section.items.map((item) => {
@@ -79,7 +83,7 @@ export function AdminSidebar({ open, onClose }: { open: boolean; onClose: () => 
                         )}
                       >
                         <item.icon className="size-4.5 shrink-0" aria-hidden />
-                        {item.label}
+                        {t(item.label)}
                       </Link>
                     </li>
                   );
@@ -96,7 +100,7 @@ export function AdminSidebar({ open, onClose }: { open: boolean; onClose: () => 
             rel="noreferrer"
             className="flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
           >
-            View storefront
+            {t('View storefront')}
             <ExternalLink className="size-4" aria-hidden />
           </a>
         </div>

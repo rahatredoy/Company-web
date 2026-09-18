@@ -18,6 +18,7 @@ import { RadioCard, RadioGroup } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
 import { Field } from '@/components/ui/field';
 import { Spinner } from '@/components/ui/spinner';
+import { useT, type MessageKey } from '@/lib/i18n';
 
 /**
  * Cancel an order.
@@ -29,7 +30,7 @@ import { Spinner } from '@/components/ui/spinner';
  * answers live.
  */
 
-const REASONS = [
+const REASONS: { value: string; label: MessageKey }[] = [
   { value: 'changed_mind', label: 'I changed my mind' },
   { value: 'found_cheaper', label: 'Found it cheaper elsewhere' },
   { value: 'ordered_by_mistake', label: 'Ordered by mistake' },
@@ -38,6 +39,7 @@ const REASONS = [
 ];
 
 export function CancelOrderDialog({ orderNumber }: { orderNumber: string }) {
+  const t = useT();
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [reason, setReason] = React.useState('');
@@ -47,7 +49,7 @@ export function CancelOrderDialog({ orderNumber }: { orderNumber: string }) {
 
   const onConfirm = async () => {
     if (!reason) {
-      setError('Please choose a reason.');
+      setError(t('Please choose a reason.'));
       return;
     }
 
@@ -63,18 +65,18 @@ export function CancelOrderDialog({ orderNumber }: { orderNumber: string }) {
 
       if (!response.ok) {
         const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? 'We could not cancel this order.');
+        setError(body?.error ?? t('We could not cancel this order.'));
         setSubmitting(false);
         return;
       }
 
       setOpen(false);
-      toast.success(`Order ${orderNumber} cancelled`, {
-        description: 'Any payment taken will be refunded within a few working days.',
+      toast.success(t('Order {orderNumber} cancelled', { orderNumber }), {
+        description: t('Any payment taken will be refunded within a few working days.'),
       });
       router.refresh();
     } catch {
-      setError('We could not reach the store. Please try again.');
+      setError(t('We could not reach the store. Please try again.'));
       setSubmitting(false);
     }
   };
@@ -84,28 +86,29 @@ export function CancelOrderDialog({ orderNumber }: { orderNumber: string }) {
       <DialogTrigger asChild>
         <Button variant="ghost" className="text-error hover:bg-error/8">
           <XCircle aria-hidden />
-          Cancel order
+          {t('Cancel order')}
         </Button>
       </DialogTrigger>
 
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Cancel order {orderNumber}?</DialogTitle>
+          <DialogTitle>{t('Cancel order {orderNumber}?', { orderNumber })}</DialogTitle>
           <DialogDescription>
-            This cannot be undone. Anything already paid is refunded to the original payment method
-            within a few working days.
+            {t(
+              'This cannot be undone. Anything already paid is refunded to the original payment method within a few working days.',
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <fieldset>
-          <legend className="mb-2 text-sm font-medium">Why are you cancelling?</legend>
-          <RadioGroup value={reason} onValueChange={setReason} aria-label="Cancellation reason">
+          <legend className="mb-2 text-sm font-medium">{t('Why are you cancelling?')}</legend>
+          <RadioGroup value={reason} onValueChange={setReason} aria-label={t('Cancellation reason')}>
             {REASONS.map((item) => (
               <RadioCard
                 key={item.value}
                 id={`cancel-${item.value}`}
                 value={item.value}
-                title={item.label}
+                title={t(item.label)}
                 className="p-3"
               />
             ))}
@@ -113,7 +116,7 @@ export function CancelOrderDialog({ orderNumber }: { orderNumber: string }) {
         </fieldset>
 
         {reason === 'other' ? (
-          <Field name="cancel-notes" label="Tell us more" className="mt-4">
+          <Field name="cancel-notes" label={t('Tell us more')} className="mt-4">
             {(props) => (
               <Textarea
                 {...props}
@@ -133,11 +136,11 @@ export function CancelOrderDialog({ orderNumber }: { orderNumber: string }) {
 
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-            Keep my order
+            {t('Keep my order')}
           </Button>
           <Button type="button" variant="danger" onClick={onConfirm} disabled={submitting}>
             {submitting ? <Spinner /> : null}
-            Cancel order
+            {t('Cancel order')}
           </Button>
         </DialogFooter>
       </DialogContent>

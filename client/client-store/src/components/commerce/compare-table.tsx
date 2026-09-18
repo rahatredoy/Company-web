@@ -13,6 +13,7 @@ import { PriceDisplay } from '@/components/commerce/price-display';
 import { useCompare } from '@/lib/commerce/collections';
 import { useCart } from '@/lib/commerce/cart';
 import { useHydrated } from '@/lib/hooks/use-hydrated';
+import { useT, type MessageKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -26,11 +27,12 @@ import { cn } from '@/lib/utils';
  */
 
 interface Row {
-  label: string;
+  label: MessageKey;
   render: (product: ProductSummary) => React.ReactNode;
 }
 
 export function CompareTable({ locale }: { locale: string }) {
+  const t = useT();
   const compare = useCompare();
   const { add } = useCart();
   const hydrated = useHydrated();
@@ -38,7 +40,7 @@ export function CompareTable({ locale }: { locale: string }) {
   if (!hydrated) {
     return (
       <div className="mt-8 grid gap-4 sm:grid-cols-3" aria-busy="true">
-        <span className="sr-only">Loading your comparison…</span>
+        <span className="sr-only">{t('Loading your comparison…')}</span>
         {Array.from({ length: 3 }, (_, index) => (
           <Skeleton key={index} className="h-96 rounded-(--radius-card)" />
         ))}
@@ -50,11 +52,14 @@ export function CompareTable({ locale }: { locale: string }) {
     return (
       <EmptyState
         icon={GitCompareArrows}
-        title="Nothing to compare yet"
-        description={`Add up to ${compare.limit} products and their prices, ratings and specifications line up side by side here.`}
+        title={t('Nothing to compare yet')}
+        description={t(
+          'Add up to {limit} products and their prices, ratings and specifications line up side by side here.',
+          { limit: compare.limit },
+        )}
         action={
           <Button asChild size="lg">
-            <Link href="/shop">Browse products</Link>
+            <Link href="/shop">{t('Browse products')}</Link>
           </Button>
         }
         className="mt-6 rounded-(--radius-card) border border-dashed border-border"
@@ -81,7 +86,7 @@ export function CompareTable({ locale }: { locale: string }) {
         product.ratingCount > 0 ? (
           <RatingStars rating={product.ratingAverage} count={product.ratingCount} size="sm" />
         ) : (
-          <span className="text-sm text-subtle">No reviews yet</span>
+          <span className="text-sm text-subtle">{t('No reviews yet')}</span>
         ),
     },
     {
@@ -104,7 +109,7 @@ export function CompareTable({ locale }: { locale: string }) {
             product.inStock ? (product.lowStock ? 'text-warning' : 'text-success') : 'text-error',
           )}
         >
-          {product.inStock ? (product.lowStock ? 'Low stock' : 'In stock') : 'Out of stock'}
+          {product.inStock ? (product.lowStock ? t('Low stock') : t('In stock')) : t('Out of stock')}
         </span>
       ),
     },
@@ -118,7 +123,7 @@ export function CompareTable({ locale }: { locale: string }) {
       label: 'Options',
       render: (product) => (
         <span className="text-sm text-muted">
-          {product.hasVariants ? 'Colours and sizes available' : 'Single option'}
+          {product.hasVariants ? t('Colours and sizes available') : t('Single option')}
         </span>
       ),
     },
@@ -128,23 +133,23 @@ export function CompareTable({ locale }: { locale: string }) {
     <>
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
         <p className="text-sm text-muted">
-          Comparing {compare.items.length} of {compare.limit}
+          {t('Comparing {count} of {limit}', { count: compare.items.length, limit: compare.limit })}
         </p>
         <Button size="sm" variant="ghost" onClick={compare.clear}>
-          Clear all
+          {t('Clear all')}
         </Button>
       </div>
 
       <div className="mt-6 overflow-x-auto">
         <table className="w-full min-w-[40rem] border-collapse text-left">
           <caption className="sr-only">
-            Product comparison across price, rating, brand, availability and specifications
+            {t('Product comparison across price, rating, brand, availability and specifications')}
           </caption>
 
           <thead>
             <tr>
               <th scope="col" className="w-36 p-3 align-bottom">
-                <span className="sr-only">Attribute</span>
+                <span className="sr-only">{t('Attribute')}</span>
               </th>
 
               {compare.items.map((product) => (
@@ -153,7 +158,7 @@ export function CompareTable({ locale }: { locale: string }) {
                     <button
                       type="button"
                       onClick={() => compare.remove(product.id)}
-                      aria-label={`Remove ${product.name} from comparison`}
+                      aria-label={t('Remove {name} from comparison', { name: product.name })}
                       className="absolute right-0 top-0 z-10 grid size-7 place-items-center rounded-full bg-surface text-muted shadow-[var(--shadow-card)] transition-colors hover:text-error"
                     >
                       <X className="size-3.5" aria-hidden />
@@ -186,7 +191,7 @@ export function CompareTable({ locale }: { locale: string }) {
             {rows.map((row) => (
               <tr key={row.label}>
                 <th scope="row" className="p-3 align-top text-sm font-medium text-subtle">
-                  {row.label}
+                  {t(row.label)}
                 </th>
                 {compare.items.map((product) => (
                   <td key={product.id} className="p-3 align-top">
@@ -198,7 +203,7 @@ export function CompareTable({ locale }: { locale: string }) {
 
             <tr>
               <th scope="row" className="p-3 text-sm font-medium text-subtle">
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t('Actions')}</span>
               </th>
               {compare.items.map((product) => (
                 <td key={product.id} className="p-3">
@@ -218,12 +223,12 @@ export function CompareTable({ locale }: { locale: string }) {
                         currency: product.currency,
                         quantity: 1,
                       });
-                      toast.success(`${product.name} added to your cart`);
+                      toast.success(t('{name} added to your cart', { name: product.name }));
                     }}
                     className="w-full"
                   >
                     <ShoppingCart aria-hidden />
-                    {product.inStock ? 'Add to cart' : 'Out of stock'}
+                    {product.inStock ? t('Add to cart') : t('Out of stock')}
                   </Button>
                 </td>
               ))}

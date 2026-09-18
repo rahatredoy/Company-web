@@ -1,12 +1,13 @@
 import type { Metadata } from 'next';
 import { getStoreConfig } from '@/lib/api/store';
 import { CollectionPage } from '@/components/catalog/collection-page';
+import { getT } from '@/lib/i18n/server';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const config = await getStoreConfig();
+  const [config, t] = await Promise.all([getStoreConfig(), getT()]);
   return {
-    title: 'Featured',
-    description: `A hand-picked selection from ${config.store.name}.`,
+    title: t('Featured'),
+    description: t('A hand-picked selection from {store}.', { store: config.store.name }),
     alternates: { canonical: '/featured' },
   };
 }
@@ -16,10 +17,11 @@ export default async function FeaturedPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const t = await getT();
+
   return (
     <CollectionPage
-      title="Featured"
-      intro="A selection chosen by hand, updated regularly."
+      title={t('Featured')}
       defaults={{ sort: 'rating' }}
       searchParams={await searchParams}
     />

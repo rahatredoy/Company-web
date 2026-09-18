@@ -32,8 +32,8 @@ export function Logo({
     <Link href={href} className={cn('group inline-flex items-center gap-2.5', className)}>
       <LogoMark />
       <span className="flex flex-col leading-none">
-        <span className="text-[15px] font-semibold tracking-tight">{publicEnv.platformName}</span>
-        {subtitle ? <span className="mt-0.5 text-[11px] text-muted-foreground">{subtitle}</span> : null}
+        <span className="text-[14px] font-semibold tracking-tight">{publicEnv.platformName}</span>
+        {subtitle ? <span className="mt-0.5 text-[10.5px] text-muted-foreground">{subtitle}</span> : null}
       </span>
     </Link>
   );

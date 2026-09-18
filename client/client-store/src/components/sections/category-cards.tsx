@@ -2,6 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import type { Category } from '@/types';
 import type { TemplatePreset } from '@/templates/meta';
+import { getT } from '@/lib/i18n/server';
 import { cn } from '@/lib/utils';
 
 /**
@@ -18,7 +19,7 @@ import { cn } from '@/lib/utils';
  * gets "Women's Fashion, link" rather than a description of a photograph
  * followed by the same words again.
  */
-export function CategoryCards({
+export async function CategoryCards({
   categories,
   style = 'card',
   limit = 12,
@@ -33,6 +34,7 @@ export function CategoryCards({
 }) {
   if (categories.length === 0) return null;
 
+  const t = await getT();
   const shown = categories.slice(0, limit);
   const editorial = style === 'editorial';
   const compact = style === 'compact';
@@ -94,8 +96,8 @@ export function CategoryCards({
                 {category.name}
               </span>
 
-              <span className="mt-0.5 block text-[11px] opacity-85 sm:text-xs">
-                {showCount ? `${category.productCount} products` : 'View Collection'}
+              <span className="mt-0.5 block text-[10.5px] opacity-85 sm:text-xs">
+                {showCount ? t('{count} products', { count: category.productCount }) : t('View Collection')}
               </span>
             </span>
           </Link>

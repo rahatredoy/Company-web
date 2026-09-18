@@ -8,8 +8,6 @@ import {
   pages,
   paymentMethods,
   platformSync,
-  shippingMethods,
-  shippingZones,
   storeSettings,
   warehouses,
 } from '../db/schema/index';
@@ -117,15 +115,15 @@ const DEFAULT_FAQS = [
  *
  * There is no `hero` block: a hero needs an image, and one shipped from here
  * would be a stock photo of somebody else's shop on the front page of theirs.
- * The first thing the owner is asked to add is the first thing a visitor sees.
  *
  * The two `banner` blocks are the advertising breaks between the product rows,
  * and they are seeded **empty on purpose**. They name a placement rather than
  * carrying artwork, so each is invisible until the owner adds a banner at
- * `/banners` and becomes a full-width strip the moment they do — no second trip
- * to the homepage screen to make room for it. That is the same reason there is
- * no hero here, arrived at from the other side: a block that needs a picture
- * ships without one, rather than with somebody else's.
+ * `/banners` and becomes a full-width strip the moment they do — the panel has
+ * no homepage editor, so a block has to be here already to be filled. That is
+ * the same reason there is no hero here, arrived at from the other side: a
+ * block that needs a picture ships without one, rather than with somebody
+ * else's.
  */
 const DEFAULT_SECTIONS = [
   {
@@ -289,13 +287,6 @@ const DEFAULT_SECTIONS = [
     config: { showProducts: true, limit: 1, offset: 3 },
     sortOrder: 55,
   },
-  {
-    type: 'newsletter' as const,
-    title: 'Stay in the loop',
-    subtitle: 'New arrivals and offers, no more than once a week.',
-    config: {},
-    sortOrder: 60,
-  },
 ] as const;
 
 async function alreadySeeded(db: TenantDb): Promise<boolean> {
@@ -440,37 +431,15 @@ async function seedNavigation(db: TenantDb, storeName: string): Promise<void> {
 }
 
 /**
- * A default warehouse, zone and shipping method.
+ * The default warehouse.
  *
- * Stock is counted against a warehouse and a shipping method hangs off a zone,
- * so without these the first order the store takes has nowhere to come from and
- * no way to reach anyone. Both are the catch-all their tables were designed
- * around — `is_default` on each.
+ * Stock is counted against a warehouse, so without one the first order the
+ * store takes has nowhere to come from. It is the catch-all the table was
+ * designed around — `is_default`.
  */
 async function seedFulfilment(db: TenantDb): Promise<void> {
   await db
     .insert(warehouses)
     .values({ name: 'Main Warehouse', code: 'MAIN', isDefault: true, isActive: true })
     .onConflictDoNothing();
-
-  const existingZone = await db.select({ id: shippingZones.id }).from(shippingZones).limit(1);
-  if (existingZone.length > 0) return;
-
-  const [zone] = await db
-    .insert(shippingZones)
-    .values({ name: 'Everywhere', isDefault: true, isActive: true, sortOrder: 0 })
-    .returning({ id: shippingZones.id });
-
-  if (!zone) return;
-
-  await db.insert(shippingMethods).values({
-    zoneId: zone.id,
-    name: 'Standard Delivery',
-    description: 'Arrives in 3–5 working days.',
-    price: '0',
-    estimatedDaysMin: 3,
-    estimatedDaysMax: 5,
-    isActive: true,
-    sortOrder: 0,
-  });
 }

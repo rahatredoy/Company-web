@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { Check } from 'lucide-react';
 import type { ProductVariant, VariantOption } from '@/types';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -32,6 +33,8 @@ export function VariantSelector({
   onChange: (next: Record<string, string>) => void;
   className?: string;
 }) {
+  const t = useT();
+
   /**
    * Whether choosing `valueId` for `attributeId` leaves at least one variant
    * reachable, holding every *other* current choice fixed.
@@ -125,9 +128,9 @@ export function VariantSelector({
                 const selected = value.id === selectedId;
 
                 const label = !available
-                  ? `${value.value} — not available`
+                  ? t('{value} — not available', { value: value.value })
                   : !inStock
-                    ? `${value.value} — out of stock`
+                    ? t('{value} — out of stock', { value: value.value })
                     : value.value;
 
                 if (option.inputType === 'color') {

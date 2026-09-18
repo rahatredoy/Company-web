@@ -1,16 +1,13 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { X } from 'lucide-react';
 import type { Category } from '@/types';
 import { getStoreConfig } from '@/lib/api/store';
 import { getProductList, parseProductQuery } from '@/lib/api/products';
 import { getTemplate } from '@/templates/registry';
-import { Breadcrumb, ProductListing } from '@/components/catalog/product-listing';
+import { ProductListing } from '@/components/catalog/product-listing';
 import { apiFetch, isStoreNotFound } from '@/lib/api/client';
 import { cookieHeader, storeCall } from '@/lib/tenant';
-import { ScrollRail } from '@/components/ui/scroll-rail';
-import { cn } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
 
 async function getCategory(slug: string): Promise<Category | null> {
 
@@ -34,15 +31,15 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const category = await getCategory(slug);
-  if (!category) return { title: 'Category not found' };
+  if (!category) return { title: (await getT())('Category not found') };
 
   return {
     title: category.seo.title ?? category.name,
-    description: category.seo.description ?? category.description ?? undefined,
+    description: category.seo.description ?? undefined,
     alternates: { canonical: `/category/${category.slug}` },
     openGraph: {
       title: category.seo.title ?? category.name,
-      description: category.seo.description ?? category.description ?? undefined,
+      description: category.seo.description ?? undefined,
       ...(category.imageUrl ? { images: [category.imageUrl] } : {}),
     },
   };
@@ -61,60 +58,30 @@ export default async function CategoryPage({
   if (!category) notFound();
 
   /*
-   * One subcategory at a time.
+   * Every filter on this page is the sidebar's, `sub` included.
    *
-   * The chips answer "which aisle", and an aisle is a place you are in rather
-   * than a set you accumulate — two at once reads as a filter that failed to
-   * clear. Clamped here as well as in the links, so a shared or hand-edited URL
-   * carrying several cannot produce a listing the chip row is unable to
-   * represent. The `sub` parameter itself stays a list: the sidebar filters are
-   * genuinely multi-select and travel the same way.
+   * It used to be clamped to one value here, because the subcategory chips above
+   * the grid were a single choice — "an aisle is a place you are in". The
+   * Category group in the filter panel replaced those chips, and a checkbox list
+   * with counts is genuinely multi-select: a shopper narrowing Electronics to
+   * Phones *and* Laptops is asking one question, not two. `parseProductQuery`
+   * validates the values and the API resolves each one to its own subtree, so a
+   * hand-edited URL still cannot ask for more than the panel could.
    */
-  const parsed = parseProductQuery(search, { category: slug });
-  const query =
-    parsed.subcategories && parsed.subcategories.length > 1
-      ? { ...parsed, subcategories: parsed.subcategories.slice(0, 1) }
-      : parsed;
+  const query = parseProductQuery(search, { category: slug });
 
-  const [config, result] = await Promise.all([getStoreConfig(), getProductList(query)]);
+  const [config, result, t] = await Promise.all([getStoreConfig(), getProductList(query), getT()]);
   const template = await getTemplate(config.design.templateKey);
 
-  /**
-   * A child chip narrows this page; it does not navigate to the child's own
-   * page. Everything the visitor is reading — the heading, the other chips, the
-   * brand list they are half way down — has to survive the click, so the only
-   * thing that changes is `sub`. It stays a real link rather than a button, so
-   * a narrowed listing is still shareable, crawlable and back-button-friendly,
-   * exactly like the sidebar filters.
-   */
-  const selectedSubs = query.subcategories ?? [];
-  const subHref = (childSlug: string) => {
-    const next = new URLSearchParams();
-    for (const [key, value] of Object.entries(search)) {
-      // `page` goes because page 7 of a narrower result set is usually empty.
-      if (key === 'sub' || key === 'page') continue;
-      if (Array.isArray(value)) value.forEach((entry) => next.append(key, entry));
-      else if (value !== undefined) next.set(key, value);
-    }
-
-    // Single-select: picking one replaces whatever was chosen, and picking the
-    // current one clears it. Appending instead of replacing is what allowed four
-    // aisles to be lit at once.
-    const after = selectedSubs.includes(childSlug) ? [] : [childSlug];
-    after.forEach((entry) => next.append('sub', entry));
-
-    const queryString = next.toString();
-    return queryString ? `/category/${category.slug}?${queryString}` : `/category/${category.slug}`;
-  };
-
   /*
-   * `category.breadcrumb` already ends with this category.
+   * The trail feeds the structured data below and nothing else — the visible
+   * one is gone from every page on the storefront, and the header's back
+   * button is what replaced it.
    *
-   * Appending the name again rendered "Home / Electronics / Electronics", and
-   * "Home / Electronics / Smartphones / Smartphones" once subcategories existed —
-   * React also warned about two children with the same key, and the
-   * `BreadcrumbList` handed to crawlers carried the duplicate too. The last
-   * entry is the page you are on, so it gets no link.
+   * `category.breadcrumb` already ends with this category, so appending the
+   * name again produced "Home / Electronics / Electronics" — and still would,
+   * in the `BreadcrumbList` handed to crawlers, which is the half that
+   * survives. The last entry is the page you are on, so it gets no link.
    */
   const trail: { name: string; href?: string }[] = category.breadcrumb.length
     ? category.breadcrumb.map((crumb, index) => ({
@@ -128,7 +95,7 @@ export default async function CategoryPage({
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
     itemListElement: [
-      { '@type': 'ListItem', position: 1, name: 'Home', item: config.store.canonicalOrigin },
+      { '@type': 'ListItem', position: 1, name: t('Home'), item: config.store.canonicalOrigin },
       ...trail.map((crumb, index) => ({
         '@type': 'ListItem',
         position: index + 2,
@@ -146,69 +113,29 @@ export default async function CategoryPage({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
 
-      <Breadcrumb trail={trail} />
+      {/*
+        The name is in the document, not on the screen.
 
-      <h1 className="text-2xl font-semibold sm:text-3xl">{category.name}</h1>
-      {category.description ? (
-        <p className="mt-2 max-w-2xl text-sm text-muted">{category.description}</p>
-      ) : null}
+        A page reached by clicking "Electronics" does not need "Home /
+        Electronics" and then "Electronics" printed across the top of it — that
+        is two lines and eighty pixels spent telling the visitor where they
+        just chose to go, above the products they came for. Getting back out is
+        the header's back button now. The heading stays in the markup because
+        removing it would leave the page with no h1 at all, which breaks the
+        outline a screen reader navigates by and is what a search result shows.
+      */}
+      <h1 className="sr-only">{category.name}</h1>
 
-      {category.children.length > 0 ? (
-        <ScrollRail label={`Narrow ${category.name}`} className="mt-5">
-          {category.children.map((child) => {
-            const selected = selectedSubs.includes(child.slug);
-
-            return (
-              <li
-                key={child.id}
-                /*
-                 * Two chips to a phone screen; from `sm` up, however many fit.
-                 *
-                 * The `2.5rem` taken off is the `gap-2` between the pair plus a
-                 * 2rem gutter, so the third chip is left peeking rather than
-                 * butting against the edge — the arrow then sits over a sliver
-                 * of the next chip instead of over the second one's label, and
-                 * the row reads as continuing before anything is measured.
-                 */
-                className="basis-[calc((100%-2.5rem)/2)] sm:basis-auto"
-              >
-                <Link
-                  href={subHref(child.slug)}
-                  // The chips sit above the grid, so re-rendering in place beats
-                  // throwing the visitor back to the top of the page.
-                  scroll={false}
-                  className={cn(
-                    // `w-full` only while the width is imposed from the `li`: a
-                    // chip narrower than its slot would leave the gaps uneven
-                    // and make "two per screen" look like an accident.
-                    'flex w-full items-center justify-center gap-1.5 rounded-(--radius-pill) border px-4 py-2 text-sm transition-colors sm:w-auto',
-                    selected
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border bg-surface hover:border-primary hover:text-primary',
-                  )}
-                >
-                  <span className="truncate">{child.name}</span>
-                  {selected ? (
-                    <>
-                      <X className="size-3.5 shrink-0" aria-hidden />
-                      <span className="sr-only">(selected — activate to remove)</span>
-                    </>
-                  ) : null}
-                </Link>
-              </li>
-            );
-          })}
-        </ScrollRail>
-      ) : null}
-
-      <div className="mt-8">
+      <div className="mt-6">
         <ProductListing
           result={result}
+          query={query}
           sort={query.sort ?? 'relevance'}
           cardVariant={template.cardVariant}
           gridClassName={template.gridClassName}
           locale={config.store.language}
-          emptyTitle={`Nothing in ${category.name} matches those filters`}
+          currency={config.store.currency}
+          emptyTitle={t('Nothing in {name} matches those filters', { name: category.name })}
         />
       </div>
     </div>

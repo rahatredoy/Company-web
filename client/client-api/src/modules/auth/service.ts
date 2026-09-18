@@ -17,7 +17,8 @@ import {
 } from '../../lib/constants';
 import { addMinutes, sleep } from '../../lib/utils';
 import { clientIp, userAgent } from '../../lib/http';
-import { button, layout, paragraph, sendMail } from '../../lib/mailer';
+import type { Language } from '../../lib/languages';
+import { button, layout, mailText, paragraph, sendMail } from '../../lib/mailer';
 import { adminUrl } from '../../lib/urls';
 import { hashPassword } from '../../lib/password';
 
@@ -96,25 +97,35 @@ export async function redeemToken(
   return rows[0] ?? null;
 }
 
+/**
+ * Written in the store's language, because the owner reads it in the same
+ * language as the panel it resets. `language` defaults to English, whose output
+ * is exactly what this mail always said.
+ */
 export async function sendPasswordResetEmail(
-  input: { slug: string; storeName: string; email: string; fullName: string; token: string },
+  input: { slug: string; storeName: string; email: string; fullName: string; token: string; language?: Language },
 ): Promise<void> {
   const url = adminUrl(input.slug, `/reset-password?token=${input.token}`);
   const firstName = input.fullName.split(' ')[0] ?? 'there';
+  const language = input.language ?? 'en';
+  const say = (text: string, values?: Record<string, string | number>) => mailText(language, text, values);
+  const expiry = say(
+    'This link expires in {minutes} minutes. If you did not request it, ignore this email — your password has not changed.',
+    { minutes: TOKEN_TTL.passwordResetMinutes },
+  );
 
   await sendMail({
     to: input.email,
     fromName: input.storeName,
-    subject: `Reset your ${input.storeName} admin password`,
-    text: `Hi ${firstName},\n\nReset your password:\n${url}\n\nThis link expires in ${TOKEN_TTL.passwordResetMinutes} minutes. If you did not request it, ignore this email — your password has not changed.`,
+    subject: say('Reset your {storeName} admin password', { storeName: input.storeName }),
+    text: `${say('Hi {firstName},', { firstName })}\n\n${say('Reset your password:')}\n${url}\n\n${expiry}`,
     html: layout(
       input.storeName,
-      'Reset your password',
-      paragraph(`Hi ${firstName}, use the link below to choose a new password.`) +
-        button('Reset my password', url) +
-        paragraph(
-          `This link expires in ${TOKEN_TTL.passwordResetMinutes} minutes. If you did not request it, ignore this email — your password has not changed.`,
-        ),
+      say('Reset your password'),
+      paragraph(say('Hi {firstName}, use the link below to choose a new password.', { firstName })) +
+        button(say('Reset my password'), url, language) +
+        paragraph(expiry),
+      language,
     ),
   });
 }

@@ -93,6 +93,11 @@ export default async function adminReturnRoutes(app: FastifyInstance) {
             status: returns.status,
             resolution: returns.resolution,
             reason: returns.reason,
+            // How many photos the customer attached, so the list can flag a claim
+            // that comes with evidence before the request is opened.
+            photoCount: sql<number>`(
+              select count(*)::int from ${returnAttachments} a where a.return_id = ${returns.id}
+            )`,
             refundableAmount: returns.refundableAmount,
             currency: orders.currency,
             createdAt: returns.createdAt,

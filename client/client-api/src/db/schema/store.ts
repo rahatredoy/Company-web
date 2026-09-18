@@ -63,6 +63,12 @@ export const storeSettings = pgTable(
        * measure_options` being null is what defers to this. See `lib/measure.ts`.
        */
       measureOptions?: { label: string; measure: number }[];
+      /**
+       * What happens when more than one automatic discount matches a basket:
+       * the single best one, the single highest-priority one, or every one that
+       * combines. Absent is `best`. See `lib/discounts/engine.ts`.
+       */
+      discountStrategy?: 'best' | 'priority' | 'stack';
     }>(),
     seoTitle: varchar('seo_title', { length: 160 }),
     seoDescription: varchar('seo_description', { length: 300 }),

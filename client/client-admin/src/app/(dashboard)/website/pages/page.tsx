@@ -11,11 +11,17 @@ import { PageHeader } from '@/components/admin/page-header';
 import { PageList } from '@/components/admin/page-list';
 import { TableFilters } from '@/components/admin/table-filters';
 import { Button } from '@/components/ui/button';
+import type { MessageKey } from '@/lib/i18n';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = { title: 'Pages' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Pages') };
+}
+
 export const dynamic = 'force-dynamic';
 
-const STATUS_OPTIONS = [
+const STATUS_OPTIONS: { value: string; label: MessageKey }[] = [
   { value: 'all', label: 'All pages' },
   { value: 'published', label: 'Published' },
   { value: 'draft', label: 'Drafts' },
@@ -26,6 +32,7 @@ export default async function PagesListPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const t = await getT();
   const params = await searchParams;
   const single = (key: string) => {
     const value = params[key];
@@ -50,23 +57,30 @@ export default async function PagesListPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Pages"
-        description="Your About, Contact and policy pages — the copy your storefront links to."
+        title={t('Pages')}
+        description={t('Your About, Contact and policy pages — the copy your storefront links to.')}
         actions={
           canManage ? (
             <Button asChild size="sm">
               <Link href="/website/pages/new">
-                <Plus aria-hidden /> New page
+                <Plus aria-hidden /> {t('New page')}
               </Link>
             </Button>
           ) : null
         }
       />
 
-      <TableFilters searchPlaceholder="Page title" statusOptions={STATUS_OPTIONS} />
+      <TableFilters
+        searchPlaceholder={t('Page title')}
+        statusOptions={STATUS_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
+      />
 
       {first.data.length === 0 && !filtered ? (
-        <EmptyState icon={FileText} title="No pages yet" description="Add one to link it from your footer." />
+        <EmptyState
+          icon={FileText}
+          title={t('No pages yet')}
+          description={t('Add one to link it from your footer.')}
+        />
       ) : (
         <PageList
           initial={{ rows: first.data, meta: first.meta }}

@@ -4,6 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/lib/i18n';
 
 /**
  * The route-level error boundary.
@@ -21,6 +22,8 @@ export default function ErrorBoundary({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useT();
+
   React.useEffect(() => {
     console.error('[storefront] render error', error);
   }, [error]);
@@ -32,24 +35,25 @@ export default function ErrorBoundary({
           <AlertTriangle className="size-6" aria-hidden />
         </span>
 
-        <h1 className="text-3xl font-semibold">Something went wrong</h1>
+        <h1 className="text-3xl font-semibold">{t('Something went wrong')}</h1>
         <p className="mt-3 text-muted">
-          We could not load this page. Please try again — if it keeps happening, contact us and
-          we will look into it.
+          {t(
+            'We could not load this page. Please try again — if it keeps happening, contact us and we will look into it.',
+          )}
         </p>
 
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <Button size="lg" onClick={reset}>
-            Try again
+            {t('Try again')}
           </Button>
           <Button asChild size="lg" variant="outline">
-            <Link href="/">Go home</Link>
+            <Link href="/">{t('Go home')}</Link>
           </Button>
         </div>
 
         {error.digest ? (
           <p className="mt-8 text-xs text-subtle">
-            Reference <code className="font-mono">{error.digest}</code>
+            {t.rich('Reference {code}', { code: <code className="font-mono">{error.digest}</code> })}
           </p>
         ) : null}
       </div>

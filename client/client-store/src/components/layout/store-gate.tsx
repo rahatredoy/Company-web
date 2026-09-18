@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Clock, Store } from 'lucide-react';
 import type { StoreConfig } from '@/types';
+import { getT } from '@/lib/i18n/server';
 
 /**
  * Decides whether a store is open for business.
@@ -29,7 +30,7 @@ export function isStoreTrading(status: Status): boolean {
   return TRADING.includes(status);
 }
 
-export function StoreGate({
+export async function StoreGate({
   config,
   children,
 }: {
@@ -38,6 +39,7 @@ export function StoreGate({
 }) {
   if (isStoreTrading(config.status)) return <>{children}</>;
 
+  const t = await getT();
   const building = PROVISIONING.includes(config.status);
 
   return (
@@ -51,14 +53,14 @@ export function StoreGate({
 
         <p className="mt-3 text-muted">
           {building
-            ? 'This store is being set up and will open shortly. Please check back soon.'
-            : 'This store is temporarily unavailable.'}
+            ? t('This store is being set up and will open shortly. Please check back soon.')
+            : t('This store is temporarily unavailable.')}
         </p>
 
         {/* The only thing a visitor can usefully do is get in touch. */}
         {config.contact.email || config.contact.phone ? (
           <div className="mt-8 rounded-(--radius-card) border border-border bg-surface p-5 text-sm">
-            <p className="font-medium">Need to reach us?</p>
+            <p className="font-medium">{t('Need to reach us?')}</p>
             <ul className="mt-2 space-y-1 text-muted">
               {config.contact.email ? (
                 <li>

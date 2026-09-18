@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { ArrowUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * Back-to-top button.
@@ -15,6 +16,7 @@ import { cn } from '@/lib/utils';
  * safe-area inset so it clears the home indicator on a modern phone.
  */
 export function BackToTop({ enabled = true, offset = false }: { enabled?: boolean; offset?: boolean }) {
+  const t = useT();
   const [visible, setVisible] = React.useState(false);
 
   React.useEffect(() => {
@@ -33,7 +35,7 @@ export function BackToTop({ enabled = true, offset = false }: { enabled?: boolea
     <button
       type="button"
       onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-      aria-label="Back to top"
+      aria-label={t('Back to top')}
       // Hidden from the accessibility tree while off-screen, so a keyboard user
       // does not tab into an invisible control.
       aria-hidden={!visible}

@@ -7,6 +7,7 @@ import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { CheckboxField } from '@/components/ui/checkbox';
 import { Spinner } from '@/components/ui/spinner';
+import { useT } from '@/lib/i18n';
 import { safeRedirectPath } from '@/lib/utils';
 
 /**
@@ -21,6 +22,7 @@ import { safeRedirectPath } from '@/lib/utils';
  * purely a typing check; the server has no second field to compare against.
  */
 export function RegisterForm({ next }: { next?: string }) {
+  const t = useT();
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
@@ -37,11 +39,11 @@ export function RegisterForm({ next }: { next?: string }) {
     const confirm = String(data.get('confirmPassword') ?? '');
 
     if (password !== confirm) {
-      setFieldErrors({ confirmPassword: 'These passwords do not match.' });
+      setFieldErrors({ confirmPassword: t('These passwords do not match.') });
       return;
     }
     if (!accepted) {
-      setFieldErrors({ acceptsTerms: 'Please accept the terms to continue.' });
+      setFieldErrors({ acceptsTerms: t('Please accept the terms to continue.') });
       return;
     }
 
@@ -66,7 +68,7 @@ export function RegisterForm({ next }: { next?: string }) {
         const body = (await response.json().catch(() => null)) as
           | { error?: string; details?: Record<string, string> }
           | null;
-        setError(body?.error ?? 'We could not create your account.');
+        setError(body?.error ?? t('We could not create your account.'));
         if (body?.details) setFieldErrors(body.details);
         setSubmitting(false);
         return;
@@ -74,30 +76,30 @@ export function RegisterForm({ next }: { next?: string }) {
 
       window.location.assign(destination);
     } catch {
-      setError('We could not reach the store. Check your connection and try again.');
+      setError(t('We could not reach the store. Check your connection and try again.'));
       setSubmitting(false);
     }
   };
 
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-5">
-      <Field name="fullName" label="Full name" required error={fieldErrors.fullName}>
+      <Field name="fullName" label={t('Full name')} required error={fieldErrors.fullName}>
         {(props) => <Input {...props} autoComplete="name" autoFocus />}
       </Field>
 
-      <Field name="email" label="Email address" required error={fieldErrors.email}>
+      <Field name="email" label={t('Email address')} required error={fieldErrors.email}>
         {(props) => <Input {...props} type="email" autoComplete="email" />}
       </Field>
 
-      <Field name="phone" label="Phone" hint="Optional — used only for delivery updates">
+      <Field name="phone" label={t('Phone')} hint={t('Optional — used only for delivery updates')}>
         {(props) => <Input {...props} type="tel" autoComplete="tel" />}
       </Field>
 
       <Field
         name="password"
-        label="Password"
+        label={t('Password')}
         required
-        hint="At least 8 characters"
+        hint={t('At least 8 characters')}
         error={fieldErrors.password}
       >
         {(props) => <Input {...props} type="password" autoComplete="new-password" minLength={8} />}
@@ -105,7 +107,7 @@ export function RegisterForm({ next }: { next?: string }) {
 
       <Field
         name="confirmPassword"
-        label="Confirm password"
+        label={t('Confirm password')}
         required
         error={fieldErrors.confirmPassword}
       >
@@ -117,18 +119,18 @@ export function RegisterForm({ next }: { next?: string }) {
           id="acceptsTerms"
           checked={accepted}
           onCheckedChange={(value) => setAccepted(value === true)}
-          label={
-            <>
-              I accept the{' '}
+          label={t.rich('I accept the {terms} and {privacy}', {
+            terms: (
               <Link href="/page/terms" className="text-primary underline underline-offset-2">
-                terms
-              </Link>{' '}
-              and{' '}
-              <Link href="/page/privacy" className="text-primary underline underline-offset-2">
-                privacy policy
+                {t('terms')}
               </Link>
-            </>
-          }
+            ),
+            privacy: (
+              <Link href="/page/privacy" className="text-primary underline underline-offset-2">
+                {t('privacy policy')}
+              </Link>
+            ),
+          })}
         />
         {fieldErrors.acceptsTerms ? (
           <p className="mt-1 text-xs font-medium text-error">{fieldErrors.acceptsTerms}</p>
@@ -143,7 +145,7 @@ export function RegisterForm({ next }: { next?: string }) {
 
       <Button type="submit" size="lg" className="w-full" disabled={submitting}>
         {submitting ? <Spinner /> : null}
-        Create account
+        {t('Create account')}
       </Button>
     </form>
   );

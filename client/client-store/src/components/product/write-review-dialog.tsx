@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 import { Spinner } from '@/components/ui/spinner';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -41,6 +42,7 @@ export function WriteReviewDialog({
   productSlug: string;
   className?: string;
 }) {
+  const t = useT();
   const [open, setOpen] = React.useState(false);
   const [rating, setRating] = React.useState(0);
   const [hovered, setHovered] = React.useState(0);
@@ -59,11 +61,11 @@ export function WriteReviewDialog({
     event.preventDefault();
 
     if (rating === 0) {
-      setError('Please choose a rating.');
+      setError(t('Please choose a rating.'));
       return;
     }
     if (body.trim().length < 10) {
-      setError('Please write at least a sentence so it is useful to other shoppers.');
+      setError(t('Please write at least a sentence so it is useful to other shoppers.'));
       return;
     }
 
@@ -81,11 +83,11 @@ export function WriteReviewDialog({
 
       setOpen(false);
       reset();
-      toast.success('Thank you — your review has been submitted', {
-        description: 'It will appear once our team has checked it over.',
+      toast.success(t('Thank you — your review has been submitted'), {
+        description: t('It will appear once our team has checked it over.'),
       });
     } catch {
-      setError('We could not submit your review just now. Please try again.');
+      setError(t('We could not submit your review just now. Please try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -104,22 +106,22 @@ export function WriteReviewDialog({
       <DialogTrigger asChild>
         <Button variant="outline" className={className}>
           <PenLine aria-hidden />
-          Write a review
+          {t('Write a review')}
         </Button>
       </DialogTrigger>
 
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Write a review</DialogTitle>
+          <DialogTitle>{t('Write a review')}</DialogTitle>
           <DialogDescription>
-            Tell other shoppers what you thought. Reviews are checked before they appear.
+            {t('Tell other shoppers what you thought. Reviews are checked before they appear.')}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={onSubmit} className="space-y-5" noValidate>
           <fieldset onMouseLeave={() => setHovered(0)}>
             <legend className="mb-2 text-sm font-medium">
-              Your rating
+              {t('Your rating')}
               <span aria-hidden className="ml-0.5 text-error">
                 *
               </span>
@@ -141,7 +143,7 @@ export function WriteReviewDialog({
                     className="sr-only-focusable absolute size-0"
                   />
                   <span className="sr-only">
-                    {value} {value === 1 ? 'star' : 'stars'}
+                    {t.plural(value, '{count} star', '{count} stars')}
                   </span>
                   <Star
                     aria-hidden
@@ -155,7 +157,7 @@ export function WriteReviewDialog({
             </div>
           </fieldset>
 
-          <Field name="review-body" label="Your review" required>
+          <Field name="review-body" label={t('Your review')} required>
             {(props) => (
               <Textarea
                 {...props}
@@ -163,7 +165,7 @@ export function WriteReviewDialog({
                 rows={5}
                 maxLength={2000}
                 onChange={(event) => setBody(event.target.value)}
-                placeholder="What did you like or dislike? How did it fit? Would you buy it again?"
+                placeholder={t('What did you like or dislike? How did it fit? Would you buy it again?')}
               />
             )}
           </Field>
@@ -176,11 +178,11 @@ export function WriteReviewDialog({
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
+              {t('Cancel')}
             </Button>
             <Button type="submit" disabled={submitting}>
               {submitting ? <Spinner /> : null}
-              Submit review
+              {t('Submit review')}
             </Button>
           </DialogFooter>
         </form>

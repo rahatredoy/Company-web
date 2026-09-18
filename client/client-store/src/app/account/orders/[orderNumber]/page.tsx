@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Download, RotateCcw, Truck } from 'lucide-react';
+import { Download, RotateCcw } from 'lucide-react';
 import { getOrder } from '@/lib/api/orders';
 import { getStoreConfig } from '@/lib/api/store';
 import { readLocalePreference } from '@/lib/locale/preference';
@@ -10,9 +10,13 @@ import { StatusBadge } from '@/components/ui/badge';
 import { OrderTimeline } from '@/components/account/order-timeline';
 import { AddressBlock, OrderLines, OrderTotals } from '@/components/account/order-detail-parts';
 import { CancelOrderDialog } from '@/components/account/cancel-order-dialog';
+import { getT } from '@/lib/i18n/server';
 import { formatDate } from '@/lib/utils';
 
-export const metadata: Metadata = { title: 'Order', robots: { index: false, follow: false } };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Order'), robots: { index: false, follow: false } };
+}
 
 /**
  * A single order.
@@ -35,18 +39,18 @@ export default async function OrderDetailPage({
   if (!order) notFound();
 
   const config = await getStoreConfig();
-  const locale = await readLocalePreference(config);
+  const [locale, t] = await Promise.all([readLocalePreference(config), getT()]);
 
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <Link href="/account/orders" className="text-sm text-muted hover:text-primary">
-            ← All orders
+            {t('← All orders')}
           </Link>
           <h1 className="mt-2 font-mono text-2xl font-semibold">{order.orderNumber}</h1>
           <p className="mt-1 text-sm text-muted">
-            Placed {formatDate(order.placedAt, locale.language)}
+            {t('Placed {date}', { date: formatDate(order.placedAt, locale.language) })}
           </p>
         </div>
 
@@ -56,27 +60,10 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
-      {order.tracking?.number ? (
-        <div className="mt-6 flex flex-wrap items-center gap-3 rounded-(--radius-card) border border-border bg-surface-alt p-4">
-          <Truck className="size-5 shrink-0 text-primary" aria-hidden />
-          <p className="min-w-0 flex-1 text-sm">
-            <span className="font-medium">{order.tracking.carrier ?? 'Courier'}</span>{' '}
-            <span className="font-mono text-muted">{order.tracking.number}</span>
-          </p>
-          {order.tracking.url ? (
-            <Button asChild size="sm" variant="outline">
-              <a href={order.tracking.url} target="_blank" rel="noreferrer noopener">
-                Track parcel
-              </a>
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-
       <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div>
           <section className="rounded-(--radius-card) border border-border bg-surface p-5">
-            <h2 className="text-sm font-semibold">Items</h2>
+            <h2 className="text-sm font-semibold">{t('Items')}</h2>
             <OrderLines
               lines={order.lines}
               currency={order.currency}
@@ -92,29 +79,17 @@ export default async function OrderDetailPage({
 
           <div className="mt-6 grid gap-6 sm:grid-cols-2">
             <section className="rounded-(--radius-card) border border-border bg-surface p-5">
-              <h2 className="text-sm font-semibold">Delivery address</h2>
+              <h2 className="text-sm font-semibold">{t('Delivery address')}</h2>
               <AddressBlock address={order.shippingAddress} className="mt-3" />
             </section>
 
             <section className="rounded-(--radius-card) border border-border bg-surface p-5">
-              <h2 className="text-sm font-semibold">Payment &amp; delivery</h2>
+              <h2 className="text-sm font-semibold">{t('Payment')}</h2>
               <dl className="mt-3 space-y-2 text-sm">
                 <div className="flex justify-between gap-3">
-                  <dt className="text-subtle">Payment</dt>
+                  <dt className="text-subtle">{t('Payment')}</dt>
                   <dd className="text-right">{order.paymentMethodLabel ?? '—'}</dd>
                 </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-subtle">Delivery</dt>
-                  <dd className="text-right">{order.shippingMethodLabel ?? '—'}</dd>
-                </div>
-                {order.estimatedDeliveryAt ? (
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-subtle">Estimated</dt>
-                    <dd className="text-right">
-                      {formatDate(order.estimatedDeliveryAt, locale.language)}
-                    </dd>
-                  </div>
-                ) : null}
               </dl>
             </section>
           </div>
@@ -124,7 +99,7 @@ export default async function OrderDetailPage({
               <Button asChild variant="outline">
                 <Link href={`/returns/request/${order.orderNumber}`}>
                   <RotateCcw aria-hidden />
-                  Request a return
+                  {t('Request a return')}
                 </Link>
               </Button>
             ) : null}
@@ -133,7 +108,7 @@ export default async function OrderDetailPage({
               <Button asChild variant="outline">
                 <a href={order.invoiceUrl} target="_blank" rel="noreferrer noopener">
                   <Download aria-hidden />
-                  Download invoice
+                  {t('Download invoice')}
                 </a>
               </Button>
             ) : null}
@@ -143,7 +118,7 @@ export default async function OrderDetailPage({
         </div>
 
         <section className="rounded-(--radius-card) border border-border bg-surface p-5">
-          <h2 className="text-sm font-semibold">Progress</h2>
+          <h2 className="text-sm font-semibold">{t('Progress')}</h2>
           <OrderTimeline timeline={order.timeline} locale={locale.language} className="mt-4" />
         </section>
       </div>

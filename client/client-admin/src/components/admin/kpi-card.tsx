@@ -1,10 +1,16 @@
 import { ArrowDown, ArrowUp, type LucideIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Sparkline } from './sparkline';
+import { getT } from '@/lib/i18n/server';
 import { cn } from '@/lib/utils';
 import type { MetricDelta } from '@/lib/types';
 
-export function KpiCard({
+/**
+ * A server component — only the dashboard page renders it, and `icon` is a
+ * component type no client boundary could receive — so its own words come from
+ * `getT()`. Everything the caller hands it is already translated.
+ */
+export async function KpiCard({
   label,
   value,
   metric,
@@ -13,7 +19,7 @@ export function KpiCard({
   /** Set when a rise is bad (failed payments, suspensions). */
   invertTrend = false,
   showSpark = true,
-  compareLabel = 'vs last 30 days',
+  compareLabel,
   /**
    * `stacked` puts the trend under the figure; `inline` sets it beside, which is
    * what keeps four cards to one row-height when the dashboard shows them next
@@ -38,6 +44,7 @@ export function KpiCard({
   align?: 'stacked' | 'inline';
   hint?: React.ReactNode;
 }) {
+  const t = await getT();
   const change = metric?.changePct ?? null;
   const rising = (change ?? 0) >= 0;
   const good = invertTrend ? !rising : rising;
@@ -62,7 +69,7 @@ export function KpiCard({
 
   const trend =
     change === null ? (
-      <p className="text-xs text-muted-foreground">{hint ?? 'No comparison data'}</p>
+      <p className="text-xs text-muted-foreground">{hint ?? t('No comparison data')}</p>
     ) : (
       <p
         className={cn(
@@ -71,8 +78,8 @@ export function KpiCard({
         )}
       >
         {rising ? <ArrowUp className="size-3" aria-hidden /> : <ArrowDown className="size-3" aria-hidden />}
-        {Math.abs(change).toFixed(1)}%
-        <span className="font-normal text-muted-foreground">{compareLabel}</span>
+        {t.number(Math.abs(change), { minimumFractionDigits: 1, maximumFractionDigits: 1, useGrouping: false })}%
+        <span className="font-normal text-muted-foreground">{compareLabel ?? t('vs last 30 days')}</span>
       </p>
     );
 

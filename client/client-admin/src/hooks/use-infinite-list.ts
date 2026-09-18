@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { apiFetchListed, errorMessage, type ListMeta } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { BATCH_SIZE } from '@/lib/list';
 
 /**
@@ -44,6 +45,7 @@ export function useInfiniteList<T extends { id: string }>({
   initial: { rows: T[]; meta: ListMeta };
   batchSize?: number;
 }): InfiniteList<T> {
+  const t = useT();
   const [more, setMore] = React.useState<T[]>([]);
   const [cursor, setCursor] = React.useState<string | null>(initial.meta.nextCursor);
   const [hasMore, setHasMore] = React.useState(initial.meta.hasMore);
@@ -96,7 +98,7 @@ export function useInfiniteList<T extends { id: string }>({
         setCursor(batch.meta.nextCursor);
         setHasMore(batch.meta.hasMore);
       })
-      .catch((caught: unknown) => setError(errorMessage(caught, 'Could not load more rows.')))
+      .catch((caught: unknown) => setError(errorMessage(caught, t('Could not load more rows.'))))
       .finally(() => setLoading(false));
   }
 

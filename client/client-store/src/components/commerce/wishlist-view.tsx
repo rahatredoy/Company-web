@@ -1,16 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { Heart, ShoppingCart, Trash2 } from 'lucide-react';
+import { ShoppingCart, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ProductGridSkeleton } from '@/components/ui/skeleton';
 import { ProductCard, type ProductCardVariant } from '@/components/commerce/product-card';
 import { useWishlist } from '@/lib/commerce/collections';
+import { WishlistIcon } from '@/lib/commerce/wishlist-icon';
 import { useCart } from '@/lib/commerce/cart';
 import { useHydrated } from '@/lib/hooks/use-hydrated';
-import { pluralise } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * The wishlist.
@@ -32,6 +33,7 @@ export function WishlistView({
   gridClassName: string;
   cardVariant: ProductCardVariant;
 }) {
+  const t = useT();
   const wishlist = useWishlist();
   const { add } = useCart();
   const hydrated = useHydrated();
@@ -43,12 +45,12 @@ export function WishlistView({
   if (wishlist.items.length === 0) {
     return (
       <EmptyState
-        icon={Heart}
-        title="Your wishlist is empty"
-        description="Tap the heart on anything you like and it will be waiting here."
+        icon={WishlistIcon}
+        title={t('Your wishlist is empty')}
+        description={t('Tap the wishlist icon on anything you like and it will be waiting here.')}
         action={
           <Button asChild size="lg">
-            <Link href="/shop">Browse products</Link>
+            <Link href="/shop">{t('Browse products')}</Link>
           </Button>
         }
         className="mt-6 rounded-(--radius-card) border border-dashed border-border"
@@ -75,25 +77,31 @@ export function WishlistView({
     }
 
     const skipped = wishlist.items.length - inStock.length;
-    toast.success(`${inStock.length} ${pluralise(inStock.length, 'item')} added to your cart`, {
-      description: skipped > 0 ? `${skipped} out-of-stock ${pluralise(skipped, 'item')} skipped.` : undefined,
-    });
+    toast.success(
+      t.plural(inStock.length, '{count} item added to your cart', '{count} items added to your cart'),
+      {
+        description:
+          skipped > 0
+            ? t.plural(skipped, '{count} out-of-stock item skipped.', '{count} out-of-stock items skipped.')
+            : undefined,
+      },
+    );
   };
 
   return (
     <>
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
         <p className="text-sm text-muted">
-          {wishlist.count} saved {pluralise(wishlist.count, 'item')}
+          {t.plural(wishlist.count, '{count} saved item', '{count} saved items')}
           {inStock.length < wishlist.count
-            ? ` · ${wishlist.count - inStock.length} currently unavailable`
+            ? ' · ' + t('{count} currently unavailable', { count: wishlist.count - inStock.length })
             : ''}
         </p>
 
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" onClick={addAll} disabled={inStock.length === 0}>
             <ShoppingCart aria-hidden />
-            Add all in stock
+            {t('Add all in stock')}
           </Button>
 
           <Button
@@ -101,11 +109,11 @@ export function WishlistView({
             variant="ghost"
             onClick={() => {
               wishlist.clear();
-              toast.message('Wishlist cleared');
+              toast.message(t('Wishlist cleared'));
             }}
           >
             <Trash2 aria-hidden />
-            Clear
+            {t('Clear')}
           </Button>
         </div>
       </div>
@@ -117,8 +125,9 @@ export function WishlistView({
       </div>
 
       <p className="mt-8 text-xs text-subtle">
-        Prices were captured when you saved each item and may have changed. The current price is
-        applied when you add something to your cart.
+        {t(
+          'Prices were captured when you saved each item and may have changed. The current price is applied when you add something to your cart.',
+        )}
       </p>
     </>
   );

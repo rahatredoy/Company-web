@@ -101,7 +101,6 @@ export interface ProductVariantView {
 }
 
 export interface ProductDetail extends Omit<ProductSummary, 'primaryImage' | 'secondaryImage'> {
-  shortDescription: string | null;
   description: string | null;
   images: ProductImage[];
   videoUrl: string | null;
@@ -111,7 +110,6 @@ export interface ProductDetail extends Omit<ProductSummary, 'primaryImage' | 'se
   variants: ProductVariantView[];
   defaultVariantId: string | null;
   specifications: { groupName: string | null; label: string; value: string; isKeySpec: boolean }[];
-  shippingInfo: string | null;
   returnInfo: string | null;
   isReturnable: boolean;
   minOrderQuantity: number;
@@ -124,9 +122,7 @@ export interface CategoryView {
   id: string;
   name: string;
   slug: string;
-  description: string | null;
   imageUrl: string | null;
-  bannerUrl: string | null;
   productCount: number;
   children: CategoryView[];
   breadcrumb: { name: string; slug: string }[];
@@ -160,7 +156,6 @@ export interface BrandView {
   description: string | null;
   logoUrl: string | null;
   productCount: number;
-  seo: { title: string | null; description: string | null };
 }
 
 export type SortValue =
@@ -171,13 +166,19 @@ export type SortValue =
   | 'best_selling'
   | 'rating';
 
+/**
+ * One block of the storefront's filter panel.
+ *
+ * `price` is the only type that is not a plain list of names: its options carry
+ * the band's bounds as numbers so the storefront can print them in the store's
+ * currency and the visitor's locale, which is knowledge this API does not have.
+ * `label` is the bare-number fallback for any other reader.
+ */
 export interface FilterGroup {
   key: string;
   label: string;
-  type: 'checkbox' | 'color' | 'range' | 'rating';
-  options: { value: string; label: string; count: number; colorHex?: string | null }[];
-  min?: number;
-  max?: number;
+  type: 'checkbox' | 'price';
+  options: { value: string; label: string; count: number; min?: number; max?: number | null }[];
 }
 
 export interface ProductListResult {
@@ -212,7 +213,6 @@ export type HomepageSectionKind =
   | 'lookbook'
   | 'testimonial'
   | 'brands'
-  | 'newsletter'
   | 'text'
   | 'collection'
   | 'social_gallery'

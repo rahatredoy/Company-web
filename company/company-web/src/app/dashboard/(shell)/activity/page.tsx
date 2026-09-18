@@ -62,7 +62,7 @@ export default async function ActivityPage() {
                     </div>
                     <div className="shrink-0 space-y-1 text-right">
                       <StatusBadge status={item.status} />
-                      <p className="text-[11px] text-muted-foreground">{formatRelative(item.createdAt)}</p>
+                      <p className="text-[10.5px] text-muted-foreground">{formatRelative(item.createdAt)}</p>
                     </div>
                   </li>
                 );

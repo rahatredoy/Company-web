@@ -1,5 +1,22 @@
 import { apiBaseForHost, isDevSlugMode, publicEnv } from './env';
+import { resolveLanguage } from './i18n/languages';
+import { DICTIONARIES, type MessageKey } from './i18n/messages';
 import { slugFromHost } from './store-slug';
+
+/**
+ * The few words this module says itself — a request that never reached the API,
+ * or an answer with no message in it. Everything else in an error is the API's,
+ * which arrives already in the store's language.
+ *
+ * No hook here: this module runs on both sides of the boundary. In the browser
+ * the page's `<html lang>` — which the root layout sets from the store's
+ * language — says which dictionary; on the server it is English.
+ */
+function localText(key: MessageKey): string {
+  if (typeof document === 'undefined') return key;
+  const language = resolveLanguage(document.documentElement.lang);
+  return DICTIONARIES[language]?.[key] ?? key;
+}
 
 /**
  * Names the store for the API when the hostname alone cannot.
@@ -31,7 +48,7 @@ export class ApiError extends Error {
   readonly requestId?: string;
 
   constructor(status: number, body: ApiErrorBody) {
-    super(body.message || 'Request failed.');
+    super(body.message || localText('Request failed.'));
     this.name = 'ApiError';
     this.status = status;
     this.code = body.code || 'INTERNAL_ERROR';
@@ -135,7 +152,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   } catch {
     throw new ApiError(0, {
       code: 'NETWORK_ERROR',
-      message: 'Cannot reach the server. Check your connection and try again.',
+      message: localText('Cannot reach the server. Check your connection and try again.'),
     });
   }
 
@@ -155,7 +172,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     const body = (payload ?? {}) as Partial<ApiErrorBody>;
     throw new ApiError(response.status, {
       code: body.code ?? 'INTERNAL_ERROR',
-      message: body.message ?? 'Something went wrong. Please try again.',
+      message: body.message ?? localText('Something went wrong. Please try again.'),
       requestId: body.requestId,
       details: body.details,
     });
@@ -220,7 +237,7 @@ export async function apiFetchListed<T>(
     const failure = (payload ?? {}) as Partial<ApiErrorBody>;
     throw new ApiError(response.status, {
       code: failure.code ?? 'INTERNAL_ERROR',
-      message: failure.message ?? 'Something went wrong. Please try again.',
+      message: failure.message ?? localText('Something went wrong. Please try again.'),
       requestId: failure.requestId,
       details: failure.details,
     });
@@ -263,7 +280,10 @@ export function errorCode(error: unknown): string | null {
   return error instanceof ApiError ? error.code : null;
 }
 
-export function errorMessage(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
+export function errorMessage(
+  error: unknown,
+  fallback: string = localText('Something went wrong. Please try again.'),
+): string {
   if (error instanceof ReauthCancelledError) return '';
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error && error.message) return error.message;

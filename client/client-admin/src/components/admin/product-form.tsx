@@ -1,9 +1,10 @@
 'use client';
 
 import * as React from 'react';
+import { flushSync } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, Trash2, X } from 'lucide-react';
+import { ChevronDown, Plus, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
@@ -21,8 +22,8 @@ import {
 } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
 import { api, ApiError, errorMessage } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { toast } from '@/components/ui/toaster';
-import { isoFromLocalInput, localInputValue } from '@/lib/local-datetime';
 import { cn } from '@/lib/utils';
 import type { AttributeRow, BrandRow, CategoryRow, ProductDetail, ProductStatus } from '@/lib/types';
 import { SELECT_CLASS } from './category-tree';
@@ -49,8 +50,19 @@ import { MeasureSelling } from './measure-selling';
  * scrolls hides the fields nobody has filled in yet, which is the half that
  * matters.
  *
+ * Even that is more than most products need, so the create panel asks it in two
+ * tiers: name, description, pictures, category, price, opening stock and the
+ * low stock alert up front, and the rest — video, sale dates, cost price, SKU,
+ * barcode, stock tracking, selling by weight, variants — behind **Advanced
+ * options**. The edit form has no such fold; by then the owner is looking for a
+ * particular field, and a field hidden behind a button is one they cannot find.
+ *
+ * A product has one description. There used to be a one-line short description
+ * beside it; it was dropped from the schema rather than left unasked, and a
+ * search engine is now given the opening of the full one instead.
+ *
  * A `simple` product and its single sellable variant are still edited together —
- * the API writes them in one transaction, so SKU, price and opening stock sit
+ * the API writes them in one transaction, so price and opening stock sit
  * alongside the name rather than behind a second screen nobody would think to
  * open.
  *
@@ -65,7 +77,7 @@ interface FieldProps {
   brands: Pick<BrandRow, 'id' | 'name'>[];
   currency: string;
   /**
-   * The shop's default measure picker, from Settings.
+   * The shop's stored default measure picker (`preferences.measureOptions`).
    *
    * Handed down rather than fetched here so the form stays a pure client
    * component with no request of its own — and so a product that names no list
@@ -134,19 +146,15 @@ function payloadFrom(form: FormData) {
      */
     categoryId: text('subcategoryId') ?? text('categoryId'),
     brandId: text('brandId'),
-    shortDescription: text('shortDescription'),
     description: text('description'),
-    sku: String(form.get('sku') ?? '').trim(),
+    /*
+     * Omitted rather than sent empty: the create endpoint makes one from the
+     * name when there is none. The edit form's box is `required`, so an empty
+     * one never reaches here from there.
+     */
+    sku: text('sku') ?? undefined,
     price: String(form.get('price') ?? '').trim(),
     salePrice: text('salePrice'),
-    /*
-     * Sent by both the create panel and the Details tab. Empty is an explicit
-     * null — "no bound" — rather than omitted, because on the edit path an
-     * omitted bound means "leave the running window alone" and a cleared box has
-     * to be able to say the opposite.
-     */
-    saleStartsAt: isoFromLocalInput(form.get('saleStartsAt')),
-    saleEndsAt: isoFromLocalInput(form.get('saleEndsAt')),
     costPrice: text('costPrice'),
     barcode: text('barcode'),
     imageUrl: text('imageUrl'),
@@ -231,8 +239,8 @@ function Section({
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
       <div className="flex items-baseline justify-between gap-3 border-b border-border bg-muted/40 px-3 py-1.5">
-        <h3 className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{title}</h3>
-        {hint ? <p className="truncate text-[11px] text-muted-foreground">{hint}</p> : null}
+        <h3 className="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">{title}</h3>
+        {hint ? <p className="truncate text-[10.5px] text-muted-foreground">{hint}</p> : null}
       </div>
       <div className={cn('grid gap-3 p-3', className)}>{children}</div>
     </section>
@@ -254,7 +262,7 @@ function FlagToggle({
 }) {
   return (
     <div className="flex h-9 items-center justify-between gap-2 rounded-md border border-border bg-background px-3">
-      <Label htmlFor={id} className="text-[13px] font-normal">
+      <Label htmlFor={id} className="text-[12px] font-normal">
         {label}
       </Label>
       <Switch
@@ -284,6 +292,7 @@ function CategoryPicker({
   product?: ProductDetail;
   fieldErrors: FieldErrors;
 }) {
+  const t = useT();
   const parents = React.useMemo(
     () => categories.filter((row) => !row.parentId).sort((a, b) => a.name.localeCompare(b.name)),
     [categories],
@@ -305,7 +314,7 @@ function CategoryPicker({
 
   return (
     <>
-      <Field label="Category" htmlFor="categoryId" error={fieldErrors.categoryId} className={TIGHT}>
+      <Field label={t('Category')} htmlFor="categoryId" error={fieldErrors.categoryId} className={TIGHT}>
         <select
           id="categoryId"
           name="categoryId"
@@ -318,7 +327,7 @@ function CategoryPicker({
           }}
           className={cn(SELECT_CLASS, CONTROL)}
         >
-          <option value="">No category</option>
+          <option value="">{t('No category')}</option>
           {parents.map((category) => (
             <option key={category.id} value={category.id}>
               {category.name}
@@ -328,9 +337,9 @@ function CategoryPicker({
       </Field>
 
       <Field
-        label="Subcategory"
+        label={t('Subcategory')}
         htmlFor="subcategoryId"
-        hint={parentId && children.length === 0 ? 'This category has no subcategories.' : undefined}
+        hint={parentId && children.length === 0 ? t('This category has no subcategories.') : undefined}
         className={TIGHT}
       >
         <select
@@ -341,7 +350,7 @@ function CategoryPicker({
           disabled={children.length === 0}
           className={cn(SELECT_CLASS, CONTROL)}
         >
-          <option value="">{parentId ? 'Whole category' : 'Choose a category first'}</option>
+          <option value="">{parentId ? t('Whole category') : t('Choose a category first')}</option>
           {children.map((category) => (
             <option key={category.id} value={category.id}>
               {category.name}
@@ -369,6 +378,7 @@ function GalleryPicker({
   images: string[];
   onChange: (next: string[]) => void;
 }) {
+  const t = useT();
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
@@ -382,7 +392,7 @@ function GalleryPicker({
               size="icon-sm"
               className="absolute -top-2.5 -right-2.5 size-6 rounded-full"
               onClick={() => onChange(images.filter((_, at) => at !== index))}
-              aria-label="Remove image"
+              aria-label={t('Remove image')}
             >
               <X aria-hidden />
             </Button>
@@ -397,14 +407,14 @@ function GalleryPicker({
           key={images.length}
           name="galleryDraft"
           purpose="products"
-          label="Add another image"
+          label={t('Add another image')}
           compact
           onChange={(url) => {
             if (url) onChange([...images, url]);
           }}
         />
       ) : (
-        <p className="text-xs text-muted-foreground">Twelve is the limit — that is a product page, not an album.</p>
+        <p className="text-xs text-muted-foreground">{t('Twelve is the limit — that is a product page, not an album.')}</p>
       )}
     </div>
   );
@@ -441,6 +451,7 @@ function VariantBuilder({
   currency: string;
   error?: string;
 }) {
+  const t = useT();
   const [attributes, setAttributes] = React.useState<AttributeRow[] | null>(null);
   const [loadError, setLoadError] = React.useState('');
 
@@ -484,16 +495,16 @@ function VariantBuilder({
       {attributes !== null && options.length === 0 ? (
         <Alert variant="warning">
           {attributes.length === 0
-            ? 'No attributes are set up yet — add Size, Colour or similar under Attributes, then come back to pick them here.'
-            : 'None of your attributes is marked as an option that picks a variant. Turn that on under Attributes to choose Size or Colour per row; until then these variants are told apart by their name and SKU alone.'}
+            ? t('No attributes are set up yet — add Size, Colour or similar under Attributes, then come back to pick them here.')
+            : t('None of your attributes is marked as an option that picks a variant. Turn that on under Attributes to choose Size or Colour per row; until then these variants are told apart by their name and SKU alone.')}
         </Alert>
       ) : null}
 
       {rows.map((row, index) => (
         <div key={row.key} className="space-y-2 rounded-lg border border-border p-3">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-              Variant {index + 1}
+            <p className="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">
+              {t('Variant {number}', { number: index + 1 })}
             </p>
             {rows.length > 1 ? (
               <Button
@@ -501,7 +512,7 @@ function VariantBuilder({
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => onChange(rows.filter((other) => other.key !== row.key))}
-                aria-label={`Remove variant ${index + 1}`}
+                aria-label={t('Remove variant {number}', { number: index + 1 })}
               >
                 <Trash2 aria-hidden />
               </Button>
@@ -526,7 +537,7 @@ function VariantBuilder({
                     }}
                     className={cn(SELECT_CLASS, CONTROL)}
                   >
-                    <option value="">Any</option>
+                    <option value="">{t('Any')}</option>
                     {attribute.values.map((value) => (
                       <option key={value.id} value={value.id}>
                         {value.value}
@@ -540,30 +551,30 @@ function VariantBuilder({
 
           <div className="grid gap-2 sm:grid-cols-2">
             <Field
-              label="Name"
-              hint={options.length === 0 ? 'What tells this one apart — “Small”, “Black”.' : undefined}
+              label={t('Name')}
+              hint={options.length === 0 ? t('What tells this one apart — “Small”, “Black”.') : undefined}
               className={cn(TIGHT, 'sm:col-span-2')}
             >
               <Input
                 value={row.title}
                 onChange={(event) => update(row.key, { title: event.target.value })}
                 maxLength={200}
-                placeholder="Black / M"
+                placeholder={t('Black / M')}
                 className={CONTROL}
               />
             </Field>
 
-            <Field label="SKU" required className={TIGHT}>
+            <Field label={t('SKU')} required className={TIGHT}>
               <Input
                 value={row.sku}
                 onChange={(event) => update(row.key, { sku: event.target.value })}
                 maxLength={64}
-                placeholder="Unique across the store"
+                placeholder={t('Unique across the store')}
                 className={CONTROL}
               />
             </Field>
 
-            <Field label={`Price (${currency})`} required className={TIGHT}>
+            <Field label={t('Price ({currency})', { currency })} required className={TIGHT}>
               <Input
                 value={row.price}
                 onChange={(event) => update(row.key, { price: event.target.value })}
@@ -573,17 +584,17 @@ function VariantBuilder({
               />
             </Field>
 
-            <Field label={`Sale price (${currency})`} className={TIGHT}>
+            <Field label={t('Sale price ({currency})', { currency })} className={TIGHT}>
               <Input
                 value={row.salePrice}
                 onChange={(event) => update(row.key, { salePrice: event.target.value })}
                 inputMode="decimal"
-                placeholder="Empty when not on sale"
+                placeholder={t('Empty when not on sale')}
                 className={CONTROL}
               />
             </Field>
 
-            <Field label="Stock quantity" className={TIGHT}>
+            <Field label={t('Stock quantity')} className={TIGHT}>
               <Input
                 type="number"
                 min={0}
@@ -593,7 +604,7 @@ function VariantBuilder({
               />
             </Field>
 
-            <Field label="Image" className={cn(TIGHT, 'sm:col-span-2')}>
+            <Field label={t('Image')} className={cn(TIGHT, 'sm:col-span-2')}>
               <ImageUpload
                 name={`variantImage-${row.key}`}
                 purpose="products"
@@ -608,7 +619,7 @@ function VariantBuilder({
 
       {rows.length < 50 ? (
         <Button type="button" variant="outline" size="sm" onClick={() => onChange([...rows, emptyDraft()])}>
-          <Plus /> Add variant
+          <Plus /> {t('Add variant')}
         </Button>
       ) : null}
     </div>
@@ -616,9 +627,38 @@ function VariantBuilder({
 }
 
 /**
+ * The fields the create panel keeps under Advanced options.
+ *
+ * A save the API refuses over one of these opens the block: an error on a field
+ * the reader cannot see is a Create button that appears to do nothing. Matched
+ * as a prefix as well, because a variant's errors come back as `variants.0.sku`.
+ */
+const ADVANCED_FIELDS = [
+  'videoUrl',
+  'costPrice',
+  'sellBy',
+  'measureUnit',
+  'pricingMeasure',
+  'pricingLabel',
+  'minMeasure',
+  'measureOptions',
+  'sku',
+  'barcode',
+  'trackInventory',
+  'variants',
+];
+
+const isAdvancedField = (key: string) =>
+  ADVANCED_FIELDS.some((field) => key === field || key.startsWith(`${field}.`));
+
+/**
  * Every field, laid out for the width it has: the panel is two columns of
  * sections with two controls to a row inside them, the page has a narrow
  * sidebar and stacks the ones in it.
+ *
+ * Each field is built once and placed by the layout, because the two frames
+ * group them differently — the page by subject, the panel by whether most
+ * products need them at all.
  */
 function ProductFields({
   layout,
@@ -642,8 +682,8 @@ function ProductFields({
   variants: VariantDraft[] | null;
   onVariantsChange: (next: VariantDraft[] | null) => void;
 }) {
+  const t = useT();
   const panel = layout === 'panel';
-  const creating = panel;
   const variant = product?.defaultVariant;
 
   // Held rather than read from `FormData` because the stock fields below are
@@ -660,51 +700,480 @@ function ProductFields({
    */
   const [priceDraft, setPriceDraft] = React.useState(product?.defaultVariant?.price ?? '');
 
+  /*
+   * The create panel's Advanced options, closed on every open of the panel.
+   *
+   * Closing hides the block rather than unmounting it. What was typed there is
+   * still the owner's answer — a cost price does not stop being true because the
+   * section it was typed in was folded away — so it stays in the DOM, stays in
+   * `FormData`, and is sent.
+   */
+  const [advanced, setAdvanced] = React.useState(false);
+
+  // Whether the price is currently a rate. Only the panel reads it: there the
+  // price is up front and the switch that changes its meaning is folded away.
+  const [measuring, setMeasuring] = React.useState(product?.sellBy === 'measure');
+
+  const [seenErrors, setSeenErrors] = React.useState(fieldErrors);
+  if (fieldErrors !== seenErrors) {
+    setSeenErrors(fieldErrors);
+    if (Object.keys(fieldErrors).some(isAdvancedField)) setAdvanced(true);
+  }
+
+  /*
+   * The browser's own validation has the same blind spot as the API's errors:
+   * a malformed video address in a folded block fails the submit with nothing on
+   * screen, because a hidden control cannot show its bubble. So an `invalid`
+   * from inside the block opens it and asks the control to report again once it
+   * can be seen. Once per submit — every invalid control fires in turn, and the
+   * first is the one worth pointing at.
+   */
+  const revealing = React.useRef(false);
+  function revealInvalid(event: React.FormEvent<HTMLDivElement>) {
+    if (advanced || revealing.current) return;
+    revealing.current = true;
+    const control = event.target as HTMLInputElement;
+    flushSync(() => setAdvanced(true));
+    window.setTimeout(() => {
+      revealing.current = false;
+      control.reportValidity();
+    }, 0);
+  }
+
+  const nameField = (
+    <Field label={t('Name')} htmlFor="name" required error={fieldErrors.name} className={cn(TIGHT, 'sm:col-span-2')}>
+      <Input
+        id="name"
+        name="name"
+        defaultValue={product?.name ?? ''}
+        required
+        maxLength={200}
+        autoFocus={panel}
+        className={CONTROL}
+      />
+    </Field>
+  );
+
+  const descriptionField = (
+    <Field
+      label={t('Full description')}
+      htmlFor="description"
+      error={fieldErrors.description}
+      className={cn(TIGHT, 'sm:col-span-2')}
+    >
+      <Textarea
+        id="description"
+        name="description"
+        rows={panel ? 3 : 5}
+        defaultValue={product?.description ?? ''}
+        placeholder={t('What it is, in full. Shown on the product page.')}
+        className="min-h-0 resize-y"
+      />
+    </Field>
+  );
+
+  const classification = (
+    <Section title={t('Classification')} className={panel ? 'sm:grid-cols-2' : 'grid-cols-1'}>
+      <Field label={t('Status')} htmlFor="status" error={fieldErrors.status} className={TIGHT}>
+        {/* A plain select: the form is read with FormData, and the Radix
+            trigger is a button that contributes no value to it. */}
+        <select
+          id="status"
+          name="status"
+          defaultValue={product?.status ?? 'draft'}
+          className={cn(SELECT_CLASS, CONTROL)}
+        >
+          <option value="draft">{t('Draft — not live')}</option>
+          <option value="active">{t('Published — on sale')}</option>
+          <option value="inactive">{t('Archived — hidden')}</option>
+        </select>
+      </Field>
+
+      <CategoryPicker categories={categories} product={product} fieldErrors={fieldErrors} />
+
+      <Field label={t('Brand')} htmlFor="brandId" error={fieldErrors.brandId} className={TIGHT}>
+        <select
+          id="brandId"
+          name="brandId"
+          defaultValue={product?.brandId ?? ''}
+          className={cn(SELECT_CLASS, CONTROL)}
+        >
+          <option value="">{t('No brand')}</option>
+          {brands.map((brand) => (
+            <option key={brand.id} value={brand.id}>
+              {brand.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+    </Section>
+  );
+
+  const mainImageField = (
+    <Field
+      label={t('Main image')}
+      htmlFor="imageUrl"
+      hint={t('The one every listing and basket line shows.')}
+      error={fieldErrors.imageUrl}
+      className={TIGHT}
+    >
+      <ImageUpload name="imageUrl" purpose="products" defaultValue={variant?.imageUrl ?? ''} compact />
+    </Field>
+  );
+
+  const videoField = (
+    <Field
+      label={t('Video')}
+      htmlFor="videoUrl"
+      hint={t('Optional. A link to a clip, kept beside the gallery.')}
+      error={fieldErrors.videoUrl}
+      className={TIGHT}
+    >
+      <Input
+        id="videoUrl"
+        name="videoUrl"
+        type="url"
+        defaultValue={product?.videoUrl ?? ''}
+        // i18n-ignore — an address format, not language
+        placeholder="https://…"
+        className={CONTROL}
+      />
+    </Field>
+  );
+
+  const priceField = (
+    <Field
+      label={t('Regular price ({currency})', { currency })}
+      htmlFor="price"
+      required
+      // On the page the measure block sits right under this box and says so
+      // itself; in the panel it is folded away, and a price that has quietly
+      // become "per kilo" is the one misreading that re-prices a whole aisle.
+      hint={panel && measuring ? t('Sold by weight: this is the rate, set under Advanced options.') : undefined}
+      error={fieldErrors.price}
+      className={TIGHT}
+    >
+      <Input
+        id="price"
+        name="price"
+        inputMode="decimal"
+        placeholder="19.99"
+        defaultValue={variant?.price ?? ''}
+        onChange={(event) => setPriceDraft(event.target.value)}
+        required
+        className={CONTROL}
+      />
+    </Field>
+  );
+
+  const salePriceField = (
+    <Field label={t('Sale price ({currency})', { currency })} htmlFor="salePrice" error={fieldErrors.salePrice} className={TIGHT}>
+      <Input
+        id="salePrice"
+        name="salePrice"
+        inputMode="decimal"
+        defaultValue={variant?.salePrice ?? ''}
+        placeholder={t('Empty when not on sale')}
+        className={CONTROL}
+      />
+    </Field>
+  );
+
+  const costPriceField = (
+    <Field
+      label={t('Cost price ({currency})', { currency })}
+      htmlFor="costPrice"
+      hint={
+        hasVariants
+          ? t('What one costs you, applied to every variant. Never shown to customers.')
+          : t('What you paid. Never shown to customers; it is what profit is measured against.')
+      }
+      error={fieldErrors.costPrice}
+      className={cn(TIGHT, 'sm:col-span-2')}
+    >
+      <Input
+        id="costPrice"
+        name="costPrice"
+        inputMode="decimal"
+        defaultValue={variant?.costPrice ?? ''}
+        className={CONTROL}
+      />
+    </Field>
+  );
+
+  /*
+   * With the pricing rather than in a section of its own, because it is a
+   * statement *about* the price: the number stops being "what one costs" and
+   * becomes a rate the moment this is switched on, and a shopkeeper reading them
+   * apart would not know which they had typed. The panel folds it away with the
+   * rest of the optional pricing, which is why the price box there repeats it.
+   */
+  const measureField = (
+    <div className="sm:col-span-2">
+      <MeasureSelling
+        product={product}
+        storeDefaults={storeMeasureOptions}
+        price={priceDraft}
+        currency={currency}
+        fieldErrors={fieldErrors}
+        onEnabledChange={setMeasuring}
+      />
+    </div>
+  );
+
+  /*
+   * Required on the edit form, optional while creating: a new product that names
+   * none is given one by the API, but an existing SKU is what order lines and
+   * the inventory ledger already print, so clearing it is not "let it be
+   * generated" — the box refuses to be empty.
+   */
+  const skuField = (
+    <Field
+      label={t('SKU')}
+      htmlFor="sku"
+      required={!panel}
+      hint={panel ? t('Empty makes one from the name.') : undefined}
+      error={fieldErrors.sku}
+      className={TIGHT}
+    >
+      <Input
+        id="sku"
+        name="sku"
+        defaultValue={variant?.sku ?? ''}
+        required={!panel}
+        maxLength={64}
+        placeholder={t('Unique across the store')}
+        className={CONTROL}
+      />
+    </Field>
+  );
+
+  const barcodeField = (
+    <Field label={t('Barcode')} htmlFor="barcode" error={fieldErrors.barcode} className={TIGHT}>
+      <Input
+        id="barcode"
+        name="barcode"
+        defaultValue={variant?.barcode ?? ''}
+        maxLength={64}
+        placeholder={t('Optional')}
+        className={CONTROL}
+      />
+    </Field>
+  );
+
+  const trackStockField = (
+    <Field
+      label=""
+      hint={
+        trackStock
+          ? t('Stock decides what may be sold — the shop refuses an order it cannot fill.')
+          : t('Sales are never refused on stock. Counts are still kept, they just do not stop a sale.')
+      }
+      className={cn(TIGHT, 'sm:col-span-2')}
+    >
+      <FlagToggle id="trackInventory" label={t('Track stock')} checked={trackStock} onCheckedChange={setTrackStock} />
+    </Field>
+  );
+
+  if (panel) {
+    /*
+     * Two tiers. Up front, what every product needs before it can be sold: a
+     * name, a description, its pictures, where it is filed, a price, a count and
+     * the level it counts as low at. Behind Advanced options, what only some
+     * products need — a video, a sale with dates, a cost price, a SKU of the
+     * shop's own, a barcode, switching stock tracking off, selling by weight,
+     * variants. A shop adding its fortieth T-shirt should not scroll past a
+     * greengrocer's weighing controls to reach Create.
+     *
+     * Each tier is two columns of sections rather than stacked ones, split down
+     * the reading order: what the product is on the left, where it goes and how
+     * it is sold on the right.
+     */
+    const basics = (
+      <Section title={t('Basic information')} className="sm:grid-cols-2">
+        {nameField}
+        {descriptionField}
+      </Section>
+    );
+
+    const media = (
+      <Section title={t('Media')} className="sm:grid-cols-2">
+        {mainImageField}
+        <Field label={t('Additional images')} hint={t('More pictures for the product page.')} className={TIGHT}>
+          <GalleryPicker images={gallery} onChange={onGalleryChange} />
+        </Field>
+      </Section>
+    );
+
+    const pricing = (
+      <Section title={t('Pricing')} className="sm:grid-cols-2">
+        {hasVariants ? (
+          <p className="text-xs text-muted-foreground sm:col-span-2">
+            {t('Each variant carries its own price, SKU and stock — set them under Variants, in Advanced options.')}
+          </p>
+        ) : (
+          <>
+            {priceField}
+            {salePriceField}
+          </>
+        )}
+      </Section>
+    );
+
+    /*
+     * The low stock alert stays up front even with variants on: it is asked once
+     * and written to every variant's stock row, not asked again per variant, and a
+     * shop that never sets it finds out it wanted one when it has already sold
+     * out.
+     */
+    const inventory = (
+      <Section title={t('Inventory')} className="sm:grid-cols-2">
+        {hasVariants ? null : (
+          <Field
+            label={t('Stock quantity')}
+            htmlFor="stockQuantity"
+            hint={t('The opening count. Every change after this goes through Adjust stock, so it lands in the ledger.')}
+            error={fieldErrors.stockQuantity}
+            className={TIGHT}
+          >
+            <Input
+              id="stockQuantity"
+              name="stockQuantity"
+              type="number"
+              min={0}
+              defaultValue="0"
+              disabled={!trackStock}
+              className={cn(CONTROL, 'tabular-nums')}
+            />
+          </Field>
+        )}
+
+        <Field
+          label={t('Low stock alert at')}
+          htmlFor="lowStockThreshold"
+          hint={
+            hasVariants
+              ? t('At or below this a variant is flagged low.')
+              : t('At or below this the product is flagged low.')
+          }
+          error={fieldErrors.lowStockThreshold}
+          className={TIGHT}
+        >
+          <Input
+            id="lowStockThreshold"
+            name="lowStockThreshold"
+            type="number"
+            min={0}
+            defaultValue="5"
+            disabled={!trackStock}
+            className={cn(CONTROL, 'tabular-nums')}
+          />
+        </Field>
+      </Section>
+    );
+
+    const morePricing = (
+      <Section title={t('More pricing')} className="sm:grid-cols-2">
+        {costPriceField}
+        {hasVariants ? null : measureField}
+      </Section>
+    );
+
+    const moreMedia = (
+      <Section title={t('More media')} className="grid-cols-1">
+        {videoField}
+      </Section>
+    );
+
+    const moreInventory = (
+      <Section title={t('More inventory')} className="sm:grid-cols-2">
+        {hasVariants ? null : (
+          <>
+            {skuField}
+            {barcodeField}
+          </>
+        )}
+        {trackStockField}
+      </Section>
+    );
+
+    const variantSection = (
+      <Section title={t('Variants')} hint={hasVariants ? undefined : t('Only if it comes in options')}>
+        <FlagToggle
+          id="hasVariants"
+          label={t('This product has variants')}
+          checked={hasVariants}
+          onCheckedChange={(next) => onVariantsChange(next ? [emptyDraft()] : null)}
+        />
+
+        {hasVariants ? (
+          <VariantBuilder
+            rows={variants}
+            onChange={onVariantsChange}
+            currency={currency}
+            error={fieldErrors.variants}
+          />
+        ) : null}
+      </Section>
+    );
+
+    return (
+      <div className="space-y-3">
+        <div className="grid items-start gap-3 md:grid-cols-2">
+          <div className="min-w-0 space-y-3">
+            {basics}
+            {media}
+          </div>
+          <div className="min-w-0 space-y-3">
+            {classification}
+            {pricing}
+            {inventory}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setAdvanced((open) => !open)}
+          aria-expanded={advanced}
+          aria-controls="product-advanced-options"
+          className="flex w-full items-center gap-3 rounded-lg border border-dashed border-border-strong bg-card px-3 py-2.5 text-left transition-colors outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
+          <SlidersHorizontal className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[12px] font-medium">{t('Advanced options')}</span>
+            <span className="block truncate text-[10.5px] text-muted-foreground">
+              {t('Video, sale dates, cost price, SKU, barcode, stock tracking, selling by weight, variants')}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+            {advanced ? t('Hide') : t('Show')}
+            <ChevronDown className={cn('size-4 transition-transform', advanced && 'rotate-180')} aria-hidden />
+          </span>
+        </button>
+
+        <div
+          id="product-advanced-options"
+          hidden={!advanced}
+          onInvalidCapture={revealInvalid}
+          className="grid items-start gap-3 md:grid-cols-2"
+        >
+          <div className="min-w-0 space-y-3">
+            {morePricing}
+          </div>
+          <div className="min-w-0 space-y-3">
+            {moreMedia}
+            {moreInventory}
+            {variantSection}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const basics = (
-    <Section title="Basic information" className="sm:grid-cols-2">
-      <Field label="Name" htmlFor="name" required error={fieldErrors.name} className={cn(TIGHT, 'sm:col-span-2')}>
-        <Input
-          id="name"
-          name="name"
-          defaultValue={product?.name ?? ''}
-          required
-          maxLength={200}
-          autoFocus={panel}
-          className={CONTROL}
-        />
-      </Field>
-
-      <Field
-        label="Short description"
-        htmlFor="shortDescription"
-        error={fieldErrors.shortDescription}
-        className={cn(TIGHT, 'sm:col-span-2')}
-      >
-        <Input
-          id="shortDescription"
-          name="shortDescription"
-          defaultValue={product?.shortDescription ?? ''}
-          maxLength={500}
-          placeholder="One line, shown in listings"
-          className={CONTROL}
-        />
-      </Field>
-
-      <Field
-        label="Full description"
-        htmlFor="description"
-        error={fieldErrors.description}
-        className={cn(TIGHT, 'sm:col-span-2')}
-      >
-        <Textarea
-          id="description"
-          name="description"
-          rows={panel ? 3 : 5}
-          defaultValue={product?.description ?? ''}
-          placeholder="What it is, in full. Shown on the product page."
-          className="min-h-0 resize-y"
-        />
-      </Field>
+    <Section title={t('Basic information')} className="sm:grid-cols-2">
+      {nameField}
+      {descriptionField}
 
       {/*
         The storefront address, on the edit form only.
@@ -715,26 +1184,25 @@ function ProductFields({
         product whose name has been corrected keeps the address every link to it
         already uses, and this field is the only way to move it on purpose.
       */}
-      {creating ? null : (
-        <Field
-          label="Storefront address"
-          htmlFor="slug"
-          error={fieldErrors.slug}
-          hint="Changing this breaks every existing link to the product."
-          className={cn(TIGHT, 'sm:col-span-2')}
-        >
-          <div className="flex items-center gap-1.5">
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">/product/</span>
-            <Input
-              id="slug"
-              name="slug"
-              defaultValue={product?.slug ?? ''}
-              maxLength={220}
-              className={cn(CONTROL, 'font-mono')}
-            />
-          </div>
-        </Field>
-      )}
+      <Field
+        label={t('Storefront address')}
+        htmlFor="slug"
+        error={fieldErrors.slug}
+        hint={t('Changing this breaks every existing link to the product.')}
+        className={cn(TIGHT, 'sm:col-span-2')}
+      >
+        <div className="flex items-center gap-1.5">
+          {/* i18n-ignore — the storefront's route, not language */}
+          <span className="shrink-0 font-mono text-xs text-muted-foreground">/product/</span>
+          <Input
+            id="slug"
+            name="slug"
+            defaultValue={product?.slug ?? ''}
+            maxLength={220}
+            className={cn(CONTROL, 'font-mono')}
+          />
+        </div>
+      </Field>
     </Section>
   );
 
@@ -745,12 +1213,12 @@ function ProductFields({
    * product is still being typed in — a minimum is a decision about how the
    * thing is sold, which is made once it is on the shelf.
    */
-  const limits = creating ? null : (
-    <Section title="Order limits" className="sm:grid-cols-2">
+  const limits = (
+    <Section title={t('Order limits')} className="sm:grid-cols-2">
       <Field
-        label="Minimum per order"
+        label={t('Minimum per order')}
         htmlFor="minOrderQuantity"
-        hint="Below this the basket refuses."
+        hint={t('Below this the basket refuses.')}
         error={fieldErrors.minOrderQuantity}
         className={TIGHT}
       >
@@ -766,9 +1234,9 @@ function ProductFields({
       </Field>
 
       <Field
-        label="Maximum per order"
+        label={t('Maximum per order')}
         htmlFor="maxOrderQuantity"
-        hint="Leave empty for no limit."
+        hint={t('Leave empty for no limit.')}
         error={fieldErrors.maxOrderQuantity}
         className={TIGHT}
       >
@@ -779,7 +1247,7 @@ function ProductFields({
           min={1}
           max={10_000}
           defaultValue={product?.maxOrderQuantity ?? ''}
-          placeholder="No limit"
+          placeholder={t('No limit')}
           className={cn(CONTROL, 'tabular-nums')}
         />
       </Field>
@@ -792,14 +1260,15 @@ function ProductFields({
    * Brands and categories have had these since they were built and products
    * never did, which left the one row type that actually gets searched for with
    * no way to say anything but its name. Empty falls back to the name and the
-   * short description, so leaving them alone is a real answer rather than a gap.
+   * opening of the description, so leaving them alone is a real answer rather
+   * than a gap.
    */
-  const seo = creating ? null : (
-    <Section title="Search engines" className="grid-cols-1">
+  const seo = (
+    <Section title={t('Search engines')} className="grid-cols-1">
       <Field
-        label="SEO title"
+        label={t('SEO title')}
         htmlFor="seoTitle"
-        hint="Empty uses the product name."
+        hint={t('Empty uses the product name.')}
         error={fieldErrors.seoTitle}
         className={TIGHT}
       >
@@ -813,9 +1282,9 @@ function ProductFields({
       </Field>
 
       <Field
-        label="SEO description"
+        label={t('SEO description')}
         htmlFor="seoDescription"
-        hint="Empty uses the short description."
+        hint={t('Empty uses the start of the full description.')}
         error={fieldErrors.seoDescription}
         className={TIGHT}
       >
@@ -831,313 +1300,29 @@ function ProductFields({
     </Section>
   );
 
-  const classification = (
-    <Section title="Classification" className={panel ? 'sm:grid-cols-2' : 'grid-cols-1'}>
-      <Field label="Status" htmlFor="status" error={fieldErrors.status} className={TIGHT}>
-        {/* A plain select: the form is read with FormData, and the Radix
-            trigger is a button that contributes no value to it. */}
-        <select
-          id="status"
-          name="status"
-          defaultValue={product?.status ?? 'draft'}
-          className={cn(SELECT_CLASS, CONTROL)}
-        >
-          <option value="draft">Draft — not live</option>
-          <option value="active">Published — on sale</option>
-          <option value="inactive">Archived — hidden</option>
-        </select>
-      </Field>
-
-      <CategoryPicker categories={categories} product={product} fieldErrors={fieldErrors} />
-
-      <Field label="Brand" htmlFor="brandId" error={fieldErrors.brandId} className={TIGHT}>
-        <select
-          id="brandId"
-          name="brandId"
-          defaultValue={product?.brandId ?? ''}
-          className={cn(SELECT_CLASS, CONTROL)}
-        >
-          <option value="">No brand</option>
-          {brands.map((brand) => (
-            <option key={brand.id} value={brand.id}>
-              {brand.name}
-            </option>
-          ))}
-        </select>
-      </Field>
-    </Section>
-  );
-
   const media = (
-    <Section title="Media" className={creating ? 'sm:grid-cols-2' : 'grid-cols-1'}>
-      <Field
-        label="Main image"
-        htmlFor="imageUrl"
-        hint="The one every listing and basket line shows."
-        error={fieldErrors.imageUrl}
-        className={TIGHT}
-      >
-        <ImageUpload name="imageUrl" purpose="products" defaultValue={variant?.imageUrl ?? ''} compact />
-      </Field>
-
-      {creating ? (
-        <Field label="Additional images" hint="More pictures for the product page." className={TIGHT}>
-          <GalleryPicker images={gallery} onChange={onGalleryChange} />
-        </Field>
-      ) : null}
-
-      <Field
-        label="Video"
-        htmlFor="videoUrl"
-        hint="Optional. A link to a clip, kept beside the gallery."
-        error={fieldErrors.videoUrl}
-        className={cn(TIGHT, creating && 'sm:col-span-2')}
-      >
-        <Input
-          id="videoUrl"
-          name="videoUrl"
-          type="url"
-          defaultValue={product?.videoUrl ?? ''}
-          placeholder="https://…"
-          className={CONTROL}
-        />
-      </Field>
+    <Section title={t('Media')} className="grid-cols-1">
+      {mainImageField}
+      {videoField}
     </Section>
   );
 
   const pricing = (
-    <Section
-      title="Pricing"
-      hint={hasVariants ? 'Each variant carries its own' : undefined}
-      className="sm:grid-cols-2"
-    >
-      {hasVariants ? (
-        <Field label={`Cost price (${currency})`} htmlFor="costPrice" error={fieldErrors.costPrice} className={TIGHT}>
-          <Input
-            id="costPrice"
-            name="costPrice"
-            inputMode="decimal"
-            defaultValue={variant?.costPrice ?? ''}
-            placeholder="Never shown to customers"
-            className={CONTROL}
-          />
-        </Field>
-      ) : (
-        <>
-          <Field label={`Regular price (${currency})`} htmlFor="price" required error={fieldErrors.price} className={TIGHT}>
-            <Input
-              id="price"
-              name="price"
-              inputMode="decimal"
-              placeholder="19.99"
-              defaultValue={variant?.price ?? ''}
-              onChange={(event) => setPriceDraft(event.target.value)}
-              required
-              className={CONTROL}
-            />
-          </Field>
-
-          <Field label={`Sale price (${currency})`} htmlFor="salePrice" error={fieldErrors.salePrice} className={TIGHT}>
-            <Input
-              id="salePrice"
-              name="salePrice"
-              inputMode="decimal"
-              defaultValue={variant?.salePrice ?? ''}
-              placeholder="Empty when not on sale"
-              className={CONTROL}
-            />
-          </Field>
-
-          {/*
-            When the sale price applies.
-
-            Not decorative: the storefront and checkout both read the price
-            through `effectiveSale`, which ignores a sale price outside its
-            window — so a sale that has not started charges full price, and an
-            expired one goes back to full price on its own. Leaving both empty is
-            the old behaviour, a sale that runs until somebody clears the price.
-          */}
-          <Field
-            label="Sale starts"
-            htmlFor="saleStartsAt"
-            hint="Empty starts it at once."
-            error={fieldErrors.saleStartsAt}
-            className={TIGHT}
-          >
-            <Input
-              id="saleStartsAt"
-              name="saleStartsAt"
-              type="datetime-local"
-              defaultValue={localInputValue(variant?.saleStartsAt)}
-              className={CONTROL}
-            />
-          </Field>
-
-          <Field
-            label="Sale ends"
-            htmlFor="saleEndsAt"
-            hint="Empty runs until the price is cleared."
-            error={fieldErrors.saleEndsAt}
-            className={TIGHT}
-          >
-            <Input
-              id="saleEndsAt"
-              name="saleEndsAt"
-              type="datetime-local"
-              defaultValue={localInputValue(variant?.saleEndsAt)}
-              className={CONTROL}
-            />
-          </Field>
-
-          <Field
-            label={`Cost price (${currency})`}
-            htmlFor="costPrice"
-            hint="What you paid. Never shown to customers; it is what profit is measured against."
-            error={fieldErrors.costPrice}
-            className={cn(TIGHT, 'sm:col-span-2')}
-          >
-            <Input
-              id="costPrice"
-              name="costPrice"
-              inputMode="decimal"
-              defaultValue={variant?.costPrice ?? ''}
-              className={CONTROL}
-            />
-          </Field>
-
-          {/*
-            Under the price rather than in a section of its own, because it is a
-            statement *about* that price: the number above stops being "what one
-            costs" and becomes a rate the moment this is switched on, and a
-            shopkeeper reading them apart would not know which they had typed.
-          */}
-          <div className="sm:col-span-2">
-            <MeasureSelling
-              product={product}
-              storeDefaults={storeMeasureOptions}
-              price={priceDraft}
-              currency={currency}
-              fieldErrors={fieldErrors}
-            />
-          </div>
-        </>
-      )}
+    <Section title={t('Pricing')} className="sm:grid-cols-2">
+      {priceField}
+      {salePriceField}
+      {costPriceField}
+      {measureField}
     </Section>
   );
 
   const inventory = (
-    <Section
-      title="Inventory"
-      hint={hasVariants ? 'Each variant carries its own' : undefined}
-      className="sm:grid-cols-2"
-    >
-      {hasVariants ? null : (
-        <>
-          <Field label="SKU" htmlFor="sku" required error={fieldErrors.sku} className={TIGHT}>
-            <Input
-              id="sku"
-              name="sku"
-              defaultValue={variant?.sku ?? ''}
-              required
-              maxLength={64}
-              placeholder="Unique across the store"
-              className={CONTROL}
-            />
-          </Field>
-
-          <Field label="Barcode" htmlFor="barcode" error={fieldErrors.barcode} className={TIGHT}>
-            <Input
-              id="barcode"
-              name="barcode"
-              defaultValue={variant?.barcode ?? ''}
-              maxLength={64}
-              placeholder="Optional"
-              className={CONTROL}
-            />
-          </Field>
-        </>
-      )}
-
-      {creating ? (
-        <>
-          {hasVariants ? null : (
-            <Field
-              label="Stock quantity"
-              htmlFor="stockQuantity"
-              hint="The opening count. Every change after this goes through Adjust stock, so it lands in the ledger."
-              error={fieldErrors.stockQuantity}
-              className={TIGHT}
-            >
-              <Input
-                id="stockQuantity"
-                name="stockQuantity"
-                type="number"
-                min={0}
-                defaultValue="0"
-                disabled={!trackStock}
-                className={cn(CONTROL, 'tabular-nums')}
-              />
-            </Field>
-          )}
-
-          <Field
-            label="Low stock alert at"
-            htmlFor="lowStockThreshold"
-            hint="At or below this the product is flagged low."
-            error={fieldErrors.lowStockThreshold}
-            className={TIGHT}
-          >
-            <Input
-              id="lowStockThreshold"
-              name="lowStockThreshold"
-              type="number"
-              min={0}
-              defaultValue="5"
-              disabled={!trackStock}
-              className={cn(CONTROL, 'tabular-nums')}
-            />
-          </Field>
-        </>
-      ) : null}
-
-      <Field
-        label=""
-        hint={
-          trackStock
-            ? 'Stock decides what may be sold — the shop refuses an order it cannot fill.'
-            : 'Sales are never refused on stock. Counts are still kept, they just do not stop a sale.'
-        }
-        className={cn(TIGHT, 'sm:col-span-2')}
-      >
-        <FlagToggle
-          id="trackInventory"
-          label="Track stock"
-          checked={trackStock}
-          onCheckedChange={setTrackStock}
-        />
-      </Field>
+    <Section title={t('Inventory')} className="sm:grid-cols-2">
+      {skuField}
+      {barcodeField}
+      {trackStockField}
     </Section>
   );
-
-  const variantSection = creating ? (
-    <Section title="Variants" hint={hasVariants ? undefined : 'Only if it comes in options'}>
-      <FlagToggle
-        id="hasVariants"
-        label="This product has variants"
-        checked={hasVariants}
-        onCheckedChange={(next) => onVariantsChange(next ? [emptyDraft()] : null)}
-      />
-
-      {hasVariants ? (
-        <VariantBuilder
-          rows={variants}
-          onChange={onVariantsChange}
-          currency={currency}
-          error={fieldErrors.variants}
-        />
-      ) : null}
-    </Section>
-  ) : null;
 
   /*
    * Merchandising, on the edit form only. None of it can be decided before the
@@ -1145,35 +1330,13 @@ function ProductFields({
    * is still typing the name — and every one of them is a one-tap change on a
    * product that is already there.
    */
-  const flags = creating ? null : (
-    <Section title="Flags" className="grid-cols-1 gap-2">
-      <FlagToggle id="isFeatured" label="Featured" defaultChecked={product?.isFeatured ?? false} />
-      <FlagToggle id="isNewArrival" label="New arrival" defaultChecked={product?.isNewArrival ?? false} />
-      <FlagToggle id="isReturnable" label="Returnable" defaultChecked={product?.isReturnable ?? true} />
+  const flags = (
+    <Section title={t('Flags')} className="grid-cols-1 gap-2">
+      <FlagToggle id="isFeatured" label={t('Featured')} defaultChecked={product?.isFeatured ?? false} />
+      <FlagToggle id="isNewArrival" label={t('New arrival')} defaultChecked={product?.isNewArrival ?? false} />
+      <FlagToggle id="isReturnable" label={t('Returnable')} defaultChecked={product?.isReturnable ?? true} />
     </Section>
   );
-
-  if (panel) {
-    // Two columns of sections rather than six stacked ones. Stacked, this form
-    // is twice the height of a laptop viewport, and a create form that scrolls
-    // hides the fields nobody has filled in yet — which is the half that
-    // matters. Split down the reading order: what the product is on the left,
-    // where it goes and how it is stocked on the right.
-    return (
-      <div className="grid items-start gap-3 md:grid-cols-2">
-        <div className="min-w-0 space-y-3">
-          {basics}
-          {media}
-          {pricing}
-        </div>
-        <div className="min-w-0 space-y-3">
-          {classification}
-          {inventory}
-          {variantSection}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
@@ -1199,6 +1362,7 @@ function ProductFields({
  */
 export function ProductForm({ categories, brands, currency, storeMeasureOptions, product }: FieldProps) {
   const router = useRouter();
+  const t = useT();
   const editing = Boolean(product);
 
   const [saving, setSaving] = React.useState(false);
@@ -1243,7 +1407,7 @@ export function ProductForm({ categories, brands, currency, storeMeasureOptions,
         ? await api.patch<ProductDetail>(`/api/v1/admin/products/${product.id}`, payload)
         : await api.post<ProductDetail>('/api/v1/admin/products', payload);
 
-      toast.success(editing ? 'Product saved.' : 'Product created.');
+      toast.success(editing ? t('Product saved.') : t('Product created.'));
       router.push(`/products/${saved.id}?tab=details`);
       router.refresh();
     } catch (caught) {
@@ -1268,10 +1432,10 @@ export function ProductForm({ categories, brands, currency, storeMeasureOptions,
       );
 
       if (result && result.deleted === false) {
-        toast.success(result.message ?? 'Product hidden from the store.');
+        toast.success(result.message ?? t('Product hidden from the store.'));
         router.refresh();
       } else {
-        toast.success('Product deleted.');
+        toast.success(t('Product deleted.'));
         router.push('/products');
         router.refresh();
       }
@@ -1303,16 +1467,16 @@ export function ProductForm({ categories, brands, currency, storeMeasureOptions,
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2">
         <div className="flex items-center gap-2">
           <Button type="submit" size="sm" loading={saving}>
-            {editing ? 'Save changes' : 'Create product'}
+            {editing ? t('Save changes') : t('Create product')}
           </Button>
           <Button asChild variant="ghost" size="sm">
-            <Link href="/products">Cancel</Link>
+            <Link href="/products">{t('Cancel')}</Link>
           </Button>
         </div>
 
         {product ? (
           <Button type="button" variant="destructive" size="sm" onClick={remove} loading={deleting}>
-            <Trash2 /> Delete
+            <Trash2 /> {t('Delete')}
           </Button>
         ) : null}
       </div>
@@ -1325,9 +1489,9 @@ export function ProductForm({ categories, brands, currency, storeMeasureOptions,
  * category and quick-edit screens use, and for the same reason: the reader keeps
  * their filters, their scroll position and their place in the list.
  *
- * The widest of those panels, because a product is asked more than they are: six
- * sections, in two columns, so the whole form is visible at once rather than
- * scrolled through.
+ * The widest of those panels, because a product is asked more than they are. The
+ * essentials fit on one screen in two columns; the optional half opens under
+ * them from the Advanced options button, closed again on every open.
  *
  * The scalar fields are Radix-unmounted with the panel, so every open starts
  * blank without anything here having to clear them. The two list-shaped ones are
@@ -1347,6 +1511,7 @@ export function ProductCreatePanel({
   /** Called after the API has written it, with the row it wrote. */
   onCreated: (product: ProductDetail) => void;
 }) {
+  const t = useT();
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
   const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({});
@@ -1438,10 +1603,11 @@ export function ProductCreatePanel({
           {/* `pr-12` again: it is the room the sheet's own close button needs, and
               the shorter `px-4` here would otherwise drop it. */}
           <SheetHeader className="px-4 py-3 pr-12">
-            <SheetTitle>Add Product</SheetTitle>
+            <SheetTitle>{t('Add Product')}</SheetTitle>
             <SheetDescription>
-              Enough to sell and stock it. Specifications, related products and the rest of the gallery come
-              after, on the product&rsquo;s own screen.
+              {t(
+                'The essentials to sell and stock it. Everything optional is under Advanced options; specifications and related products come after, on the product’s own screen.',
+              )}
             </SheetDescription>
           </SheetHeader>
 
@@ -1464,10 +1630,10 @@ export function ProductCreatePanel({
 
           <SheetFooter className="px-4 py-3">
             <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
-              Cancel
+              {t('Cancel')}
             </Button>
             <Button type="submit" size="sm" loading={saving}>
-              Create Product
+              {t('Create Product')}
             </Button>
           </SheetFooter>
         </form>

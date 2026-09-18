@@ -9,7 +9,6 @@ import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useViewTarget } from '@/hooks/use-detail';
 import { InfiniteStack } from './infinite-table';
 import { ReviewDetail } from './review-detail';
-import { formatDate } from '@/lib/format';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,10 +24,18 @@ import { Textarea } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { toast } from '@/components/ui/toaster';
 import { cn } from '@/lib/utils';
+import { useT, type MessageKey } from '@/lib/i18n';
+
+const STATUS_LABELS: Record<ReviewRow['status'], MessageKey> = {
+  pending: 'Pending',
+  approved: 'Approved',
+  rejected: 'Rejected',
+};
 
 function Stars({ rating }: { rating: number }) {
+  const t = useT();
   return (
-    <span className="flex gap-0.5" aria-label={`${rating} out of 5`}>
+    <span className="flex gap-0.5" aria-label={t('{rating} out of 5', { rating })}>
       {[1, 2, 3, 4, 5].map((n) => (
         <Star
           key={n}
@@ -54,17 +61,15 @@ export function ReviewModeration({
   query,
   canManage,
   filtered,
-  storefrontBase,
 }: {
   /** The first batch, rendered on the server. The rest arrive by cursor. */
   initial: { rows: ReviewRow[]; meta: ListMeta };
   query: Record<string, string | undefined>;
   canManage: boolean;
   filtered: boolean;
-  /** Null when the store's public address is not known to this deployment. */
-  storefrontBase: string | null;
 }) {
   const router = useRouter();
+  const t = useT();
   const list = useInfiniteList<ReviewRow>({ path: '/api/v1/admin/reviews', query, initial });
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState('');
@@ -77,6 +82,7 @@ export function ReviewModeration({
   const viewing = useViewTarget<ReviewRow>();
   const [saving, setSaving] = React.useState(false);
 
+  // i18n-ignore — a type, not copy.
   const act = async (review: ReviewRow, run: () => Promise<unknown>, message: string) => {
     setBusy(review.id);
     setError('');
@@ -102,7 +108,7 @@ export function ReviewModeration({
     try {
       await api.patch(`/api/v1/admin/reviews/${replying.id}/reply`, { adminReply: value || null });
       setReplying(null);
-      toast.success('Reply saved.');
+      toast.success(t('Reply saved.'));
       router.refresh();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -126,7 +132,7 @@ export function ReviewModeration({
         onRetry={list.retry}
         estimateRowHeight={200}
         gap={16}
-        empty={filtered ? 'Nothing matches those filters.' : 'No reviews yet.'}
+        empty={filtered ? t('Nothing matches those filters.') : t('No reviews yet.')}
         render={(review) => (
           <div className="rounded-lg border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -135,19 +141,19 @@ export function ReviewModeration({
                 <Stars rating={review.rating} />
                 <span className="font-medium">{review.customerName}</span>
                 {review.verifiedPurchase ? (
-                  <StatusBadge status="verified" label="Verified purchase" />
+                  <StatusBadge status="verified" label={t('Verified purchase')} />
                 ) : null}
-                <StatusBadge status={review.status} />
+                <StatusBadge status={review.status} label={t(STATUS_LABELS[review.status])} />
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                {review.productName} · {formatDate(review.createdAt)}
+                {review.productName} · {t.date(review.createdAt)}
               </p>
             </div>
 
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={`View the review by ${review.customerName}`}
+              aria-label={t('View the review by {name}', { name: review.customerName })}
               onClick={() => viewing.view(review)}
             >
               <Eye />
@@ -158,7 +164,7 @@ export function ReviewModeration({
 
           {review.adminReply ? (
             <p className="mt-3 rounded-md bg-muted p-3 text-sm">
-              <span className="font-medium">Your reply: </span>
+              <span className="font-medium">{t('Your reply:')} </span>
               {review.adminReply}
             </p>
           ) : null}
@@ -174,11 +180,11 @@ export function ReviewModeration({
                     act(
                       review,
                       () => api.patch(`/api/v1/admin/reviews/${review.id}`, { status: 'approved' }),
-                      'Review published.',
+                      t('Review published.'),
                     )
                   }
                 >
-                  <Check aria-hidden /> Approve
+                  <Check aria-hidden /> {t('Approve')}
                 </Button>
               ) : null}
 
@@ -191,16 +197,16 @@ export function ReviewModeration({
                     act(
                       review,
                       () => api.patch(`/api/v1/admin/reviews/${review.id}`, { status: 'rejected' }),
-                      'Review rejected and hidden.',
+                      t('Review rejected and hidden.'),
                     )
                   }
                 >
-                  <X aria-hidden /> Reject
+                  <X aria-hidden /> {t('Reject')}
                 </Button>
               ) : null}
 
               <Button size="sm" variant="ghost" onClick={() => setReplying(review)}>
-                <MessageSquare aria-hidden /> {review.adminReply ? 'Edit reply' : 'Reply'}
+                <MessageSquare aria-hidden /> {review.adminReply ? t('Edit reply') : t('Reply')}
               </Button>
 
               <Button
@@ -208,15 +214,15 @@ export function ReviewModeration({
                 variant="ghost"
                 disabled={busy !== null}
                 onClick={() => {
-                  if (!window.confirm('Delete this review permanently?')) return;
+                  if (!window.confirm(t('Delete this review permanently?'))) return;
                   void act(
                     review,
                     () => api.delete(`/api/v1/admin/reviews/${review.id}`),
-                    'Review deleted.',
+                    t('Review deleted.'),
                   );
                 }}
               >
-                <Trash2 aria-hidden /> Delete
+                <Trash2 aria-hidden /> {t('Delete')}
               </Button>
             </div>
           ) : null}
@@ -228,22 +234,22 @@ export function ReviewModeration({
         row={viewing.row}
         open={viewing.open}
         onOpenChange={viewing.onOpenChange}
-        storefrontBase={storefrontBase}
       />
 
       <Dialog open={replying !== null} onOpenChange={(open) => !open && setReplying(null)}>
         <DialogContent>
           <form onSubmit={onReply}>
             <DialogHeader>
-              <DialogTitle>Reply publicly</DialogTitle>
+              <DialogTitle>{t('Reply publicly')}</DialogTitle>
               <DialogDescription>
-                Your answer appears under the review on the product page. Leave it empty to remove an
-                existing reply.
+                {t(
+                  'Your answer appears under the review on the product page. Leave it empty to remove an existing reply.',
+                )}
               </DialogDescription>
             </DialogHeader>
 
             <div className="py-4">
-              <Field label="Your reply" htmlFor="adminReply">
+              <Field label={t('Your reply')} htmlFor="adminReply">
                 <Textarea
                   id="adminReply"
                   name="adminReply"
@@ -256,10 +262,10 @@ export function ReviewModeration({
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setReplying(null)}>
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button type="submit" loading={saving}>
-                Save reply
+                {t('Save reply')}
               </Button>
             </DialogFooter>
           </form>

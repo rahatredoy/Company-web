@@ -123,35 +123,6 @@ export const adminUserPermissions = pgTable(
   (table) => [primaryKey({ columns: [table.adminId, table.permissionKey] })],
 );
 
-export const adminSessions = pgTable(
-  'admin_sessions',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    adminId: uuid('admin_id')
-      .notNull()
-      .references(() => storeAdmins.id, { onDelete: 'cascade' }),
-    /** SHA-256 of the opaque cookie token; the raw token is never stored. */
-    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
-    /** Pinned at sign-in; a mismatch with the request host is a hard 403. */
-    tenantRef: varchar('tenant_ref', { length: 24 }).notNull(),
-    mfaVerified: boolean('mfa_verified').notNull().default(false),
-    remember: boolean('remember').notNull().default(false),
-    ipAddress: varchar('ip_address', { length: 64 }),
-    userAgent: text('user_agent'),
-    /** Last password/MFA proof — sensitive actions require a recent value. */
-    authenticatedAt: timestamp('authenticated_at', { withTimezone: true }).notNull().defaultNow(),
-    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
-    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-    revokedAt: timestamp('revoked_at', { withTimezone: true }),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('admin_sessions_token_key').on(table.tokenHash),
-    index('admin_sessions_admin_idx').on(table.adminId),
-    index('admin_sessions_expires_idx').on(table.expiresAt),
-  ],
-);
-
 export const adminLoginAttempts = pgTable(
   'admin_login_attempts',
   {

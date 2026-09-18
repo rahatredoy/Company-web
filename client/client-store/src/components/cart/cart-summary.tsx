@@ -11,10 +11,6 @@ import { CouponForm } from './coupon-form';
 /**
  * Order summary.
  *
- * Shipping reads "Calculated at checkout" rather than "Free" or "—" until an
- * address exists, because the storefront genuinely does not know it yet and
- * either alternative is a claim.
- *
  * Every figure here is the browser's optimistic view. The server recalculates
  * at checkout against live prices, live stock and the real coupon rules, and
  * that is what gets charged — which is why the line under the button says so
@@ -60,16 +56,6 @@ export function CartSummary({
             tone="success"
           />
         ) : null}
-
-        <Row
-          label="Shipping"
-          value={
-            cart.totals.shipping === null
-              ? 'Calculated at checkout'
-              : formatMoney(cart.totals.shipping, currency, locale)
-          }
-          muted={cart.totals.shipping === null}
-        />
 
         <Row label="Tax" value={formatMoney(cart.totals.tax, currency, locale)} />
       </dl>

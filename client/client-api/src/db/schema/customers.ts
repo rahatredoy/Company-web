@@ -1,5 +1,6 @@
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -11,7 +12,14 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { addressType, backInStockStatus, customerStatus, customerTokenPurpose, customerType } from './enums';
+import {
+  addressType,
+  backInStockStatus,
+  customerIdentityProvider,
+  customerStatus,
+  customerTokenPurpose,
+  customerType,
+} from './enums';
 import { productVariants, products } from './catalog';
 
 /**
@@ -23,9 +31,26 @@ export const customers = pgTable(
   'customers',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    email: varchar('email', { length: 254 }).notNull(),
+    /**
+     * Nullable since phone sign-up: an account created from a phone number has
+     * no address until its owner adds one. Postgres treats NULLs in a unique
+     * index as distinct, so `customers_email_key` keeps working unchanged.
+     */
+    email: varchar('email', { length: 254 }),
     fullName: varchar('full_name', { length: 140 }).notNull(),
+    /** The contact number as it was typed. Free text, not an identity. */
     phone: varchar('phone', { length: 24 }),
+    /**
+     * The same number in E.164, and the thing a phone sign-in actually matches.
+     *
+     * Kept apart from `phone` on purpose. That column has always been a contact
+     * detail an admin or a customer could type anything into, so it holds
+     * whatever historical shapes a store has collected and cannot carry a unique
+     * index without a data migration that would have to discard somebody's
+     * number. This one is written **only** by a passed OTP, so every value in it
+     * is normalised, unique, and proved to belong to whoever holds the handset.
+     */
+    phoneE164: varchar('phone_e164', { length: 20 }),
     passwordHash: text('password_hash'),
 
     status: customerStatus('status').notNull().default('active'),
@@ -33,7 +58,13 @@ export const customers = pgTable(
     customerType: customerType('customer_type').notNull().default('new'),
 
     emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+    phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
     acceptsMarketing: boolean('accepts_marketing').notNull().default(false),
+    /**
+     * `YYYY-MM-DD`, given by the customer on their own profile. It is what a
+     * birthday offer is checked against, and nothing else reads it.
+     */
+    birthDate: date('birth_date', { mode: 'string' }),
 
     failedLoginCount: integer('failed_login_count').notNull().default(0),
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
@@ -49,6 +80,7 @@ export const customers = pgTable(
   },
   (table) => [
     uniqueIndex('customers_email_key').on(table.email),
+    uniqueIndex('customers_phone_e164_key').on(table.phoneE164),
     index('customers_status_idx').on(table.status),
     index('customers_type_idx').on(table.customerType),
     index('customers_created_idx').on(table.createdAt),
@@ -56,32 +88,38 @@ export const customers = pgTable(
 );
 
 /**
- * A fourth, isolated audience. The cookie name (`store_customer_session`) and
- * this table are both distinct from the store-admin pair, so an admin cookie can
- * never authenticate a customer route and vice versa.
+ * A sign-in provider linked to a shopper's account — today only Google.
+ *
+ * Its own table rather than a column on `customers` for two reasons. A second
+ * provider is then a row rather than a migration; and the subject id, which is
+ * the thing that actually authenticates, stays out of the row that every
+ * customer-facing endpoint selects from.
+ *
+ * **`subject` is what identifies the account, never the email.** Google's
+ * `sub` is stable for the life of the account; the address on it is not — a
+ * Workspace user can have theirs changed by an administrator, and a Gmail
+ * address freed up can in principle be reissued. Matching on the address would
+ * mean a renamed account silently becomes a second customer, and a reissued one
+ * silently becomes somebody else's.
  */
-export const customerSessions = pgTable(
-  'customer_sessions',
+export const customerIdentities = pgTable(
+  'customer_identities',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     customerId: uuid('customer_id')
       .notNull()
       .references(() => customers.id, { onDelete: 'cascade' }),
-    /** SHA-256 of the opaque cookie token; the raw token is never stored. */
-    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
-    tenantRef: varchar('tenant_ref', { length: 24 }).notNull(),
-    remember: boolean('remember').notNull().default(false),
-    ipAddress: varchar('ip_address', { length: 64 }),
-    userAgent: text('user_agent'),
-    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
-    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    provider: customerIdentityProvider('provider').notNull(),
+    /** The provider's own immutable id for this person. */
+    subject: varchar('subject', { length: 255 }).notNull(),
+    /** What the provider said the address was when it was last used, for support. */
+    email: varchar('email', { length: 254 }),
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('customer_sessions_token_key').on(table.tokenHash),
-    index('customer_sessions_customer_idx').on(table.customerId),
-    index('customer_sessions_expires_idx').on(table.expiresAt),
+    uniqueIndex('customer_identities_provider_subject_key').on(table.provider, table.subject),
+    index('customer_identities_customer_idx').on(table.customerId),
   ],
 );
 

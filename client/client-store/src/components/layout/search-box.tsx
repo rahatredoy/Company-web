@@ -7,6 +7,7 @@ import { Loader2, Search, X } from 'lucide-react';
 import type { SearchSuggestion } from '@/types';
 import { SEARCH_DEBOUNCE_MS } from '@/config';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * Store search, with autocomplete.
@@ -26,13 +27,14 @@ import { cn } from '@/lib/utils';
  */
 export function SearchBox({
   variant = 'inline',
-  placeholder = 'Search for products…',
+  placeholder,
   className,
 }: {
   variant?: 'inline' | 'icon';
   placeholder?: string;
   className?: string;
 }) {
+  const t = useT();
   const router = useRouter();
   const [expanded, setExpanded] = React.useState(variant === 'inline');
   const [value, setValue] = React.useState('');
@@ -138,7 +140,7 @@ export function SearchBox({
     return (
       <button
         type="button"
-        aria-label="Search products"
+        aria-label={t('Search products')}
         aria-expanded={false}
         onClick={() => {
           setExpanded(true);
@@ -166,7 +168,7 @@ export function SearchBox({
     >
       <form role="search" onSubmit={onSubmit}>
         <label htmlFor={`search-${listId}`} className="sr-only">
-          Search products
+          {t('Search products')}
         </label>
 
         <Search
@@ -183,7 +185,7 @@ export function SearchBox({
           onChange={(event) => applyTerm(event.target.value)}
           onFocus={() => suggestions.length > 0 && setOpen(true)}
           onKeyDown={onKeyDown}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t('Search for products…')}
           autoComplete="off"
           role="combobox"
           aria-expanded={open}
@@ -201,7 +203,7 @@ export function SearchBox({
         ) : value ? (
           <button
             type="button"
-            aria-label="Clear search"
+            aria-label={t('Clear search')}
             onClick={() => {
               applyTerm('');
               inputRef.current?.focus();
@@ -217,7 +219,7 @@ export function SearchBox({
         <ul
           id={listId}
           role="listbox"
-          aria-label="Search suggestions"
+          aria-label={t('Search suggestions')}
           className="absolute inset-x-0 top-full z-50 mt-1.5 max-h-96 overflow-y-auto rounded-(--radius-card) border border-border bg-surface py-1.5 shadow-[var(--shadow-raised)]"
         >
           {suggestions.map((suggestion, index) => (
@@ -247,7 +249,7 @@ export function SearchBox({
                   </span>
                 ) : (
                   <span className="grid size-9 shrink-0 place-items-center rounded-(--radius-button) bg-surface-alt text-[10px] font-semibold uppercase text-subtle">
-                    {suggestion.type === 'brand' ? 'Br' : 'Cat'}
+                    {suggestion.type === 'brand' ? t('Br::brand') : t('Cat::category')}
                   </span>
                 )}
 
@@ -276,7 +278,7 @@ export function SearchBox({
               }}
               className="w-full px-3 py-2 text-left text-sm font-medium text-primary hover:bg-surface-alt"
             >
-              See all results for “{value.trim()}”
+              {t('See all results for “{term}”', { term: value.trim() })}
             </button>
           </li>
         </ul>

@@ -1,5 +1,17 @@
+'use client';
+
 import { Badge, type BadgeProps } from './badge';
 import { titleCase } from '@/lib/format';
+import { useT, type MessageKey, type Translator } from '@/lib/i18n';
+import { createTranslator } from '@/lib/i18n/translator';
+
+/*
+ * A client component because its words are the store's language and the
+ * translator is a hook. Server pages still render `<StatusBadge status=… />` —
+ * its props are plain strings — but `statusVariant` and `statusLabel` are now
+ * client-only helpers: a server component importing a plain function from a
+ * `'use client'` module gets a reference, not the function.
+ */
 
 type Variant = NonNullable<BadgeProps['variant']>;
 
@@ -73,7 +85,12 @@ const STATUS_VARIANTS: Record<string, Variant> = {
   high_value: 'success',
 };
 
-const STATUS_LABELS: Record<string, string> = {
+/**
+ * The statuses whose words are not their title-cased key. Every other status is
+ * shown as `titleCase(key)` and translated from that, so the dictionary
+ * (`messages/bn/shared.ts`) carries those title-cased words too.
+ */
+const STATUS_LABELS: Record<string, MessageKey> = {
   pending_verification: 'Unverified',
   past_due: 'Past Due',
   in_progress: 'In Progress',
@@ -88,7 +105,34 @@ const STATUS_LABELS: Record<string, string> = {
   not_shipped: 'Not Shipped',
   under_review: 'Under Review',
   high_value: 'High Value',
+  // The same English as a word that means something else — "Open" is a button
+  // in `common.ts` — so these carry a context. It is never shown.
+  open: 'Open::status',
+  repeat: 'Repeat::customer',
 };
+
+/** The English words, for a caller with no translator to hand. */
+const english = createTranslator('en', null);
+
+function labelFor(key: string, t: Translator): string {
+  const named = STATUS_LABELS[key];
+  // `loose`, because a status the platform adds later is not a key yet — it is
+  // then shown title-cased in English rather than not at all.
+  return named ? t(named) : t.loose(titleCase(key));
+}
+
+/** The colour a status is drawn in, for a figure that shows it as text rather than a pill. */
+export function statusVariant(status: string): Variant {
+  return STATUS_VARIANTS[status?.toLowerCase() ?? ''] ?? 'neutral';
+}
+
+/**
+ * The words a status is shown as — "Cash on Delivery" rather than `cod_pending`.
+ * Pass `useT()`'s translator for the store's language; without one it is English.
+ */
+export function statusLabel(status: string, t?: Translator): string {
+  return labelFor(status?.toLowerCase() ?? '', t ?? english);
+}
 
 export function StatusBadge({
   status,
@@ -96,13 +140,15 @@ export function StatusBadge({
   className,
 }: {
   status: string;
+  /** Shown as given — the caller translates it. */
   label?: string;
   className?: string;
 }) {
+  const t = useT();
   const key = status?.toLowerCase() ?? '';
   return (
     <Badge variant={STATUS_VARIANTS[key] ?? 'neutral'} dot className={className}>
-      {label ?? STATUS_LABELS[key] ?? titleCase(key)}
+      {label ?? labelFor(key, t)}
     </Badge>
   );
 }

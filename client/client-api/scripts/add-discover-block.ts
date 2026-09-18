@@ -47,7 +47,7 @@ const BLOCK = { source: 'discover', limit: 12 };
  *
  * It goes after the last of them rather than at the end of the page: below the
  * shop's own answers about itself, and above the trailing furniture — brands,
- * testimonials, the newsletter band — which read as the foot of the page and
+ * testimonials, the Instagram strip — which read as the foot of the page and
  * would bury a product grid placed under them.
  */
 const PRODUCT_BLOCKS = new Set([

@@ -19,10 +19,18 @@ export interface ProductQuery {
   brand?: string[];
   minPrice?: number;
   maxPrice?: number;
+  /**
+   * The sidebar's price ladder, as the bands the API published — `200-500`, and
+   * `1000-` for the open-ended one. Separate from `minPrice`/`maxPrice`, which
+   * stay available for an arbitrary range nobody's sidebar drew.
+   */
+  priceBands?: string[];
+  /** The sidebar's Offers group: `on_sale`, `flash_deal`, `coupon`, … */
+  offers?: string[];
   rating?: number;
   inStock?: boolean;
   sale?: boolean;
-  /** Attribute facets, e.g. `{ colour: ['black'], size: ['m'] }`. */
+  /** Attribute facets, e.g. `{ size: ['m'] }`. */
   attributes?: Record<string, string[]>;
 }
 
@@ -32,7 +40,7 @@ export interface ProductQuery {
  * query shape — and the server validates every value, including `sort`.
  */
 export async function getProductList(query: ProductQuery): Promise<ProductListResult> {
-  const { attributes, brand, subcategories, ...rest } = query;
+  const { attributes, brand, subcategories, priceBands, offers, ...rest } = query;
   const { readCurrencyPreference } = await import('@/lib/locale/preference');
 
   return apiFetch<ProductListResult>('/api/v1/storefront/products', {
@@ -45,9 +53,11 @@ export async function getProductList(query: ProductQuery): Promise<ProductListRe
       ...rest,
       pageSize: query.pageSize ?? PAGE_SIZE.shop,
       brand,
-      // Travels under the same name it has in the URL, so a listing link and
-      // the call behind it never drift apart.
+      // These three travel under the same names they have in the URL, so a
+      // listing link and the call behind it never drift apart.
       sub: subcategories,
+      price: priceBands,
+      offer: offers,
       /*
        * Display currency travels as a query parameter, not a cookie. It has to
        * be part of the cache key — a shared cache entry keyed without it would
@@ -102,7 +112,7 @@ export function parseProductQuery(
   const page = Math.max(1, Math.min(500, Number.parseInt(first(params.page) ?? '1', 10) || 1));
 
   // Anything not a known filter is treated as an attribute facet.
-  const KNOWN = new Set(['page', 'sort', 'q', 'category', 'sub', 'brand', 'minPrice', 'maxPrice', 'rating', 'inStock', 'sale', 'template', 'theme']);
+  const KNOWN = new Set(['page', 'sort', 'q', 'category', 'sub', 'brand', 'price', 'offer', 'minPrice', 'maxPrice', 'rating', 'inStock', 'sale', 'template', 'theme']);
   const attributes: Record<string, string[]> = {};
   for (const [key, value] of Object.entries(params)) {
     if (KNOWN.has(key)) continue;
@@ -118,6 +128,16 @@ export function parseProductQuery(
     category: defaults.category ?? first(params.category),
     subcategories: defaults.subcategories ?? many(params.sub),
     brand: defaults.brand ?? many(params.brand),
+    /*
+     * Passed through as written rather than parsed into numbers here.
+     *
+     * The API whitelists every band against the ladder it published, so a
+     * hand-edited `?price=137-999` is refused there rather than half-honoured
+     * here — and a bound that only one side understands is how a panel and a
+     * query start meaning different things.
+     */
+    priceBands: defaults.priceBands ?? many(params.price),
+    offers: defaults.offers ?? many(params.offer),
     minPrice: number(first(params.minPrice)),
     maxPrice: number(first(params.maxPrice)),
     rating: number(first(params.rating)),

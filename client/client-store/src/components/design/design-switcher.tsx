@@ -8,6 +8,7 @@ import { Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetTitle, S
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 import { clearDesignPreview, setDesignPreview } from '@/app/actions/design';
 import { TemplateThumbnail } from './template-thumbnail';
 
@@ -35,6 +36,7 @@ export function DesignSwitcher({
   publishedTemplate: TemplateKey;
   publishedTheme: ColorThemeKey;
 }) {
+  const t = useT();
   const [open, setOpen] = React.useState(false);
   const [pending, startTransition] = React.useTransition();
 
@@ -51,7 +53,7 @@ export function DesignSwitcher({
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
-        aria-label="Change the store design"
+        aria-label={t('Change the store design')}
         className={cn(
           'fixed bottom-5 right-5 z-40 grid size-12 place-items-center rounded-full',
           'bg-primary text-primary-foreground shadow-[var(--shadow-raised)]',
@@ -69,25 +71,27 @@ export function DesignSwitcher({
 
       <SheetContent side="right" className="w-[min(26rem,92vw)]">
         <SheetHeader>
-          <SheetTitle>Store design</SheetTitle>
+          <SheetTitle>{t('Store design')}</SheetTitle>
           <p className="mt-1 text-sm text-muted">
-            Try any layout and colour. Only you see the change.
+            {t('Try any layout and colour. Only you see the change.')}
           </p>
         </SheetHeader>
 
         <SheetBody className={cn('space-y-8', pending && 'opacity-60 transition-opacity')}>
           {previewing ? (
-            <Alert tone="info" title="You are previewing">
-              Visitors still see{' '}
-              <strong className="font-medium text-foreground">
-                {TEMPLATE_META[publishedTemplate].name} · {THEMES[publishedTheme].name}
-              </strong>
-              .
+            <Alert tone="info" title={t('You are previewing')}>
+              {t.rich('Visitors still see {design}.', {
+                design: (
+                  <strong className="font-medium text-foreground">
+                    {TEMPLATE_META[publishedTemplate].name} · {THEMES[publishedTheme].name}
+                  </strong>
+                ),
+              })}
             </Alert>
           ) : null}
 
           <section>
-            <h3 className="mb-3 text-sm font-semibold">Layout</h3>
+            <h3 className="mb-3 text-sm font-semibold">{t('Layout')}</h3>
             <ul className="grid grid-cols-2 gap-3">
               {TEMPLATE_KEYS.map((key) => {
                 const active = key === activeTemplate;
@@ -108,11 +112,11 @@ export function DesignSwitcher({
 
                       <span className="mt-2 flex items-start justify-between gap-1">
                         <span className="min-w-0">
-                          <span className="block truncate text-[13px] font-medium">
+                          <span className="block truncate text-[12px] font-medium">
                             {TEMPLATE_META[key].name}
                           </span>
-                          <span className="mt-0.5 block text-[11px] leading-snug text-subtle">
-                            {TEMPLATE_META[key].description}
+                          <span className="mt-0.5 block text-[10.5px] leading-snug text-subtle">
+                            {t(TEMPLATE_META[key].description)}
                           </span>
                         </span>
                         {active ? (
@@ -127,7 +131,7 @@ export function DesignSwitcher({
           </section>
 
           <section>
-            <h3 className="mb-3 text-sm font-semibold">Colour</h3>
+            <h3 className="mb-3 text-sm font-semibold">{t('Colour')}</h3>
             <ul className="grid grid-cols-2 gap-2">
               {COLOR_THEMES.map((key) => {
                 const theme = THEMES[key];
@@ -161,7 +165,7 @@ export function DesignSwitcher({
                         <span className="size-3.5 rounded-full" style={{ backgroundColor: theme.tokens.accent }} />
                       </span>
 
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+                      <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
                         {theme.name}
                       </span>
 
@@ -187,7 +191,7 @@ export function DesignSwitcher({
             onClick={() => startTransition(() => void clearDesignPreview())}
           >
             <RotateCcw className="size-4" aria-hidden />
-            Reset
+            {t('Reset')}
           </Button>
         </SheetFooter>
       </SheetContent>

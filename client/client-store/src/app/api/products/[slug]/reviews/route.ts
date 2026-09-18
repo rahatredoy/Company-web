@@ -25,14 +25,25 @@ const schema = z.object({
   body: z.string().trim().min(10).max(2000),
 });
 
+/**
+ * The visitor's translator, for the error messages below — imported on demand,
+ * like the rest of the data layer this handler reaches, and only on the paths
+ * that have something to say.
+ */
+async function translator() {
+  const { getT } = await import('@/lib/i18n/server');
+  return getT();
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ slug: string }> },
 ): Promise<NextResponse> {
   const limit = rateLimit(`review:${clientIp(request)}`, 3, 60_000);
   if (!limit.ok) {
+    const t = await translator();
     return NextResponse.json(
-      { error: 'Too many submissions. Please try again shortly.' },
+      { error: t('Too many submissions. Please try again shortly.') },
       { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } },
     );
   }
@@ -43,12 +54,14 @@ export async function POST(
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Please check your review and try again.' }, { status: 400 });
+    const t = await translator();
+    return NextResponse.json({ error: t('Please check your review and try again.') }, { status: 400 });
   }
 
   const parsed = schema.safeParse(payload);
   if (!parsed.success) {
-    return NextResponse.json({ error: 'Please check your review and try again.' }, { status: 400 });
+    const t = await translator();
+    return NextResponse.json({ error: t('Please check your review and try again.') }, { status: 400 });
   }
 
   const { apiFetch } = await import('@/lib/api/client');
@@ -68,6 +81,7 @@ export async function POST(
     return NextResponse.json({ data: result }, { status: 202 });
   } catch (error) {
     console.error('[storefront] review submission failed', error);
-    return NextResponse.json({ error: 'We could not submit your review.' }, { status: 502 });
+    const t = await translator();
+    return NextResponse.json({ error: t('We could not submit your review.') }, { status: 502 });
   }
 }

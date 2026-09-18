@@ -6,6 +6,7 @@ import { Minus, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ProductSummary } from '@/types';
 import { useCart } from '@/lib/commerce/cart';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { QuickAddDialog } from './quick-add-dialog';
 
@@ -48,6 +49,7 @@ export function QuickAdd({
   locale: string;
   className?: string;
 }) {
+  const t = useT();
   const router = useRouter();
   const { cart, add, updateQuantity } = useCart();
   const [picking, setPicking] = React.useState(false);
@@ -108,8 +110,8 @@ export function QuickAdd({
       maxQuantity: product.maxOrderQuantity,
     });
 
-    toast.success(`${product.name} added to your cart`, {
-      action: { label: 'View cart', onClick: () => router.push('/cart') },
+    toast.success(t('{name} added to your cart', { name: product.name }), {
+      action: { label: t('View cart'), onClick: () => router.push('/cart') },
     });
   };
 
@@ -148,8 +150,8 @@ export function QuickAdd({
             onClick={() => step(-1)}
             aria-label={
               line.quantity <= floor
-                ? `Remove ${product.name} from cart`
-                : `Less ${product.name}`
+                ? t('Remove {name} from cart', { name: product.name })
+                : t('Less {name}', { name: product.name })
             }
             className="grid size-9 place-items-center rounded-full text-primary transition-transform active:scale-90"
           >
@@ -165,14 +167,14 @@ export function QuickAdd({
             className="min-w-5 text-center text-sm font-semibold tabular-nums text-primary"
             aria-live="polite"
           >
-            {line.quantity}
-            <span className="sr-only"> {product.name} in your cart</span>
+            {t.number(line.quantity)}
+            <span className="sr-only"> {t('{name} in your cart', { name: product.name })}</span>
           </span>
 
           <button
             type="button"
             onClick={() => step(1)}
-            aria-label={`More ${product.name}`}
+            aria-label={t('More {name}', { name: product.name })}
             disabled={line.quantity >= ceiling}
             className="grid size-9 place-items-center rounded-full text-primary transition-transform active:scale-90 disabled:opacity-40"
           >
@@ -184,7 +186,9 @@ export function QuickAdd({
           type="button"
           onClick={onFirstAdd}
           aria-label={
-            needsPicker ? `Choose options for ${product.name}` : `Add ${product.name} to cart`
+            needsPicker
+              ? t('Choose options for {name}', { name: product.name })
+              : t('Add {name} to cart', { name: product.name })
           }
           className={cn(
             anchor,
@@ -196,8 +200,8 @@ export function QuickAdd({
 
           {inBasket > 0 ? (
             <span className="absolute -right-1 -top-1 grid min-w-4 place-items-center rounded-full border border-border bg-surface px-1 text-[10px] font-semibold leading-4 tabular-nums text-primary">
-              {inBasket}
-              <span className="sr-only"> in your cart</span>
+              {t.number(inBasket)}
+              <span className="sr-only"> {t('in your cart')}</span>
             </span>
           ) : null}
         </button>

@@ -8,6 +8,7 @@ import {
   findAdminSession,
   findCustomerSession,
   readSessionToken,
+  setSessionCookie,
   touchAdminSession,
   touchCustomerSession,
 } from '../lib/session';
@@ -59,6 +60,13 @@ async function loadAdmin(request: FastifyRequest, adminId: string): Promise<Admi
   return admin as AdminRow;
 }
 
+/**
+ * How stale a session has to look before its cookie is written again. The record
+ * slides forward on every request but the cookie cannot — a Set-Cookie on every
+ * response is noise — so it is re-issued in steps instead.
+ */
+const COOKIE_REFRESH_AFTER_MINUTES = 5;
+
 export default fp(async function authPlugin(app: FastifyInstance) {
   app.decorateRequest('storeAdmin', undefined);
   app.decorateRequest('storeAdminPartial', undefined);
@@ -72,13 +80,16 @@ export default fp(async function authPlugin(app: FastifyInstance) {
    * before the `tenant_ref` comparison, which is the second line of defence for
    * the case where a database is ever restored into the wrong place.
    */
-  app.decorate('requireStoreAdmin', async function requireStoreAdmin(request: FastifyRequest) {
+  app.decorate('requireStoreAdmin', async function requireStoreAdmin(
+    request: FastifyRequest,
+    reply?: FastifyReply,
+  ) {
     const store = storeOf(request);
 
     const token = readSessionToken(request, 'admin');
     if (!token) throw unauthorized('Sign in to continue.');
 
-    const session = await findAdminSession(store.db, token);
+    const session = await findAdminSession(store.tenantRef, token);
     if (!session) throw unauthorized('Your session has expired. Sign in again.', ERROR_CODES.SESSION_EXPIRED);
 
     if (session.tenantRef !== store.tenantRef) {
@@ -109,9 +120,23 @@ export default fp(async function authPlugin(app: FastifyInstance) {
       permissions: await effectivePermissions(store.db, { id: admin.id, roleKey: admin.roleKey }),
     };
 
-    // Sliding expiry — awaited, because a lost write here would silently
-    // shorten every session an active user has.
-    await touchAdminSession(store.db, session.id, session.remember);
+    /*
+     * Sliding expiry — awaited, because a lost write here would silently
+     * shorten every session an active user has.
+     *
+     * The cookie has to slide with the record, and a JWT cannot be slid in
+     * place: its expiry is signed into it, so `touch` mints a **new token** for
+     * the same session and this writes that one back. Without it an admin
+     * working through the day is signed out on the schedule set at sign-in,
+     * however recently they used the panel.
+     *
+     * Only every few minutes, though: a Set-Cookie on every response is noise.
+     */
+    const slid = await touchAdminSession(store.tenantRef, session.id, session.remember);
+    const idleMinutes = (Date.now() - session.lastSeenAt.getTime()) / 60_000;
+    if (reply && slid && idleMinutes >= COOKIE_REFRESH_AFTER_MINUTES) {
+      setSessionCookie(request, reply, 'admin', { id: session.id, ...slid });
+    }
   });
 
   /**
@@ -124,7 +149,7 @@ export default fp(async function authPlugin(app: FastifyInstance) {
     const token = readSessionToken(request, 'adminMfa');
     if (!token) throw unauthorized('Start again from the sign-in page.', ERROR_CODES.SESSION_EXPIRED);
 
-    const session = await findAdminSession(store.db, token);
+    const session = await findAdminSession(store.tenantRef, token);
     if (!session || session.mfaVerified || session.tenantRef !== store.tenantRef) {
       throw unauthorized('Start again from the sign-in page.', ERROR_CODES.SESSION_EXPIRED);
     }
@@ -186,12 +211,15 @@ export default fp(async function authPlugin(app: FastifyInstance) {
    * attached to them, but requiring a sign-in to buy something is how a shop
    * loses the sale. Everything it populates is optional by construction.
    */
-  app.decorate('optionalCustomer', async function optionalCustomer(request: FastifyRequest) {
+  app.decorate('optionalCustomer', async function optionalCustomer(
+    request: FastifyRequest,
+    reply?: FastifyReply,
+  ) {
     const store = storeOf(request);
     const token = readSessionToken(request, 'customer');
     if (!token) return;
 
-    const session = await findCustomerSession(store.db, token);
+    const session = await findCustomerSession(store.tenantRef, token);
     if (!session) return;
 
     // A token minted for another store is simply absent from this store's table,
@@ -226,7 +254,13 @@ export default fp(async function authPlugin(app: FastifyInstance) {
       tenantRef: session.tenantRef,
     };
 
-    await touchCustomerSession(store.db, session.id);
+    // Slid for the same reason, and it matters more here: a shopper's session is
+    // long by design, and being signed out mid-basket is a lost sale.
+    const slid = await touchCustomerSession(store.tenantRef, session.id);
+    const idleMinutes = (Date.now() - session.lastSeenAt.getTime()) / 60_000;
+    if (reply && slid && idleMinutes >= COOKIE_REFRESH_AFTER_MINUTES) {
+      setSessionCookie(request, reply, 'customer', { id: session.id, ...slid });
+    }
   });
 
   /**

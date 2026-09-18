@@ -6,6 +6,7 @@ import { publicEnv } from '@/lib/env';
 import { errorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 export type UploadPurpose = 'products' | 'categories' | 'brands' | 'banners' | 'website';
@@ -17,7 +18,8 @@ export type UploadPurpose = 'products' | 'categories' | 'brands' | 'banners' | '
  * somebody with an existing CDN, a stock photo library, or a file already on
  * the site needs — and it is also the escape hatch if storage is ever
  * unconfigured. The value the form submits is a URL either way, so nothing
- * downstream has to know which route it took.
+ * downstream has to know which route it took. A form that wants only files
+ * turns the address box off with `pasteable={false}`.
  *
  * The hidden input carries the value so the parent's plain `FormData` read keeps
  * working. This is a controlled field pretending to be an uncontrolled one, for
@@ -30,20 +32,25 @@ export function ImageUpload({
   purpose,
   defaultValue = '',
   disabled = false,
-  label = 'Upload an image',
+  label,
   compact = false,
+  pasteable = true,
   onChange,
 }: {
   name: string;
   purpose: UploadPurpose;
   defaultValue?: string;
   disabled?: boolean;
+  /** The button's words. Defaults to "Upload an image"; shown as given otherwise. */
   label?: string;
   /** Preview beside the button instead of above it — for a small mark, not a photo. */
   compact?: boolean;
+  /** Offer the "paste an address" box beside the upload. Off means a file or nothing. */
+  pasteable?: boolean;
   /** For a parent holding the value in state rather than reading `FormData`. */
   onChange?: (url: string) => void;
 }) {
+  const t = useT();
   const [value, setValue] = React.useState(defaultValue);
 
   // A parent that owns the value needs to hear every route it can change by:
@@ -82,13 +89,13 @@ export function ImageUpload({
         | null;
 
       if (!response.ok || !payload?.data?.url) {
-        setError(payload?.message ?? 'That file could not be uploaded.');
+        setError(payload?.message ?? t('That file could not be uploaded.'));
         return;
       }
 
       commit(payload.data.url);
     } catch (caught) {
-      setError(errorMessage(caught, 'We could not reach the store. Try again.'));
+      setError(errorMessage(caught, t('We could not reach the store. Try again.')));
     } finally {
       setUploading(false);
       // Let the same file be chosen again after a failure.
@@ -105,7 +112,7 @@ export function ImageUpload({
         src={value}
         alt=""
         className={cn(box, 'rounded-md border bg-muted object-cover')}
-        onError={() => setError('That address does not load as an image.')}
+        onError={() => setError(t('That address does not load as an image.'))}
       />
       {!disabled ? (
         <Button
@@ -114,7 +121,7 @@ export function ImageUpload({
           size="icon-sm"
           className={cn('absolute rounded-full', compact ? '-top-2.5 -right-2.5 size-6' : '-top-2 -right-2')}
           onClick={() => commit('')}
-          aria-label="Remove image"
+          aria-label={t('Remove image')}
         >
           <X aria-hidden />
         </Button>
@@ -150,7 +157,7 @@ export function ImageUpload({
         onClick={() => inputRef.current?.click()}
       >
         {uploading ? <Loader2 className="animate-spin" aria-hidden /> : <Upload aria-hidden />}
-        {uploading ? 'Uploading…' : label}
+        {uploading ? t('Uploading…') : (label ?? t('Upload an image'))}
       </Button>
     </>
   );
@@ -169,19 +176,22 @@ export function ImageUpload({
           {preview}
           <div className="flex flex-wrap items-center gap-2">
             {picker}
-            <span className="text-xs text-muted-foreground">or paste an address</span>
+            {pasteable ? <span className="text-xs text-muted-foreground">{t('or paste an address')}</span> : null}
           </div>
         </>
       )}
 
-      <Input
-        value={value}
-        onChange={(event) => commit(event.target.value)}
-        placeholder="https://…"
-        disabled={disabled || uploading}
-        aria-label="Image address"
-        className={compact ? 'h-9 text-xs' : undefined}
-      />
+      {pasteable ? (
+        <Input
+          value={value}
+          onChange={(event) => commit(event.target.value)}
+          // i18n-ignore
+          placeholder="https://…"
+          disabled={disabled || uploading}
+          aria-label={t('Image address')}
+          className={compact ? 'h-9 text-xs' : undefined}
+        />
+      ) : null}
 
       {error ? <p className="text-xs font-medium text-destructive">{error}</p> : null}
     </div>

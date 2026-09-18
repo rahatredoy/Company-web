@@ -126,7 +126,9 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
   const requestHeaders = new Headers(headers);
   requestHeaders.set('Accept', 'application/json');
-  if (body !== undefined) requestHeaders.set('Content-Type', 'application/json');
+  // A form (a file upload) sets its own multipart boundary; anything else is JSON.
+  const isForm = body instanceof FormData;
+  if (body !== undefined && !isForm) requestHeaders.set('Content-Type', 'application/json');
   if (cookieHeader) requestHeaders.set('cookie', cookieHeader);
   if (storeSlug) requestHeaders.set('X-Store-Slug', storeSlug);
 
@@ -147,7 +149,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
       method,
       headers: requestHeaders,
       credentials: 'include',
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
       ...(signal ? { signal } : {}),
     });
   } catch (error) {

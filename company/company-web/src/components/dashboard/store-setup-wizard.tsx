@@ -224,7 +224,7 @@ export function StoreSetupWizard({
 
               <div className="space-y-3">
                 <h2 className="text-3xl font-bold tracking-tight">Let&apos;s Build Your Store</h2>
-                <p className="max-w-md text-[15px] leading-relaxed text-muted-foreground">
+                <p className="max-w-md text-[14px] leading-relaxed text-muted-foreground">
                   Create your store in a few easy steps. You&apos;ll get a beautiful website and admin panel
                   to manage your business.
                 </p>
@@ -256,7 +256,7 @@ export function StoreSetupWizard({
 
                     <span
                       className={cn(
-                        'relative grid size-8 shrink-0 place-items-center rounded-full text-[13px] font-semibold',
+                        'relative grid size-8 shrink-0 place-items-center rounded-full text-[12px] font-semibold',
                         done[index]
                           ? 'bg-success text-success-foreground'
                           : index === current
@@ -268,8 +268,8 @@ export function StoreSetupWizard({
                     </span>
 
                     <div className="min-w-0 space-y-1 pt-1">
-                      <p className="text-[15px] font-semibold">{entry.title}</p>
-                      <p className="text-[13px] text-muted-foreground">{entry.description}</p>
+                      <p className="text-[14px] font-semibold">{entry.title}</p>
+                      <p className="text-[12px] text-muted-foreground">{entry.description}</p>
                     </div>
                   </li>
                 ))}

@@ -1,4 +1,5 @@
 import { cn, formatMoney } from '@/lib/utils';
+import { CardText } from './card-text';
 
 /**
  * Prices are display-only here. The server computed them; this formats them.
@@ -26,7 +27,7 @@ export function PriceDisplay({
   const current = salePrice ?? price;
 
   const sizes = {
-    sm: { current: 'text-sm font-semibold', was: 'text-[11px]' },
+    sm: { current: 'text-sm font-semibold', was: 'text-[10.5px]' },
     md: { current: 'text-base font-semibold', was: 'text-xs' },
     lg: { current: 'text-xl font-semibold', was: 'text-sm' },
     xl: { current: 'text-3xl font-bold', was: 'text-base' },
@@ -41,13 +42,13 @@ export function PriceDisplay({
      */
     <p className={cn('flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5', className)}>
       <span className={cn(sizes.current, onSale ? 'text-sale' : 'text-foreground')}>
-        {onSale ? <span className="sr-only">Sale price </span> : null}
+        {onSale ? <span className="sr-only"><CardText text="Sale price" /> </span> : null}
         {formatMoney(current, currency, locale)}
       </span>
 
       {onSale ? (
         <s className={cn(sizes.was, 'text-subtle')}>
-          <span className="sr-only">Regular price </span>
+          <span className="sr-only"><CardText text="Regular price" /> </span>
           {formatMoney(price, currency, locale)}
         </s>
       ) : null}

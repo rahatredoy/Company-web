@@ -17,6 +17,7 @@ import {
   recordPaymentMethodForPayment,
 } from '../../services/billing';
 import { advanceOnboardingAfterPayment } from '../../services/onboarding';
+import { httpsUrl } from '../../lib/secure-url';
 
 function signatureHeader(headers: Record<string, unknown>, provider: string): string | undefined {
   if (provider === 'stripe') return headers['stripe-signature'] as string | undefined;
@@ -131,7 +132,16 @@ export default async function webhookRoutes(app: FastifyInstance) {
         reference: z.string().trim().min(4).max(64),
         amount: z.string().trim(),
         currency: z.string().trim().length(3),
-        redirect: z.string().url().optional(),
+        /**
+         * Where the stub sends the browser once it has settled.
+         *
+         * `httpsUrl` rather than `z.string().url()`, which is not a scheme check
+         * — it accepts `javascript:`, and this value is handed straight to
+         * `reply.redirect`. The route is development-only, but a redirector that
+         * is only safe because the route is unreachable is one refactor away
+         * from not being safe at all.
+         */
+        redirect: httpsUrl().optional(),
       }),
       request.query,
     );

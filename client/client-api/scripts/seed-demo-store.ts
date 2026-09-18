@@ -12,15 +12,15 @@
  * than as an argument being missing.
  *
  * A newly provisioned store gets navigation, policy pages, a payment method and
- * a shipping method — everything except anything to *sell*. So the storefront
+ * a warehouse — everything except anything to *sell*. So the storefront
  * renders correctly and looks empty, which is indistinguishable from broken when
  * you are trying to build against it.
  *
  * What this produces is the reference storefront from `client-website-design.md`:
  * a hero with a campaign medallion, department circles, the trust strip, a live
- * deal beside promo panels, the four-way product tab bar, a brand row and the
- * newsletter band — all of it real rows in the tenant database, arranged by the
- * same homepage-section table the owner edits.
+ * deal beside promo panels, the four-way product tab bar and a brand row — all
+ * of it real rows in the tenant database, arranged in the
+ * same homepage-section table the storefront reads.
  *
  * Everything the admin API can do goes through the admin API rather than SQL:
  * slugs are derived by the same code a form would use, stock moves through the
@@ -28,10 +28,11 @@
  * cache is invalidated by the same hook. Seeding straight into the tables would
  * produce data the application itself would never have written.
  *
- * Two things have no admin endpoint by design and are written directly:
- * **reviews**, which only ever come from customers, and **sold counts**, which
- * only ever move on dispatch. Both are what a demo needs and neither is
- * something an admin is allowed to invent through the panel.
+ * Three things have no admin endpoint and are written directly: **reviews**,
+ * which only ever come from customers, **sold counts**, which only ever move on
+ * dispatch, and **the homepage's blocks**, which the panel has no editor for.
+ * The first two are what a demo needs and neither is something an admin is
+ * allowed to invent through the panel.
  *
  * Images come from loremflickr on a fixed keyword and seed, so a product keeps
  * the same photograph between runs, the subject matches what is being sold, and
@@ -641,7 +642,6 @@ interface DemoProduct {
   sold?: number;
   /** How many approved reviews to write, and what they should average to. */
   reviews?: { count: number; average: number };
-  short: string;
   description: string;
 }
 
@@ -671,7 +671,6 @@ const PRODUCTS: DemoProduct[] = [
       'Battery|Video playback|Up to 29 hours',
       'General|Warranty|1 year limited',
     ],
-    short: '6.7" Super Retina XDR, 48MP camera, A16 Bionic.',
     description:
       '<p>The 6.7-inch Super Retina XDR display goes to 2000 nits outdoors, and the 48MP main camera crops to a 2x telephoto without losing detail.</p><ul><li>6.7" Super Retina XDR, ProMotion 120Hz</li><li>48MP main + 12MP ultrawide + 12MP telephoto</li><li>A16 Bionic</li><li>Up to 29 hours video playback</li></ul>',
   },
@@ -697,7 +696,6 @@ const PRODUCTS: DemoProduct[] = [
       'Construction|Outsole|Rubber waffle',
       'General|Warranty|2 years',
     ],
-    short: "Nike's largest heel Air unit yet.",
     description:
       '<p>The 270 takes the largest heel Air unit Nike has put in a lifestyle shoe and wraps it in a stretchy upper that pulls on like a sock.</p>',
   },
@@ -715,7 +713,6 @@ const PRODUCTS: DemoProduct[] = [
       'In the box|Included|Flat beater, dough hook, wire whisk',
       'General|Warranty|5 years',
     ],
-    short: '4.8L bowl, 10 speeds, all-metal build.',
     description:
       '<p>A 4.8-litre bowl, ten speeds and a planetary action that reaches every part of it. The hub on the front takes the whole attachment range.</p>',
   },
@@ -735,7 +732,6 @@ const PRODUCTS: DemoProduct[] = [
       'General|Weight|449g with battery',
       'General|Warranty|2 years',
     ],
-    short: '24.1MP APS-C, 4K video, vari-angle screen.',
     description:
       '<p>24.1 megapixels on an APS-C sensor, 4K video and a vari-angle touchscreen, in the lightest DSLR body Canon makes.</p>',
   },
@@ -753,7 +749,6 @@ const PRODUCTS: DemoProduct[] = [
       'Water resistance|Rating|50 metres',
       'General|Warranty|2 years',
     ],
-    short: 'Stainless case, genuine leather strap.',
     description: '<p>A 44mm stainless steel case on a genuine leather strap, water resistant to 50 metres.</p>',
   },
   {
@@ -770,7 +765,6 @@ const PRODUCTS: DemoProduct[] = [
       'General|Weight|620g',
       'General|Warranty|2 years',
     ],
-    short: '28L, padded laptop sleeve, water-repellent.',
     description: '<p>Twenty-eight litres with a padded laptop sleeve and a water-repellent base for setting down on wet ground.</p>',
   },
 
@@ -791,7 +785,6 @@ const PRODUCTS: DemoProduct[] = [
       'General|Weight|250g',
       'General|Warranty|2 years',
     ],
-    short: 'Industry-leading noise cancelling, 30-hour battery.',
     description:
       '<p>Eight microphones and two processors reading the room, thirty hours between charges, and a three-minute charge worth three hours.</p><ul><li>Adaptive noise cancelling</li><li>30-hour battery, USB-C quick charge</li><li>Multipoint pairing</li><li>Speak-to-chat</li></ul>',
   },
@@ -802,7 +795,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'smartphones', brand: 'samsung', price: '1199.00', salePrice: '1099.00', cost: '840.00',
     stock: 22, keyword: 'samsung phone', newArrival: true, sold: 121,
     reviews: { count: 57, average: 4.5 },
-    short: '200MP camera and an S Pen in the body.',
     description: '<p>A 200MP main sensor, a 6.8-inch Dynamic AMOLED panel, and the S Pen stowed in the body rather than sold beside it.</p>',
   },
   {
@@ -810,7 +802,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'laptops', brand: 'apple', price: '1099.00', cost: '820.00',
     stock: 15, keyword: 'laptop', newArrival: true, sold: 96,
     reviews: { count: 48, average: 5 },
-    short: '13.6" Liquid Retina, 8GB, 256GB SSD.',
     description: '<p>Fanless, 1.24kg, and rated for eighteen hours — the machine most people should buy.</p>',
   },
   {
@@ -818,7 +809,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'audio', brand: 'apple', price: '249.00', salePrice: '199.00', cost: '140.00',
     stock: 74, keyword: 'earbuds', newArrival: true, sold: 188,
     reviews: { count: 92, average: 4.5 },
-    short: 'Adaptive transparency, USB-C case.',
     description: '<p>Twice the noise cancellation of the first generation, and a case that finally charges over USB-C.</p>',
   },
   {
@@ -826,7 +816,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'tv', brand: 'samsung', price: '649.00', salePrice: '549.00', cost: '430.00',
     stock: 9, keyword: 'television', sold: 64,
     reviews: { count: 31, average: 4 },
-    short: '55-inch 4K HDR with built-in streaming.',
     description: '<p>Fifty-five inches of 4K HDR with the streaming apps built in, so nothing else needs plugging into it.</p>',
   },
   {
@@ -837,7 +826,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'printers', brand: 'canon', price: '129.00', cost: '76.00',
     stock: 3, keyword: 'printer', sold: 41,
     reviews: { count: 18, average: 4 },
-    short: 'Wireless all-in-one, print/scan/copy.',
     description: '<p>Prints, scans and copies over Wi-Fi, from a phone as readily as from a laptop.</p>',
   },
 
@@ -847,7 +835,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'shoes', brand: 'adidas', price: '179.00', salePrice: '139.00', cost: '85.00',
     stock: 52, keyword: 'running shoes', sold: 134,
     reviews: { count: 66, average: 4.5 },
-    short: 'Boost midsole, knit upper.',
     description: '<p>The Boost midsole returns more of what you put into it, under a knit upper that holds the foot without pressure points.</p>',
   },
   {
@@ -871,7 +858,6 @@ const PRODUCTS: DemoProduct[] = [
       { suffix: 'S-BL', options: ['Size:S', 'Colour:Blue'], stock: 9 },
       { suffix: 'M-BL', options: ['Size:M', 'Colour:Blue'], stock: 0 },
     ],
-    short: 'Brushed fleece, ribbed cuffs.',
     description: '<p>Brushed fleece inside, ribbed cuffs and hem, and a hood that keeps its shape after washing.</p>',
   },
   {
@@ -879,7 +865,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'mens', brand: 'nike', price: '29.00', cost: '11.00',
     stock: 140, keyword: 'tshirt', sold: 210,
     reviews: { count: 44, average: 4.5 },
-    short: 'Soft cotton jersey, standard fit.',
     description: '<p>Soft cotton jersey in a standard fit, with a woven label rather than a print that cracks.</p>',
   },
   {
@@ -887,7 +872,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'mens', brand: 'puma', price: '34.00', salePrice: '24.00', cost: '13.00',
     stock: 71, keyword: 'shorts', sold: 58,
     reviews: { count: 19, average: 4 },
-    short: 'Lightweight, zip pocket.',
     description: '<p>Lightweight woven fabric with a zip pocket that holds a phone without swinging.</p>',
   },
 
@@ -897,7 +881,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'kitchen-appliances', brand: 'philips', price: '249.00', salePrice: '199.00', cost: '145.00',
     stock: 24, keyword: 'air fryer', newArrival: true, sold: 112,
     reviews: { count: 73, average: 4.5 },
-    short: '7.3L, feeds a family of six.',
     description: '<p>A 7.3-litre basket — enough for a whole chicken — and a drawer that goes in the dishwasher.</p>',
   },
   {
@@ -905,7 +888,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'kitchen-appliances', brand: 'philips', price: '89.00', cost: '47.00',
     stock: 38, keyword: 'coffee maker', sold: 67,
     reviews: { count: 25, average: 4 },
-    short: 'Grinds and brews, 1.2L carafe.',
     description: '<p>Grinds the beans and brews straight into a 1.2-litre insulated carafe.</p>',
   },
   {
@@ -913,7 +895,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'cookware', price: '129.00', salePrice: '99.00', cost: '62.00',
     stock: 31, keyword: 'cookware', sold: 49,
     reviews: { count: 22, average: 4 },
-    short: 'Ten pieces, induction-ready.',
     description: '<p>Ten pieces with a bonded base that works on induction, and handles that stay cool on the hob.</p>',
   },
   {
@@ -921,7 +902,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'bedding', price: '45.00', cost: '19.00',
     stock: 110, keyword: 'pillow', sold: 88,
     reviews: { count: 36, average: 4.5 },
-    short: 'Ventilated foam, washable covers.',
     description: '<p>Ventilated memory foam under a cover that comes off and goes in the machine.</p>',
   },
 
@@ -931,7 +911,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'grooming', brand: 'philips', price: '119.00', salePrice: '89.00', cost: '58.00',
     stock: 43, keyword: 'electric shaver', sold: 71,
     reviews: { count: 34, average: 4.5 },
-    short: 'Wet and dry, 60-minute runtime.',
     description: '<p>Heads that flex in five directions, an hour of runtime, and it can be rinsed under the tap.</p>',
   },
   {
@@ -939,7 +918,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'skincare', price: '24.00', cost: '8.00',
     stock: 165, keyword: 'skincare serum', newArrival: true, sold: 143,
     reviews: { count: 51, average: 4.5 },
-    short: '15% vitamin C with hyaluronic acid.',
     description: '<p>Fifteen percent vitamin C buffered with hyaluronic acid, in a bottle dark enough to keep it stable.</p>',
   },
   {
@@ -947,7 +925,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'haircare', price: '59.00', cost: '26.00',
     stock: 57, keyword: 'hair dryer', sold: 39,
     reviews: { count: 16, average: 4 },
-    short: 'Ionic, three heat settings.',
     description: '<p>Ionic conditioning, three heat settings and a cold shot that actually sets a style.</p>',
   },
 
@@ -957,7 +934,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fitness', price: '39.00', cost: '14.00',
     stock: 82, keyword: 'yoga mat', sold: 94,
     reviews: { count: 29, average: 4.5 },
-    short: 'Six millimetres, non-slip both sides.',
     description: '<p>Six millimetres of cushioning that still lets you feel the floor, and grip on both faces.</p>',
   },
   {
@@ -965,7 +941,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'hydration', price: '19.00', cost: '6.00',
     stock: 190, keyword: 'water bottle', newArrival: true, sold: 176,
     reviews: { count: 41, average: 4.5 },
-    short: 'Vacuum insulated, 24 hours cold.',
     description: '<p>Double-walled stainless steel: twenty-four hours cold, twelve hot, and no condensation on the outside.</p>',
   },
 
@@ -975,7 +950,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'building-toys', price: '49.00', salePrice: '39.00', cost: '18.00',
     stock: 66, keyword: 'building blocks', sold: 83,
     reviews: { count: 32, average: 4.5 },
-    short: '500 pieces, compatible with the big brands.',
     description: '<p>Five hundred pieces in a sorted tray, sized to fit the bricks already in the house.</p>',
   },
   {
@@ -983,7 +957,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'rc-toys', price: '34.00', cost: '13.00',
     stock: 48, keyword: 'toy car', sold: 55,
     reviews: { count: 21, average: 4 },
-    short: '2.4GHz, 20 minutes per charge.',
     description: '<p>Twenty minutes of running per charge, and a 2.4GHz radio so two can race without interfering.</p>',
   },
 
@@ -993,7 +966,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'power-tools', price: '89.00', cost: '44.00',
     stock: 35, keyword: 'power drill', sold: 61,
     reviews: { count: 28, average: 4.5 },
-    short: 'Two batteries, 20 torque settings.',
     description: '<p>Two batteries in the case, so one is always charged, and twenty torque settings before the clutch slips.</p>',
   },
   {
@@ -1007,7 +979,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'hand-tools', price: '69.00', cost: '31.00',
     stock: 0, keyword: 'tool kit', sold: 37,
     reviews: { count: 15, average: 4 },
-    short: 'Everything for flat-pack and repairs.',
     description: '<p>A hundred and eight pieces in a moulded case, which is the part that keeps them together.</p>',
   },
 
@@ -1017,7 +988,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'car-electronics', price: '99.00', salePrice: '79.00', cost: '46.00',
     stock: 29, keyword: 'dash cam', sold: 44,
     reviews: { count: 23, average: 4 },
-    short: '4K front, loop recording, G-sensor.',
     description: '<p>4K to a loop, with a G-sensor that locks the clip when something happens.</p>',
   },
   {
@@ -1025,7 +995,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'car-care', price: '45.00', cost: '19.00',
     stock: 58, keyword: 'vacuum cleaner', sold: 33,
     reviews: { count: 17, average: 4 },
-    short: 'Cordless, HEPA filter, 12V charge.',
     description: '<p>Cordless with a washable HEPA filter, and it charges from the car rather than needing to come inside.</p>',
   },
 
@@ -1058,7 +1027,6 @@ const PRODUCTS: DemoProduct[] = [
       { suffix: '256', options: ['Storage:256GB'], price: '899.00', stock: 19 },
       { suffix: '512', options: ['Storage:512GB'], price: '1099.00', stock: 6 },
     ],
-    short: '6.1" Super Retina XDR, 48MP main camera, USB-C.',
     description:
       '<p>The Dynamic Island, a 48MP main camera that crops to a 2x telephoto, and USB-C on an iPhone at last.</p><ul><li>6.1" Super Retina XDR</li><li>48MP main + 12MP ultrawide</li><li>A16 Bionic</li><li>USB-C, up to 20 hours video</li></ul>',
   },
@@ -1068,7 +1036,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 58, keyword: 'smartphone', sold: 203,
     reviews: { count: 71, average: 4 },
     attributes: ['Colour:Black'],
-    short: '6.4" 120Hz AMOLED, 5000mAh, 5G.',
     description: '<p>A 120Hz AMOLED and a 5000mAh battery at the price most phones give you one or the other.</p>',
   },
   {
@@ -1076,7 +1043,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'smartphones', price: '179.00', cost: '96.00',
     stock: 120, keyword: 'mobile phone', sold: 268,
     reviews: { count: 44, average: 3.6 },
-    short: '6.5" display, 128GB, dual SIM.',
     description: '<p>Dual SIM, 128GB of storage and a battery that gets through two days — the phone you buy for somebody who keeps losing theirs.</p>',
   },
   {
@@ -1085,7 +1051,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 22, keyword: 'rugged phone', sold: 41,
     reviews: { count: 18, average: 4 },
     attributes: ['Colour:Green', 'Material:Plastic'],
-    short: 'IP68, drop tested to 1.5m, 8000mAh.',
     description: '<p>IP68, drop tested to a metre and a half onto concrete, and an 8000mAh battery that will charge other things.</p>',
   },
   {
@@ -1103,7 +1068,6 @@ const PRODUCTS: DemoProduct[] = [
       'Battery|Life|Up to 22 hours',
       'General|Warranty|1 year limited',
     ],
-    short: '14.2" Liquid Retina XDR, M3, 22-hour battery.',
     description: '<p>Twenty-two hours on a charge and a display that holds 1600 nits of peak brightness — the two things that decide whether a laptop leaves the desk.</p>',
   },
   {
@@ -1112,7 +1076,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 17, keyword: 'laptop', sold: 62,
     reviews: { count: 26, average: 4 },
     attributes: ['Colour:Silver', 'Material:Aluminium'],
-    short: '15.6" FHD, Core i5, 1.5kg.',
     description: '<p>A 15.6-inch screen in something that still weighs a kilo and a half, with a full-size keyboard and a number pad.</p>',
   },
   {
@@ -1120,7 +1083,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'laptops', price: '749.00', cost: '520.00',
     stock: 31, keyword: 'ultrabook laptop', sold: 95,
     reviews: { count: 33, average: 4 },
-    short: '14" IPS, 16GB RAM, 512GB SSD.',
     description: '<p>Sixteen gigabytes and a 512GB SSD as standard, which is the configuration most people end up paying to upgrade to anyway.</p>',
   },
   {
@@ -1130,7 +1092,6 @@ const PRODUCTS: DemoProduct[] = [
     reviews: { count: 47, average: 4.5 },
     attributes: ['Colour:Black'],
     bundle: ['Bluetooth Soundbar 2.1 with Subwoofer'],
-    short: 'RTX 4060, 165Hz QHD, 16GB DDR5.',
     description: '<p>An RTX 4060 behind a 165Hz QHD panel, and a cooling system loud enough that you will want the headphones.</p>',
   },
   {
@@ -1139,7 +1100,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 14, keyword: 'mirrorless camera', sold: 73,
     reviews: { count: 35, average: 4.5 },
     attributes: ['Colour:Black'],
-    short: '24.2MP APS-C, real-time eye AF, 4K.',
     description: '<p>Real-time eye autofocus that holds a moving subject, 24.2 megapixels of APS-C behind it, and 4K with no crop.</p>',
   },
   {
@@ -1148,7 +1108,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 46, keyword: 'action camera', newArrival: true, sold: 121,
     reviews: { count: 58, average: 4 },
     attributes: ['Colour:Black', 'Material:Plastic'],
-    short: '5K30, waterproof to 10m, two batteries.',
     description: '<p>Waterproof to ten metres without a case, 5K at thirty frames, and two batteries in the box because one is never enough.</p>',
   },
   {
@@ -1156,7 +1115,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'cameras', brand: 'canon', price: '129.00', cost: '84.00',
     stock: 27, keyword: 'camera lens', sold: 66,
     reviews: { count: 29, average: 4.8 },
-    short: 'The fifty. Fast, sharp, cheap.',
     description: '<p>The lens everybody buys second and wishes they had bought first: f/1.8, sharp by f/2.8, and lighter than the cap on some zooms.</p>',
   },
   {
@@ -1165,7 +1123,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 88, keyword: 'bluetooth speaker', sold: 187,
     reviews: { count: 62, average: 4.5 },
     attributes: ['Colour:Blue'],
-    short: 'IP67, 16 hours, fits in a hand.',
     description: '<p>Sixteen hours from something that fits in one hand, and an IP67 rating that means the beach is not a risk.</p>',
   },
   {
@@ -1174,7 +1131,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 8, keyword: 'over ear headphones', sold: 44,
     reviews: { count: 21, average: 4 },
     attributes: ['Colour:Silver', 'Material:Aluminium'],
-    short: 'Over-ear, active noise cancellation, spatial audio.',
     description: '<p>Machined aluminium cups and a mesh canopy that spreads the weight — which matters, because these are heavy.</p>',
   },
   {
@@ -1183,7 +1139,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 33, keyword: 'soundbar', sold: 92,
     reviews: { count: 37, average: 4 },
     attributes: ['Colour:Black'],
-    short: '2.1 channel, wireless sub, HDMI ARC.',
     description: '<p>A wireless subwoofer you can put behind the sofa, and HDMI ARC so the TV remote still controls the volume.</p>',
   },
   {
@@ -1192,7 +1147,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 164, keyword: 'wireless earbuds', sold: 312,
     reviews: { count: 96, average: 4 },
     attributes: ['Colour:White'],
-    short: 'IPX7, 30 hours with the case.',
     description: '<p>Thirty hours of playback counting the case, and an IPX7 rating that survives being run in.</p>',
   },
   {
@@ -1208,7 +1162,6 @@ const PRODUCTS: DemoProduct[] = [
       'Connectivity|HDMI|4 ports (2 x HDMI 2.1)',
       'General|Warranty|2 years',
     ],
-    short: '65" QLED, 120Hz, four HDMI.',
     description: '<p>Sixty-five inches of QLED at 120Hz, with two HDMI 2.1 ports — the detail that decides whether a console runs at its best.</p>',
   },
   {
@@ -1216,7 +1169,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'tv', brand: 'philips', price: '329.00', cost: '224.00',
     stock: 21, keyword: 'smart tv', sold: 79,
     reviews: { count: 31, average: 4 },
-    short: '43" Full HD, apps built in.',
     description: '<p>Forty-three inches of Full HD with the apps already on it, which is the whole job for a bedroom or a kitchen.</p>',
   },
   {
@@ -1224,7 +1176,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'tv', price: '49.00', cost: '22.00',
     stock: 143, keyword: 'streaming stick', sold: 246,
     reviews: { count: 74, average: 4 },
-    short: '4K HDR, voice remote, HDMI.',
     description: '<p>Plugs into the HDMI port and makes an old television behave like a new one, which is cheaper than replacing it.</p>',
   },
   {
@@ -1232,7 +1183,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'printers', brand: 'canon', price: '139.00', cost: '92.00',
     stock: 24, keyword: 'photo printer', sold: 38,
     reviews: { count: 16, average: 4 },
-    short: 'Dye-sub 6x4 prints, Wi-Fi, battery option.',
     description: '<p>Dye-sublimation six-by-fours in under a minute, over Wi-Fi from a phone, and it will run off a battery at a party.</p>',
   },
   {
@@ -1240,7 +1190,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'printers', price: '189.00', salePrice: '159.00', cost: '122.00',
     stock: 19, keyword: 'laser printer', sold: 47,
     reviews: { count: 22, average: 3.7 },
-    short: 'Print, scan, copy. 30ppm, duplex.',
     description: '<p>Thirty pages a minute, duplex both ways, and a toner cartridge that lasts long enough to forget where you put the spare.</p>',
   },
 
@@ -1257,7 +1206,6 @@ const PRODUCTS: DemoProduct[] = [
       { suffix: 'L', options: ['Size:L'], stock: 28 },
       { suffix: 'XL', options: ['Size:XL'], stock: 12 },
     ],
-    short: 'Stretch cotton twill, slim through the leg.',
     description: '<p>Cotton twill with just enough stretch to sit down in, cut slim from the knee rather than the thigh.</p>',
   },
   {
@@ -1272,7 +1220,6 @@ const PRODUCTS: DemoProduct[] = [
       { suffix: 'L', options: ['Size:L'], stock: 19 },
       { suffix: 'XL', options: ['Size:XL'], stock: 8 },
     ],
-    short: 'Three stripes, full zip, ribbed cuffs.',
     description: '<p>The one that has been in the catalogue since 1967, with the stripes down the sleeve and a collar that stands up.</p>',
   },
   {
@@ -1287,7 +1234,6 @@ const PRODUCTS: DemoProduct[] = [
       { suffix: 'L', options: ['Size:L'], stock: 24 },
       { suffix: 'XL', options: ['Size:XL'], stock: 12 },
     ],
-    short: 'Button-down collar, 100% cotton oxford.',
     description: '<p>Proper oxford cloth with a button-down collar, which is the shirt that works with a tie and without one.</p>',
   },
   {
@@ -1302,7 +1248,6 @@ const PRODUCTS: DemoProduct[] = [
       { suffix: 'L', options: ['Size:L'], stock: 15 },
       { suffix: 'XL', options: ['Size:XL'], stock: 7 },
     ],
-    short: 'Lined viscose, side pockets, midi length.',
     description: '<p>Fully lined so it holds its shape, and it has pockets — which is the first thing anybody checks.</p>',
   },
   {
@@ -1311,7 +1256,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 47, keyword: 'denim jacket', sold: 93,
     reviews: { count: 32, average: 4 },
     attributes: ['Colour:Blue', 'Material:Cotton'],
-    short: 'Mid-wash rigid denim, cropped.',
     description: '<p>Rigid denim in a mid wash, cropped to sit at the waist, and it will fade where you wear it rather than where the factory decided.</p>',
   },
   {
@@ -1320,7 +1264,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 68, keyword: 'knit cardigan', sold: 58,
     reviews: { count: 19, average: 4 },
     attributes: ['Colour:Green', 'Material:Cotton'],
-    short: 'Chunky knit, drop shoulder, no itch.',
     description: '<p>A chunky knit with a drop shoulder, in a cotton blend that does not itch through a t-shirt.</p>',
   },
   {
@@ -1336,7 +1279,6 @@ const PRODUCTS: DemoProduct[] = [
       { suffix: 'L', options: ['Size:L'], stock: 38 },
       { suffix: 'XL', options: ['Size:XL'], stock: 14 },
     ],
-    short: 'Squat-proof, high waist, side pocket.',
     description: '<p>Four-way stretch that stays opaque when you fold over, a waistband that does not roll, and a pocket that takes a phone.</p>',
   },
   {
@@ -1345,7 +1287,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 71, keyword: 'suede sneakers', sold: 165,
     reviews: { count: 54, average: 4.5 },
     attributes: ['Colour:Red', 'Material:Leather'],
-    short: 'The 1968 original, still suede.',
     description: '<p>Unchanged since 1968 apart from the sock liner: suede upper, gum rubber sole, formstrip down the side.</p>',
   },
   {
@@ -1354,7 +1295,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 58, keyword: 'running shoes', sold: 127,
     reviews: { count: 45, average: 4 },
     attributes: ['Colour:White'],
-    short: '212g, breathable knit, neutral.',
     description: '<p>Two hundred and twelve grams in a size five, with a knit upper that lets the heat out on a long one.</p>',
   },
   {
@@ -1363,7 +1303,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 29, keyword: 'chelsea boots', sold: 64,
     reviews: { count: 23, average: 4.5 },
     attributes: ['Colour:Black', 'Material:Leather'],
-    short: 'Full grain leather, elastic gusset, Goodyear welt.',
     description: '<p>Full grain leather over a Goodyear welt, which is the construction that means a cobbler can resole them rather than shrug.</p>',
   },
   {
@@ -1380,7 +1319,6 @@ const PRODUCTS: DemoProduct[] = [
       'Water resistance|Rating|5ATM',
       'General|Warranty|1 year',
     ],
-    short: '1.43" AMOLED, SpO2, 14-day battery.',
     description: '<p>Fourteen days between charges, which is the difference between a watch you wear and one that lives in a drawer.</p>',
   },
   {
@@ -1389,7 +1327,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 26, keyword: 'womens watch', sold: 49,
     reviews: { count: 17, average: 4.5 },
     attributes: ['Colour:Silver', 'Material:Stainless Steel'],
-    short: 'Stainless bracelet, sapphire crystal, 30m.',
     description: '<p>A sapphire crystal, so it stays unscratched, on a bracelet that adjusts without a jeweller.</p>',
   },
   {
@@ -1398,7 +1335,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 37, keyword: 'leather handbag', sold: 71,
     reviews: { count: 26, average: 4.5 },
     attributes: ['Colour:Black', 'Material:Leather'],
-    short: 'Full grain, laptop sleeve, magnetic close.',
     description: '<p>Full grain leather with an internal sleeve that takes a 14-inch laptop, so it is a work bag without announcing it.</p>',
   },
   {
@@ -1407,7 +1343,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 92, keyword: 'crossbody bag', sold: 143,
     reviews: { count: 49, average: 4 },
     attributes: ['Colour:Green', 'Material:Cotton'],
-    short: 'Waxed canvas, adjustable strap, three pockets.',
     description: '<p>Waxed canvas that darkens where it creases, and a strap long enough to wear across rather than off one shoulder.</p>',
   },
 
@@ -1418,7 +1353,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 44, keyword: 'blender', sold: 108,
     reviews: { count: 34, average: 4 },
     attributes: ['Colour:White', 'Material:Plastic'],
-    short: '700W, 2L jug, ice crush.',
     description: '<p>Seven hundred watts through a ribbed jug that keeps the mixture moving, so it does not stall halfway up a smoothie.</p>',
   },
   {
@@ -1427,7 +1361,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 118, keyword: 'electric kettle', sold: 267,
     reviews: { count: 79, average: 4.5 },
     attributes: ['Colour:Silver', 'Material:Stainless Steel'],
-    short: '1.7L, 3000W, boil-dry cut-off.',
     description: '<p>Three kilowatts, so a mug is ready in under a minute, and a boil-dry cut-off for the time somebody forgets the water.</p>',
   },
   {
@@ -1436,7 +1369,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 23, keyword: 'microwave oven', sold: 62,
     reviews: { count: 25, average: 4 },
     attributes: ['Colour:Black'],
-    short: '25L, 900W, grill, 10 power levels.',
     description: '<p>Twenty-five litres takes a dinner plate without catching, and the grill element means it browns rather than only heats.</p>',
   },
   {
@@ -1446,7 +1378,6 @@ const PRODUCTS: DemoProduct[] = [
     reviews: { count: 52, average: 4.8 },
     attributes: ['Colour:Black'],
     bundle: ["Chef's Knife Set with Block"],
-    short: 'Pre-seasoned, oven safe, outlives you.',
     description: '<p>Pre-seasoned and oven safe to any temperature the oven reaches. Wash it with water, dry it on the hob, and it will outlast the cooker.</p>',
   },
   {
@@ -1455,7 +1386,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 38, keyword: 'dinner plates', sold: 84,
     reviews: { count: 29, average: 4 },
     attributes: ['Colour:White'],
-    short: 'Service for four. Dishwasher and microwave safe.',
     description: '<p>Four each of dinner plate, side plate, bowl and mug — stoneware, so the dishwasher and the microwave are both fine.</p>',
   },
   {
@@ -1464,7 +1394,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 31, keyword: 'knife set', sold: 97,
     reviews: { count: 41, average: 4.5 },
     attributes: ['Material:Stainless Steel'],
-    short: 'Five knives, full tang, acacia block.',
     description: '<p>Five full-tang knives in an acacia block, including the two you actually use: an eight-inch chef and a paring knife.</p>',
   },
   {
@@ -1473,7 +1402,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 64, keyword: 'duvet cover', sold: 112,
     reviews: { count: 38, average: 4 },
     attributes: ['Colour:White', 'Material:Cotton'],
-    short: '200 thread count, king, two pillowcases.',
     description: '<p>Two hundred thread count percale, which sleeps cooler than sateen, with two pillowcases and hidden buttons.</p>',
   },
   {
@@ -1482,7 +1410,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 41, keyword: 'weighted blanket', sold: 88,
     reviews: { count: 43, average: 4.5 },
     attributes: ['Colour:Silver', 'Material:Cotton'],
-    short: '7kg, glass beads, removable cover.',
     description: '<p>Seven kilos of glass beads in stitched pockets so the weight stays spread, under a cover that comes off for washing.</p>',
   },
   {
@@ -1491,7 +1418,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 27, keyword: 'mattress topper', sold: 55,
     reviews: { count: 21, average: 4 },
     attributes: ['Colour:White'],
-    short: '5cm gel-infused foam, double.',
     description: '<p>Five centimetres of gel-infused foam on straps that hold it to the corners, which is what stops a topper migrating overnight.</p>',
   },
   {
@@ -1499,7 +1425,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'decor', price: '29.00', cost: '11.00',
     stock: 148, keyword: 'scented candles', sold: 226,
     reviews: { count: 67, average: 4.5 },
-    short: 'Soy wax, three scents, 25 hours each.',
     description: '<p>Soy wax in three scents that do not fight each other, twenty-five hours a jar, boxed well enough to give as it comes.</p>',
   },
   {
@@ -1508,7 +1433,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 82, keyword: 'wall clock', sold: 74,
     reviews: { count: 24, average: 4 },
     attributes: ['Colour:White'],
-    short: '30cm, silent sweep movement.',
     description: '<p>A silent sweep movement rather than a ticking one, which is the difference between a clock in a bedroom and a clock in a hallway.</p>',
   },
   {
@@ -1517,7 +1441,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 18, keyword: 'floor lamp', newArrival: true, sold: 36,
     reviews: { count: 15, average: 4 },
     attributes: ['Material:Aluminium'],
-    short: '1.8m arc, marble base, dimmable.',
     description: '<p>An arc long enough to reach over a sofa, on a marble base heavy enough that it stays where you put it.</p>',
   },
 
@@ -1527,7 +1450,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'skincare', price: '32.00', cost: '9.00',
     stock: 156, keyword: 'face cream', sold: 289,
     reviews: { count: 94, average: 4.5 },
-    short: '0.3% retinol, 50ml, fragrance free.',
     description: '<p>Encapsulated retinol at 0.3%, which is enough to work and low enough to start on, with no fragrance to complicate it.</p>',
   },
   {
@@ -1535,7 +1457,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'skincare', price: '26.00', cost: '8.00',
     stock: 173, keyword: 'moisturiser', sold: 241,
     reviews: { count: 77, average: 4 },
-    short: 'Lightweight gel-cream, all skin types.',
     description: '<p>A gel-cream that sinks in rather than sitting on top, so it works under sunscreen in the morning.</p>',
   },
   {
@@ -1543,7 +1464,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'skincare', price: '19.00', cost: '6.00',
     stock: 204, keyword: 'sunscreen', sold: 318,
     reviews: { count: 102, average: 4.5 },
-    short: 'SPF 50+, broad spectrum, no white cast.',
     description: '<p>Broad spectrum SPF 50+ that finishes clear on every skin tone — the reason people actually reapply it.</p>',
   },
   {
@@ -1552,7 +1472,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 59, keyword: 'hair straightener', sold: 147,
     reviews: { count: 56, average: 4 },
     attributes: ['Colour:Black'],
-    short: 'Ceramic plates, 150–230°C, 15s heat-up.',
     description: '<p>Floating ceramic plates and a temperature dial rather than one setting, because 230°C on fine hair is how it breaks.</p>',
   },
   {
@@ -1560,7 +1479,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'haircare', price: '29.00', cost: '10.00',
     stock: 136, keyword: 'shampoo bottles', sold: 198,
     reviews: { count: 61, average: 4 },
-    short: 'Sulphate free, 400ml each.',
     description: '<p>Sulphate free, so it will not strip colour, in bottles big enough to last a couple of months.</p>',
   },
   {
@@ -1569,7 +1487,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 87, keyword: 'beard trimmer', sold: 163,
     reviews: { count: 58, average: 4 },
     attributes: ['Colour:Black'],
-    short: '20 lengths, 90 minutes cordless, washable.',
     description: '<p>Twenty guide lengths on a dial rather than a box of combs, ninety minutes off a charge, and the head rinses under a tap.</p>',
   },
   {
@@ -1578,7 +1495,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 49, keyword: 'electric toothbrush', sold: 174,
     reviews: { count: 72, average: 4.5 },
     attributes: ['Colour:White'],
-    short: 'Sonic, pressure sensor, two weeks per charge.',
     description: '<p>A pressure sensor that stops you scrubbing, a two-minute timer that quadrants itself, and a fortnight between charges.</p>',
   },
   {
@@ -1586,7 +1502,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fragrance', price: '89.00', cost: '31.00',
     stock: 42, keyword: 'perfume bottle', sold: 81,
     reviews: { count: 30, average: 4.5 },
-    short: 'Bergamot, leather, vetiver. 8 hours.',
     description: '<p>Opens on bergamot and dries down to leather and vetiver, and it is still there eight hours later.</p>',
   },
   {
@@ -1594,7 +1509,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fragrance', price: '65.00', cost: '24.00',
     stock: 53, keyword: 'perfume', sold: 69,
     reviews: { count: 22, average: 4 },
-    short: 'Peony, pear, white musk.',
     description: '<p>Peony and pear over a white musk base — light enough for an office, which is the hardest thing for a floral to be.</p>',
   },
   {
@@ -1602,7 +1516,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fragrance', price: '49.00', salePrice: '39.00', cost: '18.00',
     stock: 71, keyword: 'perfume samples', newArrival: true, sold: 94,
     reviews: { count: 33, average: 4 },
-    short: 'Five 10ml sprays, refillable atomiser.',
     description: '<p>Five ten-millilitre sprays, which is enough of each to know whether it works on you rather than on the card.</p>',
   },
 
@@ -1614,7 +1527,6 @@ const PRODUCTS: DemoProduct[] = [
     reviews: { count: 47, average: 4.5 },
     attributes: ['Material:Stainless Steel'],
     bundle: ['Resistance Bands Set (5 levels)', 'Whey Protein Powder 1kg Vanilla'],
-    short: '2 x 24kg, dial adjust, replaces 30 dumbbells.',
     description: '<p>A dial that swaps the whole rack for two handles and a cradle, which is the only version of this that fits in a flat.</p>',
   },
   {
@@ -1622,7 +1534,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fitness', price: '25.00', cost: '7.00',
     stock: 218, keyword: 'resistance bands', sold: 342,
     reviews: { count: 108, average: 4.5 },
-    short: 'Five bands, door anchor, carry bag.',
     description: '<p>Five latex bands from light to extra heavy, plus the door anchor that turns them into a cable machine.</p>',
   },
   {
@@ -1638,7 +1549,6 @@ const PRODUCTS: DemoProduct[] = [
       'Storage|Folded depth|24cm',
       'General|Maximum user weight|120kg',
     ],
-    short: '16 km/h, folds to 24cm, 120kg limit.',
     description: '<p>Folds to twenty-four centimetres so it goes under a bed, and still runs to sixteen kilometres an hour when it is out.</p>',
   },
   {
@@ -1647,7 +1557,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 93, keyword: 'duffel bag', sold: 156,
     reviews: { count: 51, average: 4.5 },
     attributes: ['Colour:Black'],
-    short: '40L, vented shoe compartment, wet pocket.',
     description: '<p>Forty litres with a vented end pocket for the shoes and a lined one for whatever is still wet.</p>',
   },
   {
@@ -1656,7 +1565,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 47, keyword: 'hiking backpack', sold: 83,
     reviews: { count: 31, average: 4.5 },
     attributes: ['Colour:Green'],
-    short: '45L, adjustable harness, rain cover.',
     description: '<p>Forty-five litres over an adjustable back length, so the weight lands on the hips rather than the shoulders, with the rain cover in its own pocket.</p>',
   },
   {
@@ -1665,7 +1573,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 187, keyword: 'travel mug', sold: 271,
     reviews: { count: 86, average: 4 },
     attributes: ['Colour:Silver', 'Material:Stainless Steel'],
-    short: 'Six hours hot, leakproof, one-handed lid.',
     description: '<p>Six hours hot, genuinely leakproof in a bag, and the lid opens with the hand that is holding it.</p>',
   },
   {
@@ -1674,7 +1581,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 231, keyword: 'water bottle', sold: 189,
     reviews: { count: 57, average: 3.6 },
     attributes: ['Colour:Blue', 'Material:Plastic'],
-    short: 'Rolls flat, 750ml, carabiner clip.',
     description: '<p>Rolls down to the size of a fist when it is empty, which is the whole point of carrying one on the way out.</p>',
   },
   {
@@ -1684,7 +1590,6 @@ const PRODUCTS: DemoProduct[] = [
     reviews: { count: 26, average: 4 },
     attributes: ['Colour:Green'],
     bundle: ['Sleeping Bag -5°C Mummy', 'Portable Camping Gas Stove'],
-    short: 'Sleeps 4, 3000mm hydrostatic head, 10 minutes up.',
     description: '<p>A 3000mm flysheet and taped seams, which is the pair of numbers that decides whether a wet night is miserable.</p>',
   },
   {
@@ -1693,7 +1598,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 38, keyword: 'sleeping bag', sold: 67,
     reviews: { count: 23, average: 4.5 },
     attributes: ['Colour:Blue'],
-    short: 'Comfort to -5°C, 1.6kg, compression sack.',
     description: '<p>Comfort rated to minus five, hooded, and it packs into a compression sack rather than the bag it arrived in.</p>',
   },
   {
@@ -1702,7 +1606,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 74, keyword: 'camping stove', sold: 91,
     reviews: { count: 28, average: 4 },
     attributes: ['Material:Stainless Steel'],
-    short: 'Piezo ignition, windshield, hard case.',
     description: '<p>Piezo ignition so there are no matches to keep dry, and a windshield that means it still boils in a breeze.</p>',
   },
 
@@ -1712,7 +1615,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'building-toys', price: '59.00', cost: '24.00',
     stock: 52, keyword: 'wooden train toy', sold: 76,
     reviews: { count: 27, average: 4.5 },
-    short: '80 pieces, beech track, fits the big brands.',
     description: '<p>Beech track cut to the same gauge as the expensive sets, so it joins onto whatever is already in the toy box.</p>',
   },
   {
@@ -1720,7 +1622,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'building-toys', price: '45.00', salePrice: '35.00', cost: '17.00',
     stock: 88, keyword: 'magnetic tiles', sold: 134,
     reviews: { count: 49, average: 4.5 },
-    short: '100 tiles, riveted seams, ages 3+.',
     description: '<p>Riveted rather than glued, which is what stops a tile splitting and letting a magnet out.</p>',
   },
   {
@@ -1729,7 +1630,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 34, keyword: 'drone', featured: true, sold: 112,
     reviews: { count: 54, average: 4 },
     attributes: ['Colour:Black', 'Material:Plastic'],
-    short: '1080p, 25 minutes with two batteries, altitude hold.',
     description: '<p>Altitude hold makes it flyable by somebody who has never flown one, and two batteries make the afternoon last.</p>',
   },
   {
@@ -1738,7 +1638,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 61, keyword: 'monster truck toy', sold: 88,
     reviews: { count: 32, average: 4 },
     attributes: ['Colour:Red'],
-    short: '4WD, 25 km/h, waterproof electronics.',
     description: '<p>Four-wheel drive and sealed electronics, so grass, gravel and puddles are all fair game.</p>',
   },
   {
@@ -1746,7 +1645,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'board-games', price: '39.00', cost: '15.00',
     stock: 79, keyword: 'board game', sold: 103,
     reviews: { count: 39, average: 4.5 },
-    short: '2–5 players, 45 minutes, ages 10+.',
     description: '<p>Forty-five minutes and rules that explain in five, which is the combination that gets a game played twice.</p>',
   },
   {
@@ -1754,7 +1652,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'board-games', price: '49.00', cost: '20.00',
     stock: 43, keyword: 'chess set', sold: 58,
     reviews: { count: 21, average: 4.8 },
-    short: '50cm folding board, weighted pieces.',
     description: '<p>Weighted pieces on a 50cm board that folds to store them, with a king at the tournament 95mm.</p>',
   },
   {
@@ -1762,7 +1659,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'board-games', price: '19.00', cost: '6.00',
     stock: 164, keyword: 'playing cards', sold: 217,
     reviews: { count: 63, average: 4 },
-    short: 'Three games, 4–10 players, one tin.',
     description: '<p>Three games in one tin, all of them playable by ten people who have had a drink.</p>',
   },
 
@@ -1773,7 +1669,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 36, keyword: 'angle grinder', sold: 64,
     reviews: { count: 24, average: 4 },
     attributes: ['Material:Aluminium'],
-    short: '900W, 115mm, restart protection.',
     description: '<p>Nine hundred watts through a 115mm disc, with restart protection so it does not leap when the power comes back.</p>',
   },
   {
@@ -1781,7 +1676,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'power-tools', price: '65.00', salePrice: '49.00', cost: '29.00',
     stock: 42, keyword: 'sander tool', sold: 51,
     reviews: { count: 18, average: 4 },
-    short: '300W, 125mm, dust extraction.',
     description: '<p>Dust extraction that actually connects to a vacuum, which is the difference between sanding indoors and not.</p>',
   },
   {
@@ -1790,7 +1684,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 68, keyword: 'socket set', sold: 97,
     reviews: { count: 35, average: 4.5 },
     attributes: ['Material:Stainless Steel'],
-    short: '46 pieces, metric and imperial, 72-tooth ratchet.',
     description: '<p>A 72-tooth ratchet needs five degrees of swing, which is what gets a bolt out of a space your hand barely fits into.</p>',
   },
   {
@@ -1798,7 +1691,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'hand-tools', price: '45.00', cost: '19.00',
     stock: 57, keyword: 'laser measure', newArrival: true, sold: 43,
     reviews: { count: 16, average: 4 },
-    short: '40m, ±2mm, area and volume.',
     description: '<p>Forty metres to within two millimetres, and it does the area and volume arithmetic so nobody has to.</p>',
   },
   {
@@ -1808,7 +1700,6 @@ const PRODUCTS: DemoProduct[] = [
     reviews: { count: 14, average: 4.5 },
     attributes: ['Colour:Red', 'Material:Stainless Steel'],
     bundle: ['Socket Wrench Set (46-piece)', 'Heavy Duty Tool Bag 18"'],
-    short: '5 drawers, ball-bearing runners, lockable.',
     description: '<p>Ball-bearing runners that still slide with a full drawer, on castors that lock, and one key for the lot.</p>',
   },
   {
@@ -1817,7 +1708,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 73, keyword: 'tool bag', sold: 69,
     reviews: { count: 22, average: 4 },
     attributes: ['Colour:Black'],
-    short: '18", 24 pockets, moulded base.',
     description: '<p>A moulded base so it stands up on wet ground, and twenty-four pockets so the small things stay findable.</p>',
   },
   {
@@ -1825,7 +1715,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'tool-storage', price: '69.00', cost: '30.00',
     stock: 39, keyword: 'pegboard tools', sold: 34,
     reviews: { count: 12, average: 4 },
-    short: '120 x 60cm, 40 hooks, steel.',
     description: '<p>Steel rather than hardboard, so a hook holds a drill instead of tearing out, with forty of them in the box.</p>',
   },
 
@@ -1835,7 +1724,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'car-electronics', price: '25.00', cost: '8.00',
     stock: 176, keyword: 'car bluetooth', sold: 248,
     reviews: { count: 71, average: 3.6 },
-    short: 'Bluetooth 5.0, two USB, hands-free.',
     description: '<p>Puts Bluetooth into a car that never had it, and charges two phones while it does — reception depending on where you live.</p>',
   },
   {
@@ -1843,7 +1731,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'car-electronics', price: '45.00', salePrice: '35.00', cost: '19.00',
     stock: 84, keyword: 'tyre inflator', sold: 152,
     reviews: { count: 58, average: 4 },
-    short: 'Preset pressure, auto stop, light.',
     description: '<p>Set the pressure and it stops there on its own, which is the feature that makes checking the tyres a two-minute job.</p>',
   },
   {
@@ -1851,7 +1738,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'car-care', price: '39.00', cost: '16.00',
     stock: 91, keyword: 'car wash', sold: 87,
     reviews: { count: 29, average: 4 },
-    short: 'Grit-guard bucket, mitt, two towels, brushes.',
     description: '<p>The bucket has a grit guard in the bottom, which is the one piece that stops a wash putting swirls into the paint.</p>',
   },
   {
@@ -1859,7 +1745,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'car-care', price: '29.00', cost: '11.00',
     stock: 128, keyword: 'car polish', sold: 116,
     reviews: { count: 41, average: 4.5 },
-    short: 'SiO2, six months, spray and wipe.',
     description: '<p>Spray on a wet car and wipe off — six months of beading for fifteen minutes of work.</p>',
   },
   {
@@ -1868,7 +1753,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 243, keyword: 'phone holder car', sold: 331,
     reviews: { count: 97, average: 4 },
     attributes: ['Colour:Black'],
-    short: 'Vent clip, N52 magnets, holds a case.',
     description: '<p>N52 magnets hold a phone in a thick case over a speed bump, and the vent clip does not sag like a windscreen sucker.</p>',
   },
   {
@@ -1877,7 +1761,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 46, keyword: 'car seat cover', sold: 73,
     reviews: { count: 26, average: 3.6 },
     attributes: ['Colour:Black', 'Material:Leather'],
-    short: 'Five seats, airbag compatible, washable.',
     description: '<p>Airbag-compatible side seams and a washable faux leather — universal fit, which means good on most cars and perfect on none.</p>',
   },
 
@@ -1887,7 +1770,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fiction', price: '14.00', cost: '5.00',
     stock: 132, keyword: 'novel book', sold: 186,
     reviews: { count: 59, average: 4.5 },
-    short: 'Literary fiction. 384 pages, paperback.',
     description: '<p>Three hundred and eighty-four pages set over one winter in a fishing town that is running out of fish.</p>',
   },
   {
@@ -1895,7 +1777,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fiction', price: '22.00', cost: '8.00',
     stock: 87, keyword: 'thriller book', sold: 124,
     reviews: { count: 43, average: 4 },
-    short: 'Thriller. 448 pages, hardback.',
     description: '<p>A first edition hardback, sewn rather than glued, which is the binding that survives being lent out.</p>',
   },
   {
@@ -1903,7 +1784,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'non-fiction', price: '26.00', cost: '10.00',
     stock: 64, keyword: 'business book', sold: 92,
     reviews: { count: 34, average: 4 },
-    short: 'Personal finance. 312 pages, hardback.',
     description: '<p>Three hundred pages on compounding, fees and doing nothing, which is most of what there is to say.</p>',
   },
   {
@@ -1911,7 +1791,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'non-fiction', price: '39.00', salePrice: '29.00', cost: '15.00',
     stock: 41, keyword: 'atlas map book', sold: 57,
     reviews: { count: 19, average: 4.5 },
-    short: 'Large format, 200 maps, current borders.',
     description: '<p>Large format on heavy paper, with two hundred maps drawn to the borders as they stand rather than as they were.</p>',
   },
   {
@@ -1919,7 +1798,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'stationery', price: '24.00', cost: '8.00',
     stock: 198, keyword: 'notebook', sold: 274,
     reviews: { count: 81, average: 4.5 },
-    short: '160gsm dotted, 192 pages, lies flat.',
     description: '<p>A hundred and sixty gsm, so a fountain pen does not come through, and a sewn spine that lets it lie flat.</p>',
   },
   {
@@ -1928,7 +1806,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 56, keyword: 'fountain pen', sold: 63,
     reviews: { count: 24, average: 4.5 },
     attributes: ['Colour:Black', 'Material:Stainless Steel'],
-    short: 'Medium nib, converter and cartridges, boxed.',
     description: '<p>A medium steel nib with both a converter and cartridges in the box, so it works out of the tin either way.</p>',
   },
 
@@ -1938,7 +1815,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'supplements', price: '25.00', cost: '7.00',
     stock: 214, keyword: 'vitamin tablets', sold: 296,
     reviews: { count: 88, average: 4 },
-    short: '120 tablets, four months, 24 nutrients.',
     description: '<p>Four months in a bottle, with the twenty-four nutrients listed at their amounts rather than as a blend.</p>',
   },
   {
@@ -1946,7 +1822,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'supplements', price: '45.00', salePrice: '35.00', cost: '19.00',
     stock: 137, keyword: 'protein powder', sold: 243,
     reviews: { count: 92, average: 4.5 },
-    short: '24g protein per scoop, 33 servings.',
     description: '<p>Twenty-four grams a scoop and thirty-three scoops a tub, and it mixes in a shaker without a blender.</p>',
   },
   {
@@ -1955,7 +1830,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 72, keyword: 'blood pressure monitor', sold: 118,
     reviews: { count: 44, average: 4.5 },
     attributes: ['Colour:White'],
-    short: 'Upper arm, clinically validated, two users.',
     description: '<p>An upper-arm cuff rather than a wrist one, which is the version a GP will accept readings from, with memory for two people.</p>',
   },
   {
@@ -1963,7 +1837,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'wellness-devices', price: '25.00', cost: '8.00',
     stock: 165, keyword: 'pulse oximeter', sold: 207,
     reviews: { count: 66, average: 4 },
-    short: 'SpO2 and pulse, OLED, 10 seconds.',
     description: '<p>Reads oxygen saturation and pulse in about ten seconds, on an OLED that can be turned to face you.</p>',
   },
   {
@@ -1971,7 +1844,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'yoga', price: '22.00', cost: '7.00',
     stock: 143, keyword: 'yoga block', sold: 158,
     reviews: { count: 47, average: 4.5 },
-    short: 'Two cork blocks, 2.5m cotton strap.',
     description: '<p>Cork rather than foam, so a block takes weight without folding, and a strap long enough to be useful behind the back.</p>',
   },
   {
@@ -1980,7 +1852,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 48, keyword: 'meditation cushion', sold: 52,
     reviews: { count: 18, average: 4.5 },
     attributes: ['Material:Cotton'],
-    short: 'Buckwheat hulls, adjustable fill, washable cover.',
     description: '<p>Buckwheat hulls hold a shape where foam collapses, and the zip means you can take some out until the height is right.</p>',
   },
 
@@ -1991,7 +1862,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 57, keyword: 'dog bed', sold: 104,
     reviews: { count: 38, average: 4.5 },
     bundle: ['No-Pull Dog Harness Adjustable', 'Deshedding Pet Grooming Brush'],
-    short: '100 x 70cm, memory foam, washable cover.',
     description: '<p>A memory foam base for an older dog, under a cover that comes off and goes in the machine — which it will need to.</p>',
   },
   {
@@ -2000,7 +1870,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 149, keyword: 'dog harness', sold: 221,
     reviews: { count: 74, average: 4 },
     attributes: ['Colour:Red'],
-    short: 'Front and back clips, reflective, four sizes.',
     description: '<p>A front clip turns a dog that pulls rather than choking it, and the whole thing is reflective for winter evenings.</p>',
   },
   {
@@ -2008,7 +1877,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'cat', price: '89.00', cost: '39.00',
     stock: 33, keyword: 'cat tree', sold: 68,
     reviews: { count: 27, average: 4 },
-    short: '120cm, sisal posts, two hammocks.',
     description: '<p>Sisal posts all the way up rather than only at the bottom, and a base wide enough that it does not rock.</p>',
   },
   {
@@ -2016,7 +1884,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'cat', price: '69.00', salePrice: '55.00', cost: '29.00',
     stock: 41, keyword: 'cat litter box', sold: 76,
     reviews: { count: 31, average: 3.6 },
-    short: 'Rotating sift, no power, liner bags.',
     description: '<p>Rolls to sift rather than plugging in, which is quieter and gives a nervous cat nothing to be frightened of.</p>',
   },
   {
@@ -2024,7 +1891,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'pet-accessories', price: '39.00', cost: '15.00',
     stock: 96, keyword: 'pet water fountain', sold: 133,
     reviews: { count: 49, average: 4 },
-    short: '2.4L, carbon filter, near-silent pump.',
     description: '<p>Moving water gets a cat drinking more, and the pump on this one is quiet enough to leave in a kitchen overnight.</p>',
   },
   {
@@ -2032,7 +1898,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'pet-accessories', price: '19.00', cost: '5.00',
     stock: 217, keyword: 'pet brush', sold: 289,
     reviews: { count: 84, average: 4.5 },
-    short: 'Stainless edge, one-press release.',
     description: '<p>A stainless edge that reaches the undercoat, and a button that drops the fur straight in the bin.</p>',
   },
 
@@ -2043,7 +1908,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 28, keyword: 'hedge trimmer', sold: 47,
     reviews: { count: 21, average: 4 },
     bundle: ['Garden Hand Tool Set (5-piece)'],
-    short: '20V, 51cm blade, 18mm cut.',
     description: '<p>A 51cm blade that takes an 18mm branch, with no cable to cut through — which is how most corded ones end.</p>',
   },
   {
@@ -2052,7 +1916,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 104, keyword: 'garden tools', sold: 89,
     reviews: { count: 32, average: 4 },
     attributes: ['Material:Stainless Steel'],
-    short: 'Trowel, fork, weeder, cultivator, pruner.',
     description: '<p>Stainless heads on ash handles, so they come out of the soil clean and do not snap at the neck.</p>',
   },
   {
@@ -2060,7 +1923,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'outdoor-furniture', price: '249.00', salePrice: '199.00', cost: '121.00',
     stock: 14, keyword: 'garden furniture', featured: true, sold: 33,
     reviews: { count: 17, average: 4.5 },
-    short: 'PE rattan, steel frame, glass top.',
     description: '<p>PE rattan over a powder-coated steel frame — the combination that survives a winter outside rather than needing to come in.</p>',
   },
   {
@@ -2073,7 +1935,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'outdoor-furniture', price: '89.00', cost: '38.00',
     stock: 0, keyword: 'garden parasol', sold: 41,
     reviews: { count: 15, average: 4 },
-    short: '2.7m, crank and tilt, base included.',
     description: '<p>Two point seven metres on a crank, with the base in the price — which is usually where the rest of the money goes.</p>',
   },
   {
@@ -2081,7 +1942,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'plants', price: '29.00', cost: '10.00',
     stock: 126, keyword: 'herb plants', newArrival: true, sold: 97,
     reviews: { count: 35, average: 4.5 },
-    short: 'Six herbs, pots, compost discs, markers.',
     description: '<p>Six herbs that will actually grow on a windowsill, with the pots, the compost and the labels you would forget to buy.</p>',
   },
   {
@@ -2090,7 +1950,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 36, keyword: 'artificial plant', sold: 54,
     reviews: { count: 19, average: 4 },
     attributes: ['Colour:Green', 'Material:Plastic'],
-    short: '120cm, real wood trunk, UV stable.',
     description: '<p>A real wood trunk under UV-stable leaves, so it holds its colour in a window instead of going grey by August.</p>',
   },
 
@@ -2111,7 +1970,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 15, keyword: 'foldable phone', featured: true, sold: 67,
     reviews: { count: 34, average: 4 },
     attributes: ['Colour:Green'],
-    short: 'Folds in half, 3.4" cover screen, 6.7" main.',
     description: '<p>Folds to something that fits a coat pocket, with a cover screen big enough to answer a message without opening it.</p>',
   },
   {
@@ -2120,7 +1978,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 43, keyword: 'iphone', sold: 156,
     reviews: { count: 48, average: 4 },
     attributes: ['Colour:White', 'Material:Aluminium'],
-    short: '4.7", A15 Bionic, Touch ID.',
     description: '<p>The last iPhone with a home button, running the same chip as phones costing twice as much.</p>',
   },
   {
@@ -2128,7 +1985,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'smartphones', price: '329.00', salePrice: '279.00', cost: '198.00',
     stock: 76, keyword: 'android phone', sold: 194,
     reviews: { count: 63, average: 4 },
-    short: '8GB RAM, 256GB, 108MP camera.',
     description: '<p>Eight gigabytes of memory and 256 of storage at a price where most phones give you half of each.</p>',
   },
   {
@@ -2137,7 +1993,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 22, keyword: 'convertible laptop', sold: 71,
     reviews: { count: 29, average: 4 },
     attributes: ['Colour:Silver', 'Material:Aluminium'],
-    short: '360° hinge, 14" touch, stylus included.',
     description: '<p>A hinge that goes all the way round and a stylus in the box, so it is a tablet when the keyboard is in the way.</p>',
   },
   {
@@ -2145,7 +2000,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'laptops', price: '279.00', cost: '186.00',
     stock: 58, keyword: 'chromebook', sold: 213,
     reviews: { count: 67, average: 4 },
-    short: '14" FHD, 12-hour battery, boots in 6 seconds.',
     description: '<p>Boots in about six seconds and lasts a school day, which between them are the whole argument for one.</p>',
   },
   {
@@ -2154,7 +2008,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 16, keyword: 'business laptop', sold: 48,
     reviews: { count: 23, average: 4.5 },
     attributes: ['Colour:Black'],
-    short: 'Core i7, 16GB, fingerprint reader, TPM 2.0.',
     description:
       '<p>A fingerprint reader, a TPM and a keyboard rated for ten million presses — the things a laptop needs when it belongs to a job rather than a person.</p>',
   },
@@ -2164,7 +2017,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 34, keyword: 'camera tripod', sold: 62,
     reviews: { count: 25, average: 4.5 },
     attributes: ['Colour:Black'],
-    short: '1.6m, 1.2kg, ball head, folds to 40cm.',
     description: '<p>A kilo and a bit of carbon fibre that still holds a 5kg body, and folds down short enough for hand luggage.</p>',
   },
   {
@@ -2173,7 +2025,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 67, keyword: 'instant camera', newArrival: true, sold: 148,
     reviews: { count: 56, average: 4 },
     attributes: ['Colour:White', 'Material:Plastic'],
-    short: 'Credit-card prints in 90 seconds, selfie mirror.',
     description: '<p>A print in your hand in ninety seconds, which is a different thing from a photograph on a phone and still the reason these sell.</p>',
   },
   {
@@ -2182,7 +2033,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 72, keyword: 'earbuds', sold: 187,
     reviews: { count: 74, average: 4.5 },
     attributes: ['Colour:Black'],
-    short: 'ANC, 15 hours with case, IPX4.',
     description: '<p>Active noise cancelling in something that weighs four and a half grams a side, so they stay in on a run.</p>',
   },
   {
@@ -2191,7 +2041,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 41, keyword: 'studio headphones', sold: 84,
     reviews: { count: 33, average: 4.5 },
     attributes: ['Colour:Black'],
-    short: 'Closed back, 50mm drivers, coiled cable.',
     description: '<p>Closed-back and flat rather than flattering, which is what you want when you are deciding whether a mix is right.</p>',
   },
   {
@@ -2199,7 +2048,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'audio', price: '179.00', salePrice: '139.00', cost: '92.00',
     stock: 29, keyword: 'party speaker', sold: 96,
     reviews: { count: 41, average: 4 },
-    short: '120W, 12 hours, mic input, wheels.',
     description: '<p>A hundred and twenty watts, twelve hours off the battery, and a microphone socket for whoever insists.</p>',
   },
   {
@@ -2207,7 +2055,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'tv', brand: 'samsung', price: '249.00', cost: '168.00',
     stock: 37, keyword: 'small television', sold: 112,
     reviews: { count: 44, average: 4 },
-    short: '32", works as a TV and a monitor.',
     description: '<p>Thirty-two inches that answers to both a remote and a laptop, which suits a desk in a spare room doing two jobs.</p>',
   },
   {
@@ -2216,7 +2063,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 118, keyword: 'tv wall bracket', sold: 234,
     reviews: { count: 78, average: 4.5 },
     attributes: ['Material:Stainless Steel'],
-    short: 'Tilts, swivels, extends 40cm. 45kg rated.',
     description: '<p>Extends forty centimetres off the wall and swivels, so a television in a corner can face the sofa rather than the room.</p>',
   },
   {
@@ -2224,7 +2070,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'printers', price: '99.00', salePrice: '79.00', cost: '58.00',
     stock: 54, keyword: 'inkjet printer', sold: 143,
     reviews: { count: 52, average: 3.7 },
-    short: 'Print, scan, copy. Wi-Fi, AirPrint.',
     description: '<p>Prints from a phone without installing anything, which is nearly always what a printer at home is asked to do.</p>',
   },
   {
@@ -2232,7 +2077,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'printers', price: '149.00', cost: '96.00',
     stock: 26, keyword: 'document scanner', sold: 39,
     reviews: { count: 15, average: 4 },
-    short: 'A4, 15 pages a minute, USB powered.',
     description: '<p>Runs off the USB cable with no power brick, and turns a drawer of paperwork into a folder in an afternoon.</p>',
   },
 
@@ -2249,7 +2093,6 @@ const PRODUCTS: DemoProduct[] = [
       { suffix: 'L', options: ['Size:L'], stock: 10 },
       { suffix: 'XL', options: ['Size:XL'], stock: 5 },
     ],
-    short: '70% wool, single breasted, knee length.',
     description: '<p>Seventy per cent wool, lined to the hem, and long enough to cover a suit jacket properly.</p>',
   },
   {
@@ -2258,7 +2101,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 104, keyword: 'cargo shorts', sold: 167,
     reviews: { count: 51, average: 4 },
     attributes: ['Colour:Green', 'Material:Cotton'],
-    short: 'Six pockets, cotton ripstop, 9" inseam.',
     description: '<p>Ripstop cotton with six pockets, two of them deep enough for a phone that will not fall out sitting down.</p>',
   },
   {
@@ -2267,7 +2109,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 61, keyword: 'wool jumper', sold: 93,
     reviews: { count: 36, average: 4.5 },
     attributes: ['Colour:Blue'],
-    short: '100% merino, machine washable.',
     description: '<p>Pure merino that goes in the machine on wool wash, which is what separates a jumper you wear from one you keep for best.</p>',
   },
   {
@@ -2276,7 +2117,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 38, keyword: 'trench coat', sold: 74,
     reviews: { count: 28, average: 4.5 },
     attributes: ['Colour:Silver', 'Material:Cotton'],
-    short: 'Water resistant cotton, belted, removable lining.',
     description: '<p>Water-resistant cotton gabardine with a lining that unbuttons, so it works from March through to November.</p>',
   },
   {
@@ -2285,7 +2125,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 44, keyword: 'silk blouse', sold: 61,
     reviews: { count: 21, average: 4 },
     attributes: ['Colour:White'],
-    short: '100% mulberry silk, 19 momme.',
     description: '<p>Nineteen momme silk, which is heavy enough to hang properly rather than clinging to everything underneath.</p>',
   },
   {
@@ -2300,7 +2139,6 @@ const PRODUCTS: DemoProduct[] = [
       { suffix: 'L', options: ['Size:L'], stock: 19 },
       { suffix: 'XL', options: ['Size:XL'], stock: 8 },
     ],
-    short: 'Permanent pleats, elasticated waist, midi.',
     description: '<p>Heat-set pleats that survive the wash, on an elasticated waist that does not need to be exactly the right size.</p>',
   },
   {
@@ -2309,7 +2147,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 52, keyword: 'samba sneakers', featured: true, sold: 289,
     reviews: { count: 97, average: 4.8 },
     attributes: ['Colour:White', 'Material:Leather'],
-    short: 'Leather upper, gum sole, indoor football origin.',
     description: '<p>Designed in 1950 for training on frozen pitches, and worn since by everybody except footballers.</p>',
   },
   {
@@ -2318,7 +2155,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 36, keyword: 'leather loafers', sold: 67,
     reviews: { count: 24, average: 4 },
     attributes: ['Colour:Black', 'Material:Leather'],
-    short: 'Full grain, leather lined, rubber sole.',
     description: '<p>Leather lined so they mould to the foot, on a rubber sole that survives a pavement in a way a leather one does not.</p>',
   },
   {
@@ -2327,7 +2163,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 43, keyword: 'hiking boots', sold: 96,
     reviews: { count: 42, average: 4.5 },
     attributes: ['Colour:Green', 'Material:Leather'],
-    short: 'Waterproof membrane, ankle support, Vibram sole.',
     description: '<p>A waterproof membrane that still breathes, over a sole that grips wet rock — the two things a boot is bought for.</p>',
   },
   {
@@ -2336,7 +2171,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 28, keyword: 'chronograph watch', sold: 54,
     reviews: { count: 19, average: 4.5 },
     attributes: ['Colour:Black', 'Material:Leather'],
-    short: 'Quartz chronograph, 50m, sapphire.',
     description: '<p>A working chronograph under sapphire glass, on a leather strap that changes with a spring bar tool in a minute.</p>',
   },
   {
@@ -2345,7 +2179,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 132, keyword: 'kids watch', sold: 178,
     reviews: { count: 54, average: 4 },
     attributes: ['Colour:Blue', 'Material:Plastic'],
-    short: '5ATM, alarm, stopwatch, backlight.',
     description: '<p>Waterproof to five atmospheres, so swimming is fine, and cheap enough that losing it is not a disaster.</p>',
   },
   {
@@ -2354,7 +2187,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 96, keyword: 'leather belt', sold: 142,
     reviews: { count: 46, average: 4 },
     attributes: ['Colour:Black', 'Material:Leather'],
-    short: 'Black one side, brown the other. Rotating buckle.',
     description: '<p>The buckle turns, so it is black with a suit and brown with jeans, which is one belt instead of two.</p>',
   },
   {
@@ -2363,7 +2195,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 148, keyword: 'travel wallet', sold: 196,
     reviews: { count: 62, average: 4.5 },
     attributes: ['Material:Leather'],
-    short: 'Passport, cards, boarding pass, pen loop.',
     description: '<p>Holds two passports, the cards and a boarding pass, with RFID shielding in the card slots.</p>',
   },
 
@@ -2375,7 +2206,6 @@ const PRODUCTS: DemoProduct[] = [
     reviews: { count: 43, average: 4.5 },
     attributes: ['Colour:Silver', 'Material:Stainless Steel'],
     bundle: ['Philips Coffee Maker'],
-    short: '15 bar pump, steam wand, 1.5L tank.',
     description: '<p>A real steam wand rather than a frothing gadget, which is the part that decides whether the milk is any good.</p>',
   },
   {
@@ -2384,7 +2214,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 84, keyword: 'toaster', sold: 156,
     reviews: { count: 48, average: 4 },
     attributes: ['Colour:Silver', 'Material:Stainless Steel'],
-    short: 'Four slices, wide slots, removable crumb tray.',
     description: '<p>Slots wide enough for a crumpet or a doorstep of bloomer, and a crumb tray that actually slides out.</p>',
   },
   {
@@ -2392,7 +2221,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'kitchen-appliances', price: '129.00', salePrice: '99.00', cost: '67.00',
     stock: 31, keyword: 'food processor', sold: 74,
     reviews: { count: 29, average: 4 },
-    short: '1000W, 2.5L bowl, six attachments.',
     description: '<p>A kilowatt and six discs, which turns a bag of vegetables into a stew in the time it takes to find the chopping board.</p>',
   },
   {
@@ -2401,7 +2229,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 42, keyword: 'saucepan set', sold: 108,
     reviews: { count: 37, average: 4.5 },
     attributes: ['Material:Stainless Steel'],
-    short: 'Tri-ply base, glass lids, induction ready.',
     description: '<p>A tri-ply base that spreads the heat instead of scorching a ring into the middle, and it works on induction.</p>',
   },
   {
@@ -2409,7 +2236,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'cookware', price: '35.00', cost: '13.00',
     stock: 126, keyword: 'chopping board', sold: 189,
     reviews: { count: 57, average: 4 },
-    short: 'Three sizes, juice groove, hanging holes.',
     description: '<p>Three sizes so the raw and the cooked never meet, with a groove that catches what comes off a roast.</p>',
   },
   {
@@ -2417,7 +2243,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'cookware', price: '45.00', salePrice: '35.00', cost: '19.00',
     stock: 97, keyword: 'food containers', sold: 213,
     reviews: { count: 68, average: 4.5 },
-    short: 'Borosilicate, oven to freezer, leakproof lids.',
     description: '<p>Borosilicate glass goes from freezer to oven, and the lids clip on four sides so a bag survives a soup.</p>',
   },
   {
@@ -2426,7 +2251,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 53, keyword: 'down pillows', sold: 96,
     reviews: { count: 34, average: 4.5 },
     attributes: ['Colour:White', 'Material:Cotton'],
-    short: 'Medium support, 233 thread cotton cover, pair.',
     description: '<p>Down and feather in a cambric cover tight enough that the quills stay inside, which is the usual complaint.</p>',
   },
   {
@@ -2435,7 +2259,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 118, keyword: 'bed sheets', sold: 167,
     reviews: { count: 52, average: 4 },
     attributes: ['Colour:Silver', 'Material:Cotton'],
-    short: 'Jersey cotton, 35cm deep, no ironing.',
     description: '<p>Jersey cotton stretches over a deep mattress and comes out of the machine without needing an iron near it.</p>',
   },
   {
@@ -2443,7 +2266,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'decor', price: '69.00', salePrice: '55.00', cost: '28.00',
     stock: 47, keyword: 'wall art frames', sold: 71,
     reviews: { count: 26, average: 4.5 },
-    short: 'A3, solid wood frames, ready to hang.',
     description: '<p>Three A3 prints in solid wood frames with the hanging hardware fitted, so a blank wall is a ten-minute job.</p>',
   },
   {
@@ -2451,7 +2273,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'decor', price: '129.00', cost: '61.00',
     stock: 24, keyword: 'jute rug', sold: 48,
     reviews: { count: 18, average: 4 },
-    short: 'Hand woven jute, reversible, 160 x 230cm.',
     description: '<p>Hand-woven and reversible, so the side that takes the sun can be swapped for the one that has not.</p>',
   },
   {
@@ -2460,7 +2281,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 88, keyword: 'ceramic vases', newArrival: true, sold: 84,
     reviews: { count: 29, average: 4 },
     attributes: ['Colour:White'],
-    short: 'Three heights, matte glaze, watertight.',
     description: '<p>Three heights that group properly on a shelf, glazed inside as well as out so they hold water rather than seeping.</p>',
   },
 
@@ -2470,7 +2290,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'skincare', price: '22.00', cost: '7.00',
     stock: 164, keyword: 'face toner', sold: 218,
     reviews: { count: 71, average: 4 },
-    short: '10% vitamin C, alcohol free, 200ml.',
     description: '<p>Ten per cent vitamin C with no alcohol in it, so it can be used morning and evening without the sting.</p>',
   },
   {
@@ -2478,7 +2297,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'skincare', price: '18.00', cost: '5.00',
     stock: 187, keyword: 'face mask clay', sold: 246,
     reviews: { count: 78, average: 4.5 },
-    short: 'Kaolin and charcoal, 10 minutes, 12 uses.',
     description: '<p>Kaolin and charcoal that dry in ten minutes rather than cracking on the face for half an hour.</p>',
   },
   {
@@ -2486,7 +2304,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'skincare', price: '24.00', salePrice: '19.00', cost: '8.00',
     stock: 143, keyword: 'eye cream', sold: 189,
     reviews: { count: 63, average: 4 },
-    short: '5% caffeine, 15ml, fragrance free.',
     description: '<p>Caffeine at five per cent in a base light enough to go under makeup, with nothing in it that stings an eye.</p>',
   },
   {
@@ -2495,7 +2312,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 68, keyword: 'curling wand', sold: 124,
     reviews: { count: 47, average: 4 },
     attributes: ['Colour:Black'],
-    short: '32mm barrel, 210°C, heat-proof glove.',
     description: '<p>A 32mm barrel for a loose curl, up to 210°C, and a glove in the box because a wand has no clip to hold.</p>',
   },
   {
@@ -2503,7 +2319,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'haircare', price: '16.00', cost: '5.00',
     stock: 213, keyword: 'hair brush', sold: 287,
     reviews: { count: 84, average: 4.5 },
-    short: 'Silicone bristles, wet or dry, waterproof.',
     description: '<p>Silicone bristles that work in the shower on conditioner, which is where detangling is least painful.</p>',
   },
   {
@@ -2512,7 +2327,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 92, keyword: 'safety razor', sold: 138,
     reviews: { count: 51, average: 4.5 },
     attributes: ['Colour:Silver', 'Material:Stainless Steel'],
-    short: 'Butterfly open, 10 blades included, brass core.',
     description: '<p>A brass core weighted so it shaves under its own mass, and blades that cost pence rather than pounds.</p>',
   },
   {
@@ -2521,7 +2335,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 156, keyword: 'manicure set', sold: 194,
     reviews: { count: 58, average: 4 },
     attributes: ['Material:Stainless Steel'],
-    short: 'Twelve tools, stainless, leather case.',
     description: '<p>Twelve stainless tools in a case that closes properly, which is the difference between a set and a drawer.</p>',
   },
   {
@@ -2529,7 +2342,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fragrance', price: '69.00', salePrice: '55.00', cost: '26.00',
     stock: 61, keyword: 'cologne bottle', sold: 92,
     reviews: { count: 33, average: 4 },
-    short: 'Lemon, neroli, cedar. Light and sharp.',
     description: '<p>Lemon and neroli over cedar — a summer scent that does not turn sweet by the afternoon.</p>',
   },
   {
@@ -2537,7 +2349,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fragrance', price: '32.00', cost: '12.00',
     stock: 134, keyword: 'reed diffuser', sold: 148,
     reviews: { count: 44, average: 4.5 },
-    short: 'Amber and sandalwood, 200ml, 4 months.',
     description: '<p>Four months from a bottle with the reeds turned once a fortnight, and no flame to remember to put out.</p>',
   },
 
@@ -2548,7 +2359,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 64, keyword: 'kettlebell', sold: 127,
     reviews: { count: 44, average: 4.5 },
     attributes: ['Colour:Black'],
-    short: '16kg, vinyl coated base, wide handle.',
     description: '<p>A handle wide enough for two hands and a coated base that will not mark a floor when it comes down.</p>',
   },
   {
@@ -2556,7 +2366,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fitness', price: '19.00', cost: '6.00',
     stock: 218, keyword: 'skipping rope', sold: 264,
     reviews: { count: 76, average: 4 },
-    short: 'Weighted handles, ball bearings, 3m adjustable.',
     description: '<p>Ball-bearing handles so the rope turns rather than twisting, adjustable down to whatever height you are.</p>',
   },
   {
@@ -2564,7 +2373,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fitness', price: '349.00', salePrice: '289.00', cost: '196.00',
     stock: 13, keyword: 'exercise bike', sold: 41,
     reviews: { count: 24, average: 4 },
-    short: '16 resistance levels, 8kg flywheel, near silent.',
     description: '<p>Magnetic resistance means nothing touches the flywheel, so it is quiet enough to use while somebody else is watching television.</p>',
   },
   {
@@ -2573,7 +2381,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 87, keyword: 'laptop backpack', sold: 176,
     reviews: { count: 64, average: 4.5 },
     attributes: ['Colour:Black'],
-    short: '25L, hidden zips, USB pass-through, 15.6" sleeve.',
     description: '<p>Zips that face the back panel where nobody can reach them, and a padded sleeve that takes a 15.6-inch laptop.</p>',
   },
   {
@@ -2582,7 +2389,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 164, keyword: 'foldable backpack', sold: 198,
     reviews: { count: 57, average: 4 },
     attributes: ['Colour:Blue'],
-    short: '20L, folds into its own pocket, 180g.',
     description: '<p>A hundred and eighty grams that folds into its own pocket, so it lives in a suitcase until the day it is needed.</p>',
   },
   {
@@ -2590,7 +2396,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'hydration', price: '27.00', cost: '10.00',
     stock: 112, keyword: 'hydration pack', sold: 89,
     reviews: { count: 31, average: 4 },
-    short: '2L, wide fill opening, bite valve, BPA free.',
     description: '<p>An opening wide enough to get a hand inside for cleaning, which is the reason most bladders get thrown away.</p>',
   },
   {
@@ -2599,7 +2404,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 243, keyword: 'shaker bottle', sold: 312,
     reviews: { count: 88, average: 4 },
     attributes: ['Colour:Black', 'Material:Plastic'],
-    short: '700ml, wire whisk ball, leakproof.',
     description: '<p>A wire ball rather than a mesh, because the mesh is what holds the smell after a fortnight.</p>',
   },
   {
@@ -2607,7 +2411,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'camping', price: '32.00', salePrice: '25.00', cost: '12.00',
     stock: 128, keyword: 'camping lantern', sold: 173,
     reviews: { count: 54, average: 4.5 },
-    short: '1000 lumens, 30 hours, power bank out.',
     description: '<p>Thirty hours on low and a USB socket on the side, so it charges a phone when the light is not needed.</p>',
   },
   {
@@ -2616,7 +2419,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 56, keyword: 'sleeping mat', sold: 78,
     reviews: { count: 27, average: 4 },
     attributes: ['Colour:Green'],
-    short: '5cm thick, self-inflating, R-value 4.',
     description: '<p>Five centimetres of open-cell foam that pulls its own air in, and an R-value that holds up on cold ground.</p>',
   },
 
@@ -2626,7 +2428,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'building-toys', price: '69.00', salePrice: '55.00', cost: '29.00',
     stock: 58, keyword: 'robot toy kit', newArrival: true, sold: 96,
     reviews: { count: 38, average: 4.5 },
-    short: '12 builds, app coding, ages 8+.',
     description: '<p>Twelve builds from one box, each of them programmable from a tablet, which is where the second hour comes from.</p>',
   },
   {
@@ -2634,7 +2435,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'building-toys', price: '54.00', cost: '23.00',
     stock: 47, keyword: 'marble run toy', sold: 72,
     reviews: { count: 26, average: 4.5 },
-    short: '120 beech pieces, 30 marbles.',
     description: '<p>Beech blocks cut precisely enough that a run holds together, with thirty marbles because they do go missing.</p>',
   },
   {
@@ -2643,7 +2443,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 39, keyword: 'rc boat', sold: 63,
     reviews: { count: 24, average: 4 },
     attributes: ['Colour:Red'],
-    short: '30 km/h, self-righting hull, 2 batteries.',
     description: '<p>A self-righting hull, which means capsizing it is a pause rather than a swim.</p>',
   },
   {
@@ -2652,7 +2451,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 21, keyword: 'toy excavator', sold: 38,
     reviews: { count: 16, average: 4.5 },
     attributes: ['Material:Aluminium'],
-    short: '1:14, metal bucket, 11 functions.',
     description: '<p>A metal bucket on eleven separate functions, which digs actual holes in actual soil rather than miming it.</p>',
   },
   {
@@ -2660,7 +2458,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'board-games', price: '18.00', cost: '6.00',
     stock: 187, keyword: 'jigsaw puzzle', sold: 241,
     reviews: { count: 72, average: 4.5 },
-    short: '1000 pieces, 68 x 48cm, poster included.',
     description: '<p>Thick board that does not delaminate, and a poster in the box so the picture is not stuck on the lid all evening.</p>',
   },
   {
@@ -2668,7 +2465,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'board-games', price: '24.00', cost: '9.00',
     stock: 96, keyword: 'dominoes', sold: 84,
     reviews: { count: 27, average: 4 },
-    short: '28 tiles, spinner pins, wooden case.',
     description: '<p>Twenty-eight weighted tiles with spinner pins, in a wooden case rather than the tin that eventually splits.</p>',
   },
 
@@ -2678,7 +2474,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'power-tools', price: '69.00', salePrice: '55.00', cost: '31.00',
     stock: 44, keyword: 'jigsaw power tool', sold: 71,
     reviews: { count: 26, average: 4 },
-    short: '700W, tool-free blade change, laser guide.',
     description: '<p>Blades change without a hex key, which matters because a blunt jigsaw blade is what burns a cut.</p>',
   },
   {
@@ -2688,7 +2483,6 @@ const PRODUCTS: DemoProduct[] = [
     reviews: { count: 23, average: 4.8 },
     attributes: ['Colour:Blue'],
     bundle: ['Cordless Drill 20V'],
-    short: 'Brushless, 180Nm, two batteries.',
     description: '<p>A hundred and eighty newton metres will drive a 100mm screw into a joist without a pilot hole, and brushless means it does it all day.</p>',
   },
   {
@@ -2697,7 +2491,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 76, keyword: 'spirit level', sold: 89,
     reviews: { count: 31, average: 4.5 },
     attributes: ['Material:Aluminium'],
-    short: '120cm, three vials, milled base.',
     description: '<p>A milled base rather than an extruded one, which is what makes a level accurate over the whole 120 centimetres.</p>',
   },
   {
@@ -2706,7 +2499,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 138, keyword: 'precision screwdriver', sold: 187,
     reviews: { count: 62, average: 4.5 },
     attributes: ['Material:Stainless Steel'],
-    short: '32 bits, magnetic, for phones and laptops.',
     description: '<p>Thirty-two bits including the pentalobe and tri-point ones, which is what a phone actually needs opening.</p>',
   },
   {
@@ -2715,7 +2507,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 34, keyword: 'tool trolley', sold: 47,
     reviews: { count: 18, average: 4 },
     attributes: ['Colour:Black'],
-    short: 'Three trays, locking castors, 60kg.',
     description: '<p>Three deep trays on castors that lock, so the tools follow the job round the garage instead of staying on the bench.</p>',
   },
   {
@@ -2724,7 +2515,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 92, keyword: 'parts organiser', sold: 76,
     reviews: { count: 24, average: 4 },
     attributes: ['Material:Plastic'],
-    short: '24 removable bins, wall mountable.',
     description: '<p>Bins that lift out to take to the job, in a frame that hangs on a wall rather than taking up a shelf.</p>',
   },
 
@@ -2734,7 +2524,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'car-electronics', price: '89.00', salePrice: '69.00', cost: '41.00',
     stock: 48, keyword: 'reversing camera', sold: 94,
     reviews: { count: 36, average: 4 },
-    short: '4.3" monitor, IP68 camera, wireless link.',
     description: '<p>The camera wires to the reversing light and the monitor to the cigarette socket, so there is no cable to run down the car.</p>',
   },
   {
@@ -2742,7 +2531,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'car-electronics', price: '45.00', cost: '18.00',
     stock: 116, keyword: 'obd scanner', sold: 168,
     reviews: { count: 58, average: 4.5 },
-    short: 'Reads and clears fault codes, live data.',
     description: '<p>Reads the code behind the engine light and clears it once it is fixed, which is a garage visit for most people.</p>',
   },
   {
@@ -2750,7 +2538,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'car-care', price: '22.00', cost: '8.00',
     stock: 174, keyword: 'microfibre towel', sold: 216,
     reviews: { count: 67, average: 4.5 },
-    short: '90 x 60cm, 1200gsm, twisted loop.',
     description: '<p>Twelve hundred gsm of twisted loop dries a whole car without wringing, and leaves nothing behind on glass.</p>',
   },
   {
@@ -2758,7 +2545,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'car-care', price: '25.00', cost: '10.00',
     stock: 152, keyword: 'wiper blades', sold: 234,
     reviews: { count: 74, average: 4 },
-    short: 'Flat beam, graphite coated, 8 adaptors.',
     description: '<p>Flat beam blades press evenly across the whole curve of a screen, and there are eight adaptors so they fit nearly anything.</p>',
   },
   {
@@ -2767,7 +2553,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 128, keyword: 'boot organiser', sold: 163,
     reviews: { count: 49, average: 4 },
     attributes: ['Colour:Black'],
-    short: 'Three compartments, folds flat, non-slip base.',
     description: '<p>Stops the shopping travelling on a roundabout, and folds flat against the side when the boot is needed for something bigger.</p>',
   },
   {
@@ -2776,7 +2561,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 27, keyword: 'roof rack bars', sold: 43,
     reviews: { count: 17, average: 4 },
     attributes: ['Material:Aluminium'],
-    short: '75kg rated, lockable clamps, fits rails.',
     description: '<p>Seventy-five kilos on lockable clamps, which is a roof box, two bikes or a very optimistic amount of timber.</p>',
   },
 
@@ -2786,7 +2570,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fiction', price: '13.00', cost: '5.00',
     stock: 148, keyword: 'paperback book', sold: 172,
     reviews: { count: 54, average: 4.5 },
-    short: 'Literary fiction. 296 pages, paperback.',
     description: '<p>Two hundred and ninety-six pages about a woman who maps places that are about to be demolished.</p>',
   },
   {
@@ -2794,7 +2577,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'fiction', price: '15.00', salePrice: '11.00', cost: '6.00',
     stock: 121, keyword: 'fantasy book', sold: 198,
     reviews: { count: 63, average: 4 },
-    short: 'Fantasy, book one of three. 512 pages.',
     description: '<p>The first of three, and it finishes its own story rather than stopping — which is rarer than it should be.</p>',
   },
   {
@@ -2802,7 +2584,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'non-fiction', price: '24.00', cost: '9.00',
     stock: 78, keyword: 'history book', sold: 116,
     reviews: { count: 42, average: 4.5 },
-    short: 'Popular history. 368 pages, hardback.',
     description: '<p>Where the fork, the pocket and the postbox came from, in chapters short enough to read one at a time.</p>',
   },
   {
@@ -2810,7 +2591,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'non-fiction', price: '32.00', salePrice: '25.00', cost: '13.00',
     stock: 64, keyword: 'cookbook', sold: 143,
     reviews: { count: 51, average: 4.5 },
-    short: '180 recipes, 400 pages, lies flat.',
     description: '<p>A hundred and eighty recipes in a binding that stays open on the counter, which is the only binding a cookbook should have.</p>',
   },
   {
@@ -2818,7 +2598,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'stationery', price: '39.00', cost: '15.00',
     stock: 104, keyword: 'desk organiser', sold: 87,
     reviews: { count: 29, average: 4 },
-    short: 'Five pieces, bamboo, phone stand included.',
     description: '<p>Five pieces that group rather than clutter, including a slot that holds a phone upright while it charges.</p>',
   },
   {
@@ -2826,7 +2605,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'stationery', price: '16.00', cost: '5.00',
     stock: 217, keyword: 'coloured pens', sold: 268,
     reviews: { count: 79, average: 4 },
-    short: '24 colours, 0.5mm, quick dry.',
     description: '<p>Quick-drying ink at 0.5mm, so a left-handed hand does not drag the last word through the next one.</p>',
   },
 
@@ -2836,7 +2614,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'supplements', price: '29.00', salePrice: '22.00', cost: '11.00',
     stock: 186, keyword: 'fish oil capsules', sold: 254,
     reviews: { count: 76, average: 4 },
-    short: '1000mg, 180 capsules, no repeat.',
     description: '<p>Enteric coated, which is what stops the aftertaste that makes most people give up by the second week.</p>',
   },
   {
@@ -2844,7 +2621,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'supplements', price: '24.00', cost: '9.00',
     stock: 163, keyword: 'magnesium supplement', sold: 217,
     reviews: { count: 68, average: 4.5 },
-    short: '400mg elemental, 90 capsules, chelated.',
     description: '<p>Glycinate rather than oxide, which is absorbed rather than passing straight through.</p>',
   },
   {
@@ -2853,7 +2629,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 128, keyword: 'bathroom scale', sold: 196,
     reviews: { count: 62, average: 4 },
     attributes: ['Colour:Black', 'Material:Plastic'],
-    short: '13 metrics, app sync, 8 users.',
     description: '<p>Thirteen readings that sync to a phone, and it recognises which of eight people is standing on it.</p>',
   },
   {
@@ -2861,7 +2636,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'wellness-devices', price: '32.00', cost: '13.00',
     stock: 147, keyword: 'infrared thermometer', sold: 178,
     reviews: { count: 54, average: 4 },
-    short: 'One second, forehead or object, silent mode.',
     description: '<p>A reading in a second without touching, and a silent mode for the child you do not want to wake up.</p>',
   },
   {
@@ -2870,7 +2644,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 82, keyword: 'yoga wheel', sold: 74,
     reviews: { count: 26, average: 4.5 },
     attributes: ['Colour:Blue'],
-    short: '33cm, 150kg rated, padded surface.',
     description: '<p>Rated to a hundred and fifty kilos, padded where the spine goes, and it opens a chest that has been at a desk all week.</p>',
   },
   {
@@ -2879,7 +2652,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 136, keyword: 'foam roller', sold: 168,
     reviews: { count: 57, average: 4 },
     attributes: ['Colour:Black'],
-    short: '45cm, hollow core, textured surface.',
     description: '<p>A hollow core keeps it firm under weight, and the texture works into a knot instead of rolling over it.</p>',
   },
 
@@ -2889,7 +2661,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'dog', price: '25.00', cost: '9.00',
     stock: 184, keyword: 'dog toys', sold: 243,
     reviews: { count: 72, average: 4 },
-    short: 'Five toys, natural rubber, treat holes.',
     description: '<p>Natural rubber with holes that take peanut butter, which is what buys twenty minutes of quiet.</p>',
   },
   {
@@ -2897,7 +2668,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'dog', price: '69.00', salePrice: '55.00', cost: '29.00',
     stock: 43, keyword: 'dog crate', sold: 68,
     reviews: { count: 24, average: 4.5 },
-    short: 'Folds flat, two doors, washable tray.',
     description: '<p>Folds flat in about ten seconds and has a tray that slides out, which is the part that gets washed most.</p>',
   },
   {
@@ -2905,7 +2675,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'cat', price: '35.00', cost: '14.00',
     stock: 118, keyword: 'scratching post', sold: 194,
     reviews: { count: 61, average: 4 },
-    short: '60cm sisal, weighted base, dangling toy.',
     description: '<p>Tall enough for a full stretch, which is the reason a cat picks the sofa over a short one.</p>',
   },
   {
@@ -2913,7 +2682,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'cat', price: '29.00', cost: '11.00',
     stock: 156, keyword: 'cat toy', sold: 187,
     reviews: { count: 58, average: 4 },
-    short: 'Automatic, random pattern, 15-minute timer.',
     description: '<p>Runs a random pattern for fifteen minutes then stops itself, so the cat gets exercise and the room gets peace.</p>',
   },
   {
@@ -2922,7 +2690,6 @@ const PRODUCTS: DemoProduct[] = [
     stock: 67, keyword: 'pet carrier', sold: 96,
     reviews: { count: 34, average: 4 },
     attributes: ['Colour:Green'],
-    short: 'Mesh on three sides, up to 8kg, airline friendly.',
     description: '<p>Mesh on three sides so it stays cool, and small enough to go under an aeroplane seat.</p>',
   },
   {
@@ -2930,7 +2697,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'pet-accessories', price: '22.00', cost: '8.00',
     stock: 172, keyword: 'pet bowls', sold: 214,
     reviews: { count: 64, average: 4.5 },
-    short: 'Raised lip mat, two stainless bowls.',
     description: '<p>A raised lip that keeps water on the mat instead of the floor, with two stainless bowls that lift out to wash.</p>',
   },
 
@@ -2940,7 +2706,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'garden-tools', price: '159.00', salePrice: '129.00', cost: '82.00',
     stock: 31, keyword: 'pressure washer', featured: true, sold: 74,
     reviews: { count: 32, average: 4.5 },
-    short: '135 bar, patio head, 8m hose.',
     description: '<p>A hundred and thirty-five bar with a rotating patio head, which cleans a drive in an hour rather than an afternoon.</p>',
   },
   {
@@ -2948,7 +2713,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'garden-tools', price: '39.00', cost: '16.00',
     stock: 94, keyword: 'garden kneeler', sold: 87,
     reviews: { count: 31, average: 4.5 },
-    short: 'Flips between kneeler and seat, tool pouches.',
     description: '<p>Turns over to be either a padded kneeler or a seat, and the handles are what get you back up.</p>',
   },
   {
@@ -2956,7 +2720,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'outdoor-furniture', price: '179.00', cost: '92.00',
     stock: 19, keyword: 'garden bench', sold: 36,
     reviews: { count: 14, average: 4 },
-    short: 'FSC acacia, 150cm, pre-oiled.',
     description: '<p>FSC acacia that arrives already oiled, and needs doing again once a year to stay that colour.</p>',
   },
   {
@@ -2964,7 +2727,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'outdoor-furniture', price: '299.00', salePrice: '249.00', cost: '158.00',
     stock: 12, keyword: 'hanging egg chair', newArrival: true, sold: 28,
     reviews: { count: 16, average: 4.5 },
-    short: 'PE rattan, steel stand, cushion included.',
     description: '<p>The stand takes 150kg and the cushion comes with it, so there is nothing else to buy before sitting in it.</p>',
   },
   {
@@ -2972,7 +2734,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'plants', price: '45.00', salePrice: '35.00', cost: '18.00',
     stock: 108, keyword: 'grow light', sold: 124,
     reviews: { count: 43, average: 4 },
-    short: 'Full spectrum, timer, clip mount.',
     description: '<p>Full spectrum on a timer that remembers, which is what keeps a houseplant alive through a British January.</p>',
   },
   {
@@ -2980,7 +2741,6 @@ const PRODUCTS: DemoProduct[] = [
     category: 'plants', price: '32.00', cost: '12.00',
     stock: 143, keyword: 'plant pots', sold: 152,
     reviews: { count: 47, average: 4.5 },
-    short: 'Five sizes, drainage holes, saucers.',
     description: '<p>Unglazed terracotta breathes, which is why it is harder to overwater a plant in one, and the saucers are included.</p>',
   },
   {
@@ -2988,34 +2748,35 @@ const PRODUCTS: DemoProduct[] = [
     category: 'plants', price: '19.00', cost: '6.00',
     stock: 196, keyword: 'wildflower seeds', sold: 218,
     reviews: { count: 66, average: 4 },
-    short: '30 native species, covers 100m².',
     description: '<p>Thirty native species over a hundred square metres, chosen for pollinators rather than for the photograph on the packet.</p>',
   },
 ];
 
-const COUPONS = [
+/**
+ * The demo codes, written as the rules their titles promise — "a first order"
+ * is a first-order rule now that the discount engine can enforce one.
+ */
+const DISCOUNTS = [
   {
+    kind: 'coupon' as const,
+    name: 'Welcome — first order',
     code: 'WELCOME10',
-    description: '10% off a first order',
-    type: 'percentage' as const,
+    title: '10% off a first order',
+    valueType: 'percentage' as const,
     value: '10.00',
     maxDiscountAmount: '100.00',
     minOrderAmount: '50.00',
     usageLimit: 500,
     perCustomerLimit: 1,
+    customerRules: { segment: 'new' as const, limitByIdentity: true },
     status: 'active' as const,
   },
   {
-    code: 'FREESHIP',
-    description: 'Free delivery, any basket',
-    type: 'free_shipping' as const,
-    value: '0.00',
-    status: 'active' as const,
-  },
-  {
+    kind: 'coupon' as const,
+    name: 'Save 25 over 200',
     code: 'SAVE25',
-    description: '25.00 off orders over 200.00',
-    type: 'fixed' as const,
+    title: '25.00 off orders over 200.00',
+    valueType: 'fixed_amount' as const,
     value: '25.00',
     minOrderAmount: '200.00',
     usageLimit: 200,
@@ -3163,7 +2924,7 @@ async function main(): Promise<void> {
 
   if (RESET) {
     console.log('Removing everything a previous run created…');
-    for (const path of ['/products', '/categories', '/brands', '/banners', '/coupons']) {
+    for (const path of ['/products', '/categories', '/brands', '/banners', '/discounts']) {
       for (const row of await everyPage(path)) {
         const gone = await call(`${path}/${row.id}`, { method: 'DELETE' });
         const ok = gone.status === 204 || gone.status === 200;
@@ -3339,7 +3100,6 @@ async function main(): Promise<void> {
       logoUrl: photo(brand.keyword, 900 + index, 200),
       isActive: true,
       isFeatured: true,
-      sortOrder: index * 10,
     });
     if (id) brandIds.set(brand.key, id);
   }
@@ -3394,13 +3154,13 @@ async function main(): Promise<void> {
         status: 'active',
         categoryId: categoryIds.get(product.category) ?? null,
         brandId: product.brand ? (brandIds.get(product.brand) ?? null) : null,
-        shortDescription: product.short,
         description: product.description,
         imageUrl: photo(product.keyword, 100 + index),
         isFeatured: product.featured ?? false,
         isNewArrival: product.newArrival ?? false,
-        seoTitle: `${product.name} — ${product.short}`,
-        seoDescription: product.short,
+        // No SEO title or description: the storefront falls back to the name
+        // and the opening of the description, which is what a real shop that
+        // never opens that section gets.
       },
     });
 
@@ -3611,8 +3371,8 @@ async function main(): Promise<void> {
 
   // ---- marketing ----------------------------------------------------------
   console.log('\nCoupons');
-  for (const coupon of COUPONS) {
-    await ensure('/coupons', 'code', coupon.code, coupon);
+  for (const discount of DISCOUNTS) {
+    await ensure('/discounts', 'code', discount.code, discount);
   }
 
   /*
@@ -3654,11 +3414,6 @@ async function main(): Promise<void> {
   // block names a `source` instead of a list of ids, so the shop keeps filling
   // itself in as the owner adds stock.
   console.log('\nHomepage');
-  const existingSections = await call('/website/homepage');
-  for (const section of (existingSections.body?.data ?? []) as Array<{ id: string; type: string }>) {
-    await call(`/website/homepage/${section.id}`, { method: 'DELETE' });
-  }
-
   const SECTIONS: Array<Record<string, unknown>> = [
     {
       type: 'hero',
@@ -3715,20 +3470,6 @@ async function main(): Promise<void> {
       // a frozen id list would hide whatever the owner adds after this ran.
       // Empty means every top-level category, in the store's own order.
       config: {},
-    },
-    {
-      type: 'benefits',
-      title: null,
-      subtitle: null,
-      sortOrder: 30,
-      config: {
-        items: [
-          { icon: 'truck', title: 'Free Shipping', description: 'On orders over $100' },
-          { icon: 'refresh', title: 'Easy Returns', description: '30 days return policy' },
-          { icon: 'shield', title: 'Secure Payment', description: '100% secure checkout' },
-          { icon: 'support', title: '24/7 Support', description: "We're here to help" },
-        ],
-      },
     },
     {
       type: 'flash_sale',
@@ -3806,6 +3547,31 @@ async function main(): Promise<void> {
             imageUrl: wide('delivery parcel', 26),
             tone: 'sky',
           },
+        ],
+      },
+    },
+    {
+      /*
+       * The trust strip sits **under** the deal block, not third from the top.
+       *
+       * A shopper arriving on the homepage has not decided to buy anything yet,
+       * so four claims about delivery and returns answer a question nobody has
+       * asked — and they were pushing the first department panel below the fold
+       * on a laptop. Placed here they close the campaign block instead: by this
+       * point the page has offered a deal and three promotions, which is exactly
+       * where "free shipping over $100" stops being noise and starts being a
+       * reason.
+       */
+      type: 'benefits',
+      title: null,
+      subtitle: null,
+      sortOrder: 45,
+      config: {
+        items: [
+          { icon: 'truck', title: 'Free Shipping', description: 'On orders over $100' },
+          { icon: 'refresh', title: 'Easy Returns', description: '30 days return policy' },
+          { icon: 'shield', title: 'Secure Payment', description: '100% secure checkout' },
+          { icon: 'support', title: '24/7 Support', description: "We're here to help" },
         ],
       },
     },
@@ -3969,7 +3735,7 @@ async function main(): Promise<void> {
     },
     {
       /*
-       * Last before the newsletter, and empty for a first-time visitor — which
+       * Last on the page, and empty for a first-time visitor — which
        * is correct rather than broken. The list lives in the browser, so this is
        * the one block whose contents the server never sees.
        */
@@ -3979,18 +3745,43 @@ async function main(): Promise<void> {
       sortOrder: 110,
       config: {},
     },
-    {
-      type: 'newsletter',
-      title: 'Subscribe to our Newsletter',
-      subtitle: 'Get the latest updates on new products and upcoming sales',
-      sortOrder: 115,
-      config: {},
-    },
   ];
 
+  /*
+   * Straight to the tenant database: the panel has no homepage editor, so no
+   * admin endpoint writes these rows. One transaction, so a block Postgres
+   * refuses leaves the old homepage standing rather than half of a new one. The
+   * design re-save at the end is what drops the storefront's cached copy.
+   */
+  const homePool = await openTenantPoolForSlug(SLUG!);
+  const homeClient = await homePool.connect();
+  try {
+    await homeClient.query('begin');
+    await homeClient.query('delete from homepage_sections');
+    for (const section of SECTIONS) {
+      await homeClient.query(
+        `insert into homepage_sections (type, title, subtitle, config, is_enabled, sort_order)
+         values ($1, $2, $3, $4::jsonb, true, $5)`,
+        [
+          section.type,
+          section.title ?? null,
+          section.subtitle ?? null,
+          JSON.stringify(section.config ?? {}),
+          section.sortOrder ?? 0,
+        ],
+      );
+    }
+    await homeClient.query('commit');
+  } catch (error) {
+    await homeClient.query('rollback').catch(() => undefined);
+    throw error;
+  } finally {
+    homeClient.release();
+    await homePool.end().catch(() => undefined);
+  }
   for (const section of SECTIONS) {
-    const result = await call('/website/homepage', { method: 'POST', body: section });
-    report(`section ${String(section.type)}`, result.status, result.body);
+    created += 1;
+    console.log(`  ok      section ${String(section.type)}`);
   }
 
   // ---- reviews and sold counts --------------------------------------------
@@ -4162,8 +3953,8 @@ async function main(): Promise<void> {
   console.log(`  ok      ${reviewRows} approved reviews across the catalogue`);
 
   /*
-   * Ratings went in behind the API's back, so the storefront's cached answers
-   * still carry the old ones. `invalidateStorefrontOnWrite` is an `onResponse`
+   * Ratings and the homepage went in behind the API's back, so the storefront's
+   * cached answers still carry the old ones. `invalidateStorefrontOnWrite` is an `onResponse`
    * hook on writes, so re-saving the design — the same values, already accepted
    * once — is what drops the cache. A GET would not.
    */
@@ -4179,7 +3970,7 @@ async function main(): Promise<void> {
     ['products', '/products?pageSize=1'],
     ['categories', '/categories?pageSize=1'],
     ['brands', '/brands?pageSize=1'],
-    ['coupons', '/coupons?pageSize=1'],
+    ['discounts', '/discounts?pageSize=1'],
     ['reviews', '/reviews?pageSize=1'],
   ] as const) {
     const result = await call(path);

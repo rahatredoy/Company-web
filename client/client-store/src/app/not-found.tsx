@@ -2,11 +2,15 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { PackageSearch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = {
-  title: 'Page not found',
-  robots: { index: false, follow: true },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return {
+    title: t('Page not found'),
+    robots: { index: false, follow: true },
+  };
+}
 
 /**
  * The 404.
@@ -15,7 +19,9 @@ export const metadata: Metadata = {
  * lands the visitor somewhere they can shop from rather than on a bare page
  * that looks like the site is broken.
  */
-export default function NotFound() {
+export default async function NotFound() {
+  const t = await getT();
+
   return (
     <div className="container-store grid min-h-[55vh] place-items-center py-16">
       <div className="max-w-md text-center">
@@ -23,18 +29,18 @@ export default function NotFound() {
           <PackageSearch className="size-6" aria-hidden />
         </span>
 
-        <p className="text-sm font-semibold uppercase tracking-wide text-subtle">Error 404</p>
-        <h1 className="mt-2 text-3xl font-semibold">Page not found</h1>
+        <p className="text-sm font-semibold uppercase tracking-wide text-subtle">{t('Error 404')}</p>
+        <h1 className="mt-2 text-3xl font-semibold">{t('Page not found')}</h1>
         <p className="mt-3 text-muted">
-          The page you are looking for does not exist, or it may have moved.
+          {t('The page you are looking for does not exist, or it may have moved.')}
         </p>
 
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <Button asChild size="lg">
-            <Link href="/">Go home</Link>
+            <Link href="/">{t('Go home')}</Link>
           </Button>
           <Button asChild size="lg" variant="outline">
-            <Link href="/shop">Shop products</Link>
+            <Link href="/shop">{t('Shop products')}</Link>
           </Button>
         </div>
       </div>

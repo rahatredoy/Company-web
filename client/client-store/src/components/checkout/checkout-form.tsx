@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Lock } from 'lucide-react';
-import type { PaymentMethodOption, ShippingMethodOption } from '@/types';
+import type { Address, Customer, PaymentMethodOption } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
@@ -15,10 +15,9 @@ import { RadioCard, RadioGroup } from '@/components/ui/radio-group';
 import { CartSummary } from '@/components/cart/cart-summary';
 import { useCart } from '@/lib/commerce/cart';
 import { useHydrated } from '@/lib/hooks/use-hydrated';
-import { formatMoney, pluralise } from '@/lib/utils';
 
 /**
- * One-page checkout: contact, address, delivery, payment, review.
+ * One-page checkout: contact, address, payment, review.
  *
  * The submit sends product ids and quantities — **never prices**. The server
  * re-reads every price and re-applies the coupon from its own rules, and its
@@ -27,18 +26,26 @@ import { formatMoney, pluralise } from '@/lib/utils';
  *
  * The button disables itself for the whole request. A double-tapped Place Order
  * is the most expensive duplicate submission in a shop.
+ *
+ * **The shopper is always signed in by the time this renders** — the page
+ * redirects to `/login?next=/checkout` otherwise — so every box that the
+ * account can answer opens already answered, and a session that expired between
+ * the page loading and Place Order being pressed comes back as a 401 that sends
+ * them to sign in rather than as "we could not place your order".
  */
 
 const COUNTRIES = ['Bangladesh', 'India', 'Pakistan', 'Sri Lanka', 'Nepal'];
 
 export function CheckoutForm({
-  shippingMethods,
   paymentMethods,
   locale,
+  customer,
+  savedAddress,
 }: {
-  shippingMethods: ShippingMethodOption[];
   paymentMethods: PaymentMethodOption[];
   locale: string;
+  customer: Customer;
+  savedAddress: Address | null;
 }) {
   const router = useRouter();
   const { cart, clear } = useCart();
@@ -48,18 +55,19 @@ export function CheckoutForm({
   const [error, setError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
 
-  const [shippingMethodId, setShippingMethodId] = React.useState(shippingMethods[0]?.id ?? '');
   const [paymentProvider, setPaymentProvider] = React.useState(paymentMethods[0]?.provider ?? '');
 
-  const currency = cart.totals.currency;
-  const shippingMethod = shippingMethods.find((method) => method.id === shippingMethodId);
-  const chosenPayment = paymentMethods.find((method) => method.provider === paymentProvider);
+  // A saved address may name a country this list does not, and dropping it
+  // silently would post the order to the wrong one. Offer it instead.
+  const countries = React.useMemo(
+    () =>
+      savedAddress && !COUNTRIES.includes(savedAddress.country)
+        ? [savedAddress.country, ...COUNTRIES]
+        : COUNTRIES,
+    [savedAddress],
+  );
 
-  const estimatedTotal = React.useMemo(() => {
-    const base = Number.parseFloat(cart.totals.total);
-    const delivery = shippingMethod ? Number.parseFloat(shippingMethod.price) : 0;
-    return (base + delivery).toFixed(2);
-  }, [cart.totals.total, shippingMethod]);
+  const chosenPayment = paymentMethods.find((method) => method.provider === paymentProvider);
 
   if (hydrated && cart.lines.length === 0) {
     return (
@@ -103,6 +111,14 @@ export function CheckoutForm({
         quantity: line.quantity,
         measure: line.measure,
       })),
+      /*
+       * The saved address this form opened filled in from, if there was one.
+       * It is what turns a correction made here into an edit of that address
+       * rather than a second copy of it beside the first — see
+       * `rememberAddress` in the Commerce API. A first order sends null, and
+       * the API writes the address as new.
+       */
+      shippingAddressId: savedAddress?.id ?? null,
       shippingAddress: {
         fullName: value('fullName'),
         phone: value('phone'),
@@ -113,7 +129,6 @@ export function CheckoutForm({
         postalCode: value('postalCode') || null,
         country: value('country'),
       },
-      shippingMethodId,
       paymentProvider,
       couponCode: cart.coupon?.code ?? null,
       notes: value('notes') || null,
@@ -129,6 +144,13 @@ export function CheckoutForm({
       const body = (await response.json().catch(() => null)) as
         | { data?: { orderNumber: string; paymentRedirectUrl: string | null }; error?: string; details?: Record<string, string> }
         | null;
+
+      if (response.status === 401) {
+        // The session went while the form was open. The basket is in
+        // `localStorage`, so signing in returns them to a full checkout.
+        router.push('/login?next=/checkout');
+        return;
+      }
 
       if (!response.ok || !body?.data) {
         setError(body?.error ?? 'We could not place your order. Please try again.');
@@ -159,25 +181,71 @@ export function CheckoutForm({
         <section>
           <h2 className="text-lg font-semibold">Contact</h2>
           <p className="mt-1 text-sm text-muted">
-            We will send your order confirmation and tracking here.{' '}
-            <Link href="/login?next=/checkout" className="font-medium text-primary hover:underline">
-              Sign in
-            </Link>{' '}
-            to use your saved details.
+            Signed in as{' '}
+            <span className="font-medium text-foreground">
+              {customer.email ?? customer.phone ?? 'your account'}
+            </span>
+            .{' '}
+            {/*
+              An account created from a phone number has no address to prefill,
+              so the box below is empty and this is the first time anyone has
+              asked for one. Saying what it is *for* is what makes that a
+              reasonable thing to ask at a till.
+            */}
+            {customer.email
+              ? 'We will send your order confirmation and updates here — change it below if you would rather they went somewhere else.'
+              : 'We need an email address to send your order confirmation and updates to.'}{' '}
+            <Link href="/account" className="font-medium text-primary hover:underline">
+              Manage your details
+            </Link>
+            .
           </p>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <Field name="email" label="Email" required error={fieldErrors.email}>
-              {(props) => <Input {...props} type="email" autoComplete="email" placeholder="you@example.com" />}
+              {(props) => (
+                <Input
+                  {...props}
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  defaultValue={customer.email ?? ''}
+                />
+              )}
             </Field>
             <Field name="phone" label="Phone" required error={fieldErrors.phone}>
-              {(props) => <Input {...props} type="tel" autoComplete="tel" placeholder="+880 1700 000000" />}
+              {(props) => (
+                <Input
+                  {...props}
+                  type="tel"
+                  autoComplete="tel"
+                  placeholder="+880 1700 000000"
+                  defaultValue={savedAddress?.phone ?? customer.phone ?? ''}
+                />
+              )}
             </Field>
           </div>
         </section>
 
         <section>
           <h2 className="text-lg font-semibold">Delivery address</h2>
+          <p className="mt-1 text-sm text-muted">
+            {savedAddress ? (
+              <>
+                Filled in from your saved address — anything you change here is saved back to it,
+                so your next order opens with the address you actually used. See your{' '}
+                <Link
+                  href="/account/addresses"
+                  className="font-medium text-primary hover:underline"
+                >
+                  address book
+                </Link>
+                .
+              </>
+            ) : (
+              'We will save this address to your account, so you only have to type it once.'
+            )}
+          </p>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <Field
@@ -187,7 +255,13 @@ export function CheckoutForm({
               className="sm:col-span-2"
               error={fieldErrors['shippingAddress.fullName']}
             >
-              {(props) => <Input {...props} autoComplete="name" />}
+              {(props) => (
+                <Input
+                  {...props}
+                  autoComplete="name"
+                  defaultValue={savedAddress?.fullName ?? customer.fullName}
+                />
+              )}
             </Field>
 
             <Field
@@ -197,7 +271,14 @@ export function CheckoutForm({
               className="sm:col-span-2"
               error={fieldErrors['shippingAddress.addressLine1']}
             >
-              {(props) => <Input {...props} autoComplete="address-line1" placeholder="House, road, area" />}
+              {(props) => (
+                <Input
+                  {...props}
+                  autoComplete="address-line1"
+                  placeholder="House, road, area"
+                  defaultValue={savedAddress?.addressLine1 ?? ''}
+                />
+              )}
             </Field>
 
             <Field
@@ -206,30 +287,47 @@ export function CheckoutForm({
               hint="Optional"
               className="sm:col-span-2"
             >
-              {(props) => <Input {...props} autoComplete="address-line2" />}
+              {(props) => (
+                <Input
+                  {...props}
+                  autoComplete="address-line2"
+                  defaultValue={savedAddress?.addressLine2 ?? ''}
+                />
+              )}
             </Field>
 
             <Field name="city" label="City" required error={fieldErrors['shippingAddress.city']}>
-              {(props) => <Input {...props} autoComplete="address-level2" />}
+              {(props) => (
+                <Input {...props} autoComplete="address-level2" defaultValue={savedAddress?.city ?? ''} />
+              )}
             </Field>
 
             <Field name="state" label="District / State" hint="Optional">
-              {(props) => <Input {...props} autoComplete="address-level1" />}
+              {(props) => (
+                <Input {...props} autoComplete="address-level1" defaultValue={savedAddress?.state ?? ''} />
+              )}
             </Field>
 
             <Field name="postalCode" label="Postal code" hint="Optional">
-              {(props) => <Input {...props} autoComplete="postal-code" inputMode="numeric" />}
+              {(props) => (
+                <Input
+                  {...props}
+                  autoComplete="postal-code"
+                  inputMode="numeric"
+                  defaultValue={savedAddress?.postalCode ?? ''}
+                />
+              )}
             </Field>
 
             <Field name="country" label="Country" required>
               {(props) => (
                 <select
                   {...props}
-                  defaultValue={COUNTRIES[0]}
+                  defaultValue={savedAddress?.country ?? countries[0]}
                   autoComplete="country-name"
                   className="h-11 w-full rounded-(--radius-input) border border-border-strong bg-surface px-3.5 text-sm outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/25"
                 >
-                  {COUNTRIES.map((country) => (
+                  {countries.map((country) => (
                     <option key={country} value={country}>
                       {country}
                     </option>
@@ -238,40 +336,6 @@ export function CheckoutForm({
               )}
             </Field>
           </div>
-        </section>
-
-        <section>
-          <h2 className="text-lg font-semibold">Delivery method</h2>
-
-          <RadioGroup
-            value={shippingMethodId}
-            onValueChange={setShippingMethodId}
-            className="mt-4"
-            aria-label="Delivery method"
-          >
-            {shippingMethods.map((method) => (
-              <RadioCard
-                key={method.id}
-                id={`shipping-${method.id}`}
-                value={method.id}
-                title={method.name}
-                description={
-                  <>
-                    {method.description}
-                    {method.estimatedDaysMin !== null ? (
-                      <>
-                        {' · '}
-                        {method.estimatedDaysMin === method.estimatedDaysMax
-                          ? `${method.estimatedDaysMin} ${pluralise(method.estimatedDaysMin, 'day')}`
-                          : `${method.estimatedDaysMin}–${method.estimatedDaysMax} days`}
-                      </>
-                    ) : null}
-                  </>
-                }
-                trailing={formatMoney(method.price, currency, locale)}
-              />
-            ))}
-          </RadioGroup>
         </section>
 
         <section>
@@ -316,20 +380,6 @@ export function CheckoutForm({
           showCoupon={false}
           action={
             <div className="space-y-3">
-              <div className="flex items-baseline justify-between text-sm">
-                <span className="text-muted">Delivery</span>
-                <span className="tabular-nums">
-                  {shippingMethod ? formatMoney(shippingMethod.price, currency, locale) : '—'}
-                </span>
-              </div>
-
-              <div className="flex items-baseline justify-between border-t border-border pt-3">
-                <span className="font-semibold">Estimated total</span>
-                <span className="text-xl font-bold tabular-nums">
-                  {formatMoney(estimatedTotal, currency, locale)}
-                </span>
-              </div>
-
               {error ? (
                 <p role="alert" className="text-sm font-medium text-error">
                   {error}

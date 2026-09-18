@@ -56,6 +56,33 @@ interface Jar {
   cookies: Map<string, string>;
 }
 
+/** One base64url JWT segment as an object, or null if it is not one. */
+function decodeSegment(segment: string | undefined): any {
+  if (!segment) return null;
+  try {
+    return JSON.parse(Buffer.from(segment, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clears this store's session records.
+ *
+ * There is no table to truncate any more — a session is a Redis record keyed
+ * under the tenant — and the scoping matters here rather than being tidiness:
+ * an unscoped wipe would sign every other store on the shared Redis out
+ * mid-request.
+ */
+async function clearSessionRecords(): Promise<void> {
+  const { fetchTenantBySlug } = await import('../src/lib/company-client');
+  const tenant = await fetchTenantBySlug(SLUG);
+  if (!tenant) return;
+
+  const keys = await redis.keys(`t:${tenant.tenantRef}:session*`);
+  if (keys.length) await redis.del(...keys);
+}
+
 function newJar(): Jar {
   return { cookies: new Map() };
 }
@@ -201,7 +228,7 @@ async function main(): Promise<void> {
       [OWNER, await hashPassword(PASSWORD)],
     );
     await pool.query('delete from admin_password_reset_tokens');
-    await pool.query('delete from admin_sessions');
+    await clearSessionRecords();
 
     const before = await pool.query(
       `select role, role_key, account_status, password_hash from store_admins where lower(email) = $1`,
@@ -302,11 +329,60 @@ async function main(): Promise<void> {
     const forgedResult = await call('/auth/permissions', { jar: forged });
     check('a forged store cookie is refused', forgedResult.body?.code === 'SESSION_EXPIRED', forgedResult.body);
 
-    const stored = await pool.query(
-      `select token_hash, tenant_ref, mfa_verified from admin_sessions where revoked_at is null order by created_at desc limit 1`,
+    /*
+     * The cookie is a JWT now, so what is worth checking has changed. It used to
+     * be "the token is stored only as a hash"; the stronger fact is that the
+     * token is **not stored at all** — the record its `jti` names holds no copy
+     * of it, so a dump of Redis yields nothing that can be replayed.
+     */
+    const raw = ownerJar.cookies.get('store_admin_session') ?? '';
+    const parts = raw.split('.');
+    check('session cookie is a JWT', parts.length === 3, { segments: parts.length });
+
+    const header = decodeSegment(parts[0]);
+    check(
+      'signed HS256, and the algorithm is not up for negotiation',
+      header?.alg === 'HS256' && header?.typ === 'JWT',
+      header,
     );
-    check('session token is stored only as a hash', /^[0-9a-f]{64}$/.test(stored.rows[0]?.token_hash ?? ''), stored.rows[0]);
-    check('session is pinned to the tenant', /^TNT-/.test(stored.rows[0]?.tenant_ref ?? ''), stored.rows[0]);
+
+    const claims = decodeSegment(parts[1]);
+    check('token is issued by this API for the store-admin audience', 
+      claims?.iss === 'client-api' && claims?.aud === 'commerce-admin', claims);
+    check('session is pinned to the tenant', /^TNT-/.test(String(claims?.tnt ?? '')), claims);
+    check('token carries no secret of its own', typeof claims?.jti === 'string' && !raw.includes(PASSWORD), null);
+
+    const record = await redis.get(`t:${claims?.tnt}:session:admin:${claims?.jti}`);
+    check('the record behind it is scoped to this tenant', record !== null, { found: record !== null });
+    check(
+      'and holds no copy of the token',
+      record !== null && !record.includes(raw) && !record.includes(parts[2] ?? ' '),
+      null,
+    );
+
+    /*
+     * The point of pairing a JWT with a record: a JWT cannot be recalled, so
+     * without this a sign-out would be advisory until the token expired. Done on
+     * a jar of its own — revoking `ownerJar` would sign the rest of this script
+     * out.
+     */
+    const revocable = newJar();
+    await call('/auth/login', {
+      method: 'POST',
+      jar: revocable,
+      body: JSON.stringify({ email: OWNER, password: PASSWORD }),
+    });
+    const live = await call('/auth/permissions', { jar: revocable });
+    check('a second sign-in works', live.status === 200, live.body);
+
+    const revoked = decodeSegment((revocable.cookies.get('store_admin_session') ?? '').split('.')[1]);
+    await redis.del(`t:${revoked?.tnt}:session:admin:${revoked?.jti}`);
+    const dead = await call('/auth/permissions', { jar: revocable });
+    check(
+      'dropping the record revokes an unexpired token at once',
+      dead.body?.code === 'SESSION_EXPIRED',
+      dead.body,
+    );
   }
 
   // ---------------------------------------------------------------------- 5 --

@@ -3,6 +3,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { TenantExecutor } from '../../db/tenant-manager';
 import { ok, parseQuery } from '../../lib/http';
+import { languageOf, translate } from '../../lib/i18n/index';
+import type { Language } from '../../lib/languages';
+import { loadStoreCurrency } from '../../lib/store-currency';
 import { storeOf } from '../../plugins/tenant';
 
 /**
@@ -42,8 +45,8 @@ const BUCKET = {
 /**
  * Orders that are neither cancelled nor failed — the ones that represent money.
  *
- * The same filter `/reports` uses, and for the same reason: a cancelled order
- * was never revenue, and counting it would make a bad week look like a good one.
+ * A cancelled order was never revenue, and counting it would make a bad week
+ * look like a good one.
  */
 const COUNTED = sql`o.status not in ('cancelled', 'failed')`;
 
@@ -54,6 +57,16 @@ const COUNTED = sql`o.status not in ('cancelled', 'failed')`;
  * building, so keeping it in the queue would mean the figure only ever grows.
  */
 const AWAITING = sql`o.status in ('new', 'pending', 'confirmed', 'processing', 'packed')`;
+
+/**
+ * An order taken in the currency the store trades in now.
+ *
+ * Applied to money and never to counts. `orders.currency` is snapshotted at
+ * checkout, so a store that has switched currency holds orders in both, and a
+ * sum across them printed with one symbol is not a figure — while an order
+ * count across them is still exactly how many orders there were.
+ */
+const inCurrency = (currency: string) => sql`o.currency = ${currency}`;
 
 /**
  * The thumbnail for a product, resolved the way the catalogue list resolves it —
@@ -102,6 +115,15 @@ const denied = (what: string): Section<never> => ({
   message: `You do not have access to ${what}.`,
 });
 
+/**
+ * A refused or broken section's message in the store's language. It travels
+ * inside a 200, so the error handler — which translates every error — never
+ * sees it. The data of a section that loaded is passed through untouched.
+ */
+function inLanguage<T>(result: Section<T>, language: Language): Section<T> {
+  return result.ok ? result : { ...result, message: translate(language, result.message) };
+}
+
 interface BucketRow {
   bucket: string;
   orders: number;
@@ -120,7 +142,7 @@ interface BucketRow {
  */
 async function bucketedSeries(
   db: TenantExecutor,
-  args: { from: Date; to: Date; tz: string; unit: string; step: string },
+  args: { from: Date; to: Date; tz: string; unit: string; step: string; currency: string },
 ): Promise<BucketRow[]> {
   const result = await db.execute<{
     bucket: string;
@@ -143,7 +165,7 @@ async function bucketedSeries(
     select
       to_char(s.local_start, 'YYYY-MM-DD') as bucket,
       count(o.id)::int as orders,
-      coalesce(sum(o.grand_total), 0)::numeric(14,2)::text as revenue,
+      coalesce(sum(o.grand_total) filter (where ${inCurrency(args.currency)}), 0)::numeric(14,2)::text as revenue,
       count(distinct o.customer_id)::int as customers,
       count(o.id) filter (where ${AWAITING})::int as awaiting
     from slots s
@@ -203,7 +225,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
        * and the panel's own error state is a better answer than eight identical
        * failures.
        */
-      const boundsResult = await store.db.execute<{
+      const boundsQuery = store.db.execute<{
         tz: string;
         starts_at: Date;
         ends_at: Date;
@@ -221,6 +243,13 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         from s
       `);
 
+      /*
+       * Read through the same cache as the session, so the currency every total
+       * below is filtered by is the one the panel prints beside it — two readers
+       * with two caches could disagree for a few seconds after a switch.
+       */
+      const [boundsResult, currency] = await Promise.all([boundsQuery, loadStoreCurrency(store)]);
+
       const bounds = boundsResult.rows?.[0];
       const tz = bounds?.tz ?? 'UTC';
       const from = new Date(bounds!.starts_at);
@@ -237,7 +266,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
        * rendering without its trend lines, so a failure here empties the sparks
        * rather than failing the metrics section.
        */
-      const daily = await bucketedSeries(store.db, { from, to, tz, unit: 'day', step: '1 day' }).catch(
+      const daily = await bucketedSeries(store.db, { from, to, tz, unit: 'day', step: '1 day', currency }).catch(
         (error: unknown) => {
           app.log.error({ err: error, section: 'daily' }, 'dashboard section failed');
           return null;
@@ -255,6 +284,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
           const [totals, customers, catalogue] = await Promise.all([
             store.db.execute<{
               orders: number;
+              priced_orders: number;
               revenue: string;
               discounts: string;
               refunded: string;
@@ -265,12 +295,13 @@ export default async function dashboardRoutes(app: FastifyInstance) {
             }>(sql`
               select
                 count(*) filter (where o.placed_at >= ${from})::int as orders,
-                coalesce(sum(o.grand_total) filter (where o.placed_at >= ${from}), 0)::numeric(14,2)::text as revenue,
-                coalesce(sum(o.discount_total) filter (where o.placed_at >= ${from}), 0)::numeric(14,2)::text as discounts,
-                coalesce(sum(o.refunded_total) filter (where o.placed_at >= ${from}), 0)::numeric(14,2)::text as refunded,
+                count(*) filter (where o.placed_at >= ${from} and ${inCurrency(currency)})::int as priced_orders,
+                coalesce(sum(o.grand_total) filter (where o.placed_at >= ${from} and ${inCurrency(currency)}), 0)::numeric(14,2)::text as revenue,
+                coalesce(sum(o.discount_total) filter (where o.placed_at >= ${from} and ${inCurrency(currency)}), 0)::numeric(14,2)::text as discounts,
+                coalesce(sum(o.refunded_total) filter (where o.placed_at >= ${from} and ${inCurrency(currency)}), 0)::numeric(14,2)::text as refunded,
                 count(*) filter (where o.placed_at >= ${from} and ${AWAITING})::int as awaiting,
                 count(*) filter (where o.placed_at < ${from})::int as previous_orders,
-                coalesce(sum(o.grand_total) filter (where o.placed_at < ${from}), 0)::numeric(14,2)::text as previous_revenue,
+                coalesce(sum(o.grand_total) filter (where o.placed_at < ${from} and ${inCurrency(currency)}), 0)::numeric(14,2)::text as previous_revenue,
                 count(*) filter (where o.placed_at < ${from} and ${AWAITING})::int as previous_awaiting
               from orders o
               where o.placed_at >= ${previousFrom} and o.placed_at < ${to} and ${COUNTED}
@@ -298,6 +329,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
 
           const revenue = Number(row?.revenue ?? 0);
           const orderCount = Number(row?.orders ?? 0);
+          const pricedOrders = Number(row?.priced_orders ?? 0);
 
           return {
             revenue: delta(
@@ -325,7 +357,9 @@ export default async function dashboardRoutes(app: FastifyInstance) {
               revenue: row?.revenue ?? '0',
               discounts: row?.discounts ?? '0',
               refunded: row?.refunded ?? '0',
-              averageOrderValue: orderCount > 0 ? (revenue / orderCount).toFixed(2) : '0.00',
+              // Divided by the orders that revenue was summed over, not by every
+              // order: an order in another currency added nothing to the top line.
+              averageOrderValue: pricedOrders > 0 ? (revenue / pricedOrders).toFixed(2) : '0.00',
               activeProducts: Number(catalogueRow?.active ?? 0),
               totalProducts: Number(catalogueRow?.total ?? 0),
             },
@@ -335,8 +369,8 @@ export default async function dashboardRoutes(app: FastifyInstance) {
         section(app, 'series', async () => {
           const rows =
             query.granularity === 'day'
-              ? (daily ?? (await bucketedSeries(store.db, { from, to, tz, unit: 'day', step: '1 day' })))
-              : await bucketedSeries(store.db, { from, to, tz, ...BUCKET[query.granularity] });
+              ? (daily ?? (await bucketedSeries(store.db, { from, to, tz, unit: 'day', step: '1 day', currency })))
+              : await bucketedSeries(store.db, { from, to, tz, currency, ...BUCKET[query.granularity] });
 
           return {
             granularity: query.granularity,
@@ -403,7 +437,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
                   i.product_id,
                   max(i.product_name) as name,
                   sum(i.quantity)::int as units,
-                  coalesce(sum(i.line_total), 0)::numeric(14,2)::text as revenue,
+                  coalesce(sum(i.line_total) filter (where ${inCurrency(currency)}), 0)::numeric(14,2)::text as revenue,
                   coalesce(${productImage(sql`i.product_id`)}, max(i.image_url)) as image_url
                 from order_items i
                 join orders o on o.id = i.order_id
@@ -554,6 +588,8 @@ export default async function dashboardRoutes(app: FastifyInstance) {
           : denied('reviews'),
       ]);
 
+      const language = await languageOf(request);
+
       return ok(reply, {
         range: {
           days: query.days,
@@ -565,8 +601,16 @@ export default async function dashboardRoutes(app: FastifyInstance) {
           previousFrom: previousFrom.toISOString(),
           previousTo: from.toISOString(),
         },
-        currency: store.currency,
-        sections: { metrics, series, recentOrders, topProducts, lowStock, reviews },
+        /** What every total above is in — and the only currency they add up. */
+        currency,
+        sections: {
+          metrics: inLanguage(metrics, language),
+          series: inLanguage(series, language),
+          recentOrders: inLanguage(recentOrders, language),
+          topProducts: inLanguage(topProducts, language),
+          lowStock: inLanguage(lowStock, language),
+          reviews: inLanguage(reviews, language),
+        },
       });
     },
   );

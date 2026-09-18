@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Archive, ExternalLink, Minus, Package, Pencil, Plus, RotateCcw } from 'lucide-react';
+import { Archive, Minus, Package, Pencil, Plus, RotateCcw } from 'lucide-react';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/sheet';
 import { toast } from '@/components/ui/toaster';
 import { api, ApiError, errorMessage } from '@/lib/api';
-import { formatNumber } from '@/lib/format';
+import { useT, type MessageKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { InventoryBucket, ProductInsights, ProductStatus, WarehouseRow } from '@/lib/types';
 import { SELECT_CLASS } from './category-tree';
@@ -39,11 +39,20 @@ import { SELECT_CLASS } from './category-tree';
 
 type Mode = 'add' | 'adjust';
 
-const BUCKETS: { value: InventoryBucket; label: string; hint: string }[] = [
+const BUCKETS: { value: InventoryBucket; label: MessageKey; hint: MessageKey }[] = [
   { value: 'available', label: 'Available', hint: 'Sellable right now' },
   { value: 'damaged', label: 'Damaged', hint: 'Held back, never sold' },
   { value: 'incoming', label: 'Incoming', hint: 'On order, not yet received' },
 ];
+
+/** A bucket as the toast after a move names it — lower case, mid-sentence. */
+const BUCKET_WORD: Record<InventoryBucket, MessageKey> = {
+  available: 'available',
+  reserved: 'reserved',
+  return_pending: 'return pending',
+  damaged: 'damaged',
+  incoming: 'incoming',
+};
 
 /** Common receiving amounts, so the usual case is one tap. */
 const QUICK = [1, 5, 10, 25, 50];
@@ -52,53 +61,59 @@ export function ProductActions({
   product,
   variants,
   warehouses,
-  storefrontUrl,
   canManage,
   canAdjust,
+  openWith = null,
 }: {
   product: { id: string; slug: string; status: ProductStatus };
   variants: ProductInsights['variants'];
   warehouses: WarehouseRow[];
-  /** Null when the panel is reached on a custom domain, which carries no slug. */
-  storefrontUrl: string | null;
   canManage: boolean;
   canAdjust: boolean;
+  /**
+   * `?stock=add|adjust` — the sheet already open, so "Adjust stock" in the
+   * products list lands on the form rather than on a screen with a button for it.
+   */
+  openWith?: Mode | null;
 }) {
-  const [mode, setMode] = React.useState<Mode | null>(null);
+  const t = useT();
+  const [mode, setMode] = React.useState<Mode | null>(canAdjust ? openWith : null);
   const archived = product.status === 'inactive';
+
+  // Drop `?stock=` on close, or a reload would open the sheet again.
+  const close = () => {
+    setMode(null);
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('stock')) {
+      url.searchParams.delete('stock');
+      window.history.replaceState(null, '', url);
+    }
+  };
 
   return (
     <>
       <Button asChild size="sm" variant="outline">
         <Link href={`/products/${product.id}?tab=details`}>
-          <Pencil /> Edit product
+          <Pencil /> {t('Edit product')}
         </Link>
       </Button>
 
       {canAdjust ? (
         <>
           <Button size="sm" onClick={() => setMode('add')}>
-            <Plus /> Add stock
+            <Plus /> {t('Add stock')}
           </Button>
           <Button size="sm" variant="outline" onClick={() => setMode('adjust')}>
-            <Package /> Adjust stock
+            <Package /> {t('Adjust stock')}
           </Button>
         </>
-      ) : null}
-
-      {storefrontUrl ? (
-        <Button asChild size="sm" variant="outline">
-          <a href={`${storefrontUrl}/product/${product.slug}`} target="_blank" rel="noreferrer">
-            <ExternalLink /> View in store
-          </a>
-        </Button>
       ) : null}
 
       {canManage ? <ArchiveButton productId={product.id} archived={archived} /> : null}
 
       <StockPanel
         mode={mode}
-        onClose={() => setMode(null)}
+        onClose={close}
         variants={variants}
         warehouses={warehouses}
       />
@@ -117,13 +132,14 @@ export function ProductActions({
  */
 function ArchiveButton({ productId, archived }: { productId: string; archived: boolean }) {
   const router = useRouter();
+  const t = useT();
   const [busy, setBusy] = React.useState(false);
 
   async function run() {
     setBusy(true);
     try {
       await api.patch(`/api/v1/admin/products/${productId}`, { status: archived ? 'draft' : 'inactive' });
-      toast.success(archived ? 'Product restored as a draft.' : 'Product archived and taken off the shop.');
+      toast.success(archived ? t('Product restored as a draft.') : t('Product archived and taken off the shop.'));
       router.refresh();
     } catch (caught) {
       toast.error(errorMessage(caught));
@@ -136,11 +152,11 @@ function ArchiveButton({ productId, archived }: { productId: string; archived: b
     <Button size="sm" variant={archived ? 'outline' : 'ghost'} onClick={run} loading={busy}>
       {archived ? (
         <>
-          <RotateCcw /> Restore
+          <RotateCcw /> {t('Restore')}
         </>
       ) : (
         <>
-          <Archive /> Archive
+          <Archive /> {t('Archive')}
         </>
       )}
     </Button>
@@ -175,6 +191,7 @@ function StockPanel({
   warehouses: WarehouseRow[];
 }) {
   const router = useRouter();
+  const t = useT();
   const open = mode !== null;
   const adding = mode === 'add';
 
@@ -262,8 +279,12 @@ function StockPanel({
 
       toast.success(
         delta === 0
-          ? 'Warning line saved.'
-          : `${variant?.sku ?? 'Stock'}: ${delta > 0 ? '+' : ''}${formatNumber(delta)} ${(adding ? 'available' : bucket).replace('_', ' ')}.`,
+          ? t('Warning line saved.')
+          : t('{sku}: {change} {bucket}.', {
+              sku: variant?.sku ?? t('Stock'),
+              change: `${delta > 0 ? '+' : ''}${t.number(delta)}`,
+              bucket: t(BUCKET_WORD[adding ? 'available' : bucket]),
+            }),
       );
       onClose();
       router.refresh();
@@ -284,11 +305,11 @@ function StockPanel({
       <SheetContent>
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
           <SheetHeader>
-            <SheetTitle>{adding ? 'Add stock' : 'Adjust stock'}</SheetTitle>
+            <SheetTitle>{adding ? t('Add stock') : t('Adjust stock')}</SheetTitle>
             <SheetDescription>
               {adding
-                ? 'A delivery arrived. The amount is added to what is already on the shelf.'
-                : 'A correction. Positive adds, negative removes, and the count can never go below zero.'}
+                ? t('A delivery arrived. The amount is added to what is already on the shelf.')
+                : t('A correction. Positive adds, negative removes, and the count can never go below zero.')}
             </SheetDescription>
           </SheetHeader>
 
@@ -297,13 +318,14 @@ function StockPanel({
 
             {usable.length === 0 ? (
               <Alert variant="warning">
-                This store has no active warehouse, so there is nowhere for stock to land. Add one under
-                Inventory first.
+                {t(
+                  'This store has no active warehouse, so there is nowhere for stock to land. Add one under Settings first.',
+                )}
               </Alert>
             ) : null}
 
             {variants.length > 1 ? (
-              <Field label="Which variant" htmlFor="stock-variant">
+              <Field label={t('Which variant')} htmlFor="stock-variant">
                 <select
                   id="stock-variant"
                   value={variantId}
@@ -312,7 +334,8 @@ function StockPanel({
                 >
                   {variants.map((row) => (
                     <option key={row.id} value={row.id}>
-                      {[row.title, row.sku].filter(Boolean).join(' · ')} — {formatNumber(row.available)} available
+                      {[row.title, row.sku].filter(Boolean).join(' · ')} —{' '}
+                      {t('{count} available', { count: row.available })}
                     </option>
                   ))}
                 </select>
@@ -320,7 +343,7 @@ function StockPanel({
             ) : null}
 
             {usable.length > 1 ? (
-              <Field label="Warehouse" htmlFor="stock-warehouse">
+              <Field label={t('Warehouse')} htmlFor="stock-warehouse">
                 <select
                   id="stock-warehouse"
                   value={warehouseId}
@@ -329,8 +352,7 @@ function StockPanel({
                 >
                   {usable.map((row) => (
                     <option key={row.id} value={row.id}>
-                      {row.name}
-                      {row.isDefault ? ' (default)' : ''}
+                      {row.isDefault ? t('{name} (default)', { name: row.name }) : row.name}
                     </option>
                   ))}
                 </select>
@@ -339,17 +361,17 @@ function StockPanel({
 
             {variant ? (
               <div className="grid grid-cols-3 gap-2 rounded-lg border border-border p-3 text-sm">
-                <Count label="Available" value={variant.available} strong />
-                <Count label="Reserved" value={variant.reserved} />
-                <Count label="Incoming" value={variant.incoming} />
-                <Count label="Damaged" value={variant.damaged} />
-                <Count label="Returns" value={variant.returnPending} />
-                <Count label="Warn at" value={variant.lowStockThreshold} />
+                <Count label={t('Available')} value={variant.available} strong />
+                <Count label={t('Reserved')} value={variant.reserved} />
+                <Count label={t('Incoming')} value={variant.incoming} />
+                <Count label={t('Damaged')} value={variant.damaged} />
+                <Count label={t('Returns')} value={variant.returnPending} />
+                <Count label={t('Warn at')} value={variant.lowStockThreshold} />
               </div>
             ) : null}
 
             {adding ? null : (
-              <Field label="Which count" htmlFor="stock-bucket">
+              <Field label={t('Which count')} htmlFor="stock-bucket">
                 <select
                   id="stock-bucket"
                   value={bucket}
@@ -358,7 +380,7 @@ function StockPanel({
                 >
                   {BUCKETS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {option.label} — {option.hint}
+                      {t(option.label)} — {t(option.hint)}
                     </option>
                   ))}
                 </select>
@@ -366,9 +388,9 @@ function StockPanel({
             )}
 
             <Field
-              label={adding ? 'How many arrived' : 'Change by'}
+              label={adding ? t('How many arrived') : t('Change by')}
               htmlFor="stock-amount"
-              hint={adding ? undefined : 'Positive adds, negative removes. 12 received, or −3 broken.'}
+              hint={adding ? undefined : t('Positive adds, negative removes. 12 received, or −3 broken.')}
               error={fieldErrors.delta}
             >
               <div className="space-y-2">
@@ -379,7 +401,7 @@ function StockPanel({
                       variant="outline"
                       size="icon"
                       onClick={() => setAmount(String(typed - 1))}
-                      aria-label="One less"
+                      aria-label={t('One less')}
                     >
                       <Minus />
                     </Button>
@@ -398,7 +420,7 @@ function StockPanel({
                     variant="outline"
                     size="icon"
                     onClick={() => setAmount(String(typed + 1))}
-                    aria-label="One more"
+                    aria-label={t('One more')}
                   >
                     <Plus />
                   </Button>
@@ -413,12 +435,12 @@ function StockPanel({
                       size="sm"
                       onClick={() => setAmount(String(typed + step))}
                     >
-                      {step > 0 ? `+${step}` : step}
+                      {step > 0 ? `+${t.number(step)}` : t.number(step)}
                     </Button>
                   ))}
                   {typed !== 0 ? (
                     <Button type="button" variant="ghost" size="sm" onClick={() => setAmount('0')}>
-                      Clear
+                      {t('Clear')}
                     </Button>
                   ) : null}
                 </div>
@@ -433,23 +455,26 @@ function StockPanel({
                 )}
               >
                 <span className="text-muted-foreground">
-                  {(adding ? 'Available' : (BUCKETS.find((o) => o.value === bucket)?.label ?? bucket))} after this
+                  {t('{bucket} after this', {
+                    bucket: adding ? t('Available') : t(BUCKETS.find((o) => o.value === bucket)?.label ?? BUCKET_WORD[bucket]),
+                  })}
                 </span>
-                <span className="font-semibold tabular-nums">{formatNumber(after)}</span>
+                <span className="font-semibold tabular-nums">{t.number(after)}</span>
               </div>
             ) : null}
 
             {after < 0 ? (
               <Alert variant="danger">
-                There is not that much to remove — the database refuses a count below zero, so this will be
-                rejected rather than clamped.
+                {t(
+                  'There is not that much to remove — the database refuses a count below zero, so this will be rejected rather than clamped.',
+                )}
               </Alert>
             ) : null}
 
             <Field
-              label="Why"
+              label={t('Why')}
               htmlFor="stock-reason"
-              hint="Kept in the stock ledger, next to who did it."
+              hint={t('Kept in the stock ledger, next to who did it.')}
               error={fieldErrors.reason}
             >
               <Input
@@ -457,14 +482,14 @@ function StockPanel({
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
                 maxLength={300}
-                placeholder={adding ? 'Delivery, purchase order…' : 'Stock count, breakage…'}
+                placeholder={adding ? t('Delivery, purchase order…') : t('Stock count, breakage…')}
               />
             </Field>
 
             <Field
-              label="Low-stock warning at"
+              label={t('Low-stock warning at')}
               htmlFor="stock-threshold"
-              hint="At or below this the product is flagged low. Leave blank to keep it as it is."
+              hint={t('At or below this the product is flagged low. Leave blank to keep it as it is.')}
               error={fieldErrors.lowStockThreshold}
             >
               <Input
@@ -482,10 +507,10 @@ function StockPanel({
 
           <SheetFooter>
             <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
-              Cancel
+              {t('Cancel')}
             </Button>
             <Button type="submit" loading={busy} disabled={nothingToDo || !variantId || !warehouseId}>
-              {delta === 0 ? 'Save warning line' : adding ? 'Add to stock' : 'Apply change'}
+              {delta === 0 ? t('Save warning line') : adding ? t('Add to stock') : t('Apply change')}
             </Button>
           </SheetFooter>
         </form>
@@ -495,10 +520,11 @@ function StockPanel({
 }
 
 function Count({ label, value, strong }: { label: string; value: number; strong?: boolean }) {
+  const t = useT();
   return (
     <div>
-      <p className="text-[11px] tracking-wide text-muted-foreground uppercase">{label}</p>
-      <p className={cn('tabular-nums', strong ? 'text-base font-semibold' : 'text-sm')}>{formatNumber(value)}</p>
+      <p className="text-[10.5px] tracking-wide text-muted-foreground uppercase">{label}</p>
+      <p className={cn('tabular-nums', strong ? 'text-base font-semibold' : 'text-sm')}>{t.number(value)}</p>
     </div>
   );
 }

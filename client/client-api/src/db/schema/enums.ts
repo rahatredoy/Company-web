@@ -108,15 +108,6 @@ export const paymentStatus = pgEnum('order_payment_status', [
   'cod_pending',
 ]);
 
-export const shippingStatus = pgEnum('shipping_status', [
-  'not_shipped',
-  'packed',
-  'shipped',
-  'out_for_delivery',
-  'delivered',
-  'returned',
-]);
-
 export const addressType = pgEnum('address_type', ['shipping', 'billing']);
 
 // --- customers ---------------------------------------------------------------------------
@@ -148,21 +139,40 @@ export const refundStatus = pgEnum('refund_status', [
 ]);
 
 // --- marketing --------------------------------------------------------------------------------
-export const discountType = pgEnum('discount_type', [
-  'percentage',
-  'fixed',
-  'free_shipping',
-  'buy_x_get_y',
+/** How a discount is triggered. See `lib/discounts/rules.ts`. */
+export const discountKind = pgEnum('discount_kind', [
+  'coupon',
+  'automatic',
+  'voucher',
+  'campaign',
+  'bank_offer',
+  'payment_offer',
 ]);
 
-export const discountScope = pgEnum('discount_scope', ['order', 'product', 'category']);
-export const couponStatus = pgEnum('coupon_status', ['active', 'scheduled', 'expired', 'disabled']);
+/** What a discount takes off. */
+export const discountValueType = pgEnum('discount_value_type', [
+  'percentage',
+  'fixed_amount',
+  'buy_x_get_y',
+  'fixed_price',
+  'bundle',
+]);
+
+/**
+ * What the owner set. `scheduled`, `expired` and "limit reached" are not stored:
+ * they are read off the clock and the counter, so a sale ends itself rather than
+ * waiting for a sweep to notice.
+ */
+export const discountStatus = pgEnum('discount_status', ['draft', 'active', 'paused']);
+
+/** Whether a customer was put on a discount by the owner or earned it. */
+export const discountAssignmentSource = pgEnum('discount_assignment_source', ['manual', 'reward']);
+
 export const reviewStatus = pgEnum('review_status', ['pending', 'approved', 'rejected']);
 
 // --- content -------------------------------------------------------------------------------------
 export const navigationLocation = pgEnum('navigation_location', ['header', 'footer']);
 export const navigationTargetType = pgEnum('navigation_target_type', ['page', 'category', 'url']);
-export const subscriberStatus = pgEnum('subscriber_status', ['subscribed', 'unsubscribed']);
 
 // --- notifications ----------------------------------------------------------------------------------
 export const notificationChannel = pgEnum('store_notification_channel', ['email', 'sms', 'whatsapp']);
@@ -175,13 +185,21 @@ export const cartStatus = pgEnum('cart_status', ['active', 'converted', 'abandon
 
 export const customerTokenPurpose = pgEnum('customer_token_purpose', ['password_reset', 'email_verify']);
 
+/**
+ * Sign-in providers a shopper's account can be linked to.
+ *
+ * An enum rather than free text because the value decides which token endpoint
+ * a callback talks to; a provider nobody wrote code for must not be storable.
+ */
+export const customerIdentityProvider = pgEnum('customer_identity_provider', ['google']);
+
 /** The only section types the storefront will render. Anything else is ignored. */
 /**
- * Every block the homepage builder can place.
+ * Every block a homepage can carry.
  *
  * The storefront's `HomepageSectionType` is the authority here — a value it can
- * render but this enum cannot store is a section the owner is simply unable to
- * add, which is how the first seven values ended up describing a fraction of the
+ * render but this enum cannot store is a section nobody is able to add, which
+ * is how the first seven values ended up describing a fraction of the
  * templates' capability. The pairs that look redundant are not: `category_grid`
  * is picture cards and `category_circle` an icon rail, `product_grid` is static
  * and `product_carousel` scrolls. Section order and per-section settings live in
@@ -201,7 +219,6 @@ export const homepageSectionType = pgEnum('homepage_section_type', [
   'lookbook',
   'testimonial',
   'brands',
-  'newsletter',
   'text',
   'collection',
   'social_gallery',

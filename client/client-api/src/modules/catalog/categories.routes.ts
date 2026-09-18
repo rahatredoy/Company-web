@@ -1,4 +1,4 @@
-import { and, count, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, count, eq, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { categories, products } from '../../db/schema/index';
@@ -8,6 +8,7 @@ import { cursorField, listed, noContent, ok, parseBody, parseParams, parseQuery,
 import { keyset } from '../../lib/keyset';
 import { storeOf } from '../../plugins/tenant';
 import { assertParentIsSafe, settleSlug } from './service';
+import { httpsUrlNullable } from '../../lib/secure-url';
 
 const listQuerySchema = z.object({
   ...cursorField,
@@ -23,16 +24,16 @@ const listQuerySchema = z.object({
 });
 
 /**
- * `.url()` on a nullable field would refuse an empty string, and a form that
- * clears an image sends exactly that. Empty becomes null before validation so
- * "remove the picture" is expressible without a separate endpoint.
+ * An https address, or nothing.
+ *
+ * `httpsUrlNullable` carries both halves of that: a form clearing an image sends
+ * `""`, which becomes null before validation so "remove the picture" needs no
+ * second endpoint — and the scheme is checked, because `z.string().url()` is not
+ * a scheme check and accepts `javascript:` (see `lib/secure-url.ts`).
  */
-const imageUrlSchema = z.preprocess(
-  (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
-  z.string().trim().url('Use a full web address.').max(2000).nullable(),
-);
+const imageUrlSchema = httpsUrlNullable();
 
-/** Same reasoning as `imageUrlSchema`, for the free-text fields. */
+/** Empty-means-null, for the free-text fields. */
 const optionalText = (max: number) =>
   z.preprocess(
     (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
@@ -46,18 +47,14 @@ const optionalText = (max: number) =>
  * `.partial()` does not remove them: Zod wraps the existing `ZodDefault` in a
  * `ZodOptional`, so an absent key still comes back carrying the default. A patch
  * built that way turns `{ isFeatured: true }` into a full row of defaults and
- * the `UPDATE` that follows quietly empties the description, the images and the
- * SEO fields. Splitting the shapes is what keeps a partial update partial.
+ * the `UPDATE` that follows quietly empties the image and the SEO fields.
+ * Splitting the shapes is what keeps a partial update partial.
  */
 const fields = {
   name: z.string().trim().min(1, 'Give the category a name.').max(140),
   slug: z.string().trim().max(160),
   parentId: z.string().uuid('Choose a category that exists.').nullable(),
-  description: optionalText(5000),
   imageUrl: imageUrlSchema,
-  /** The small mark shown beside the name in the storefront menu. */
-  iconUrl: imageUrlSchema,
-  bannerUrl: imageUrlSchema,
   isActive: z.boolean(),
   showInMenu: z.boolean(),
   isFeatured: z.boolean(),
@@ -71,14 +68,12 @@ const writeSchema = z.object({
   ...fields,
   slug: fields.slug.optional(),
   parentId: fields.parentId.default(null),
-  description: fields.description.default(null),
   imageUrl: fields.imageUrl.default(null),
-  iconUrl: fields.iconUrl.default(null),
-  bannerUrl: fields.bannerUrl.default(null),
   isActive: fields.isActive.default(true),
   showInMenu: fields.showInMenu.default(true),
   isFeatured: fields.isFeatured.default(false),
-  sortOrder: fields.sortOrder.default(0),
+  /** Absent means "after its siblings" — the handler places it; see POST. */
+  sortOrder: fields.sortOrder.optional(),
   seoTitle: fields.seoTitle.default(null),
   seoDescription: fields.seoDescription.default(null),
 });
@@ -107,10 +102,7 @@ const listColumns = {
   parentId: categories.parentId,
   name: categories.name,
   slug: categories.slug,
-  description: categories.description,
   imageUrl: categories.imageUrl,
-  iconUrl: categories.iconUrl,
-  bannerUrl: categories.bannerUrl,
   isActive: categories.isActive,
   showInMenu: categories.showInMenu,
   isFeatured: categories.isFeatured,
@@ -237,7 +229,25 @@ export default async function categoryRoutes(app: FastifyInstance) {
             .length > 0,
       });
 
-      const [created] = await store.db.insert(categories).values({ ...body, slug }).returning();
+      /*
+       * The panel no longer asks for a position: a new category goes to the end
+       * of its own siblings, and dragging in the list is how it moves. A default
+       * of 0 put every new row level with the first one, so it landed wherever
+       * its name sorted rather than where it was added.
+       */
+      const sortOrder =
+        body.sortOrder ??
+        Math.min(
+          100_000,
+          (
+            await store.db
+              .select({ next: sql<number>`coalesce(max(${categories.sortOrder}) + 1, 0)::int` })
+              .from(categories)
+              .where(body.parentId ? eq(categories.parentId, body.parentId) : isNull(categories.parentId))
+          )[0]?.next ?? 0,
+        );
+
+      const [created] = await store.db.insert(categories).values({ ...body, slug, sortOrder }).returning();
 
       await audit(store.db, request, {
         action: 'category.create',

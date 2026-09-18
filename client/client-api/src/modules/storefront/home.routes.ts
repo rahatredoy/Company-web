@@ -104,9 +104,7 @@ export async function resolveSource(
    * headphones. Depth is the thing the block is actually claiming; `updatedAt`
    * stays as the tie-breaker so equal discounts still favour the fresher campaign.
    */
-  // Measured against the sale that is actually running: a closed window is not a
-  // discount, and ordering by the flat column put an expired campaign at the top
-  // of a "Deal of the Day" block. See `service.ts#liveSalePriceSql`.
+  // Measured against the active variants' sale. See `service.ts#liveSalePriceSql`.
   const discountDepth = sql`(${products.priceFrom} - ${liveSalePriceSql}) / nullif(${products.priceFrom}, 0)`;
 
   const order =

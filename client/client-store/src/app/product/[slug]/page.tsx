@@ -11,7 +11,8 @@ import {
 import { getProductList } from '@/lib/api/products';
 import { getTemplate } from '@/templates/registry';
 import { readLocalePreference } from '@/lib/locale/preference';
-import { Breadcrumbs, BreadcrumbJsonLd, type Crumb } from '@/components/layout/breadcrumbs';
+import { getT } from '@/lib/i18n/server';
+import { BreadcrumbJsonLd, type Crumb } from '@/components/layout/breadcrumbs';
 import { ProductPurchase } from '@/components/product/product-purchase';
 import { ProductDetailsTabs } from '@/components/product/product-details-tabs';
 import { FrequentlyBoughtTogether } from '@/components/product/frequently-bought-together';
@@ -36,15 +37,53 @@ interface PageProps {
   params: Promise<{ slug: string }>;
 }
 
+/**
+ * The description as plain text on one line. It is stored as HTML, and a meta
+ * tag or a JSON-LD string printing `<p>` is worse than printing nothing.
+ */
+function plainDescription(description: string | null): string | undefined {
+  const text = description
+    ?.replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text || undefined;
+}
+
+/**
+ * The opening of the description, cut at a word near 160 characters — the
+ * length a search result shows.
+ *
+ * What a product page is described as when the owner wrote no SEO description.
+ * It used to be the short description, which no longer exists; the store-wide
+ * description would describe every product in the shop with the same sentence.
+ */
+function descriptionExcerpt(description: string | null, limit = 160): string | undefined {
+  const flat = plainDescription(description);
+  if (!flat) return undefined;
+  if (flat.length <= limit) return flat;
+  const cut = flat.slice(0, limit - 1);
+  const atWord = cut.lastIndexOf(' ');
+  return `${(atWord > limit / 2 ? cut.slice(0, atWord) : cut).trimEnd()}…`;
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const [product, config] = await Promise.all([getProductDetail(slug), getPublishedStoreConfig()]);
 
-  if (!product) return { title: 'Product not found', robots: { index: false, follow: true } };
+  if (!product) {
+    const t = await getT();
+    return { title: t('Product not found'), robots: { index: false, follow: true } };
+  }
 
   const title = product.seo.title ?? product.name;
   const description =
-    product.seo.description ?? product.shortDescription ?? config.seo.description ?? undefined;
+    product.seo.description ?? descriptionExcerpt(product.description) ?? config.seo.description ?? undefined;
 
   return {
     title,
@@ -68,7 +107,7 @@ const AISLE_RAIL_SIZE = 12;
 export default async function ProductPage({ params }: PageProps) {
   const { slug } = await params;
 
-  const [product, config] = await Promise.all([getProductDetail(slug), getStoreConfig()]);
+  const [product, config, t] = await Promise.all([getProductDetail(slug), getStoreConfig(), getT()]);
   if (!product) notFound();
 
   /*
@@ -137,7 +176,12 @@ export default async function ProductPage({ params }: PageProps) {
 
   return (
     <div className="container-store py-4 sm:py-6">
-      <Breadcrumbs items={crumbs} className="mb-6" />
+      {/*
+        Crawlers still get the trail; the page no longer prints it. The same
+        three category names are on the way in and in the header, and spending
+        the first line of a product page on them delayed the picture and the
+        price — which is the whole of what somebody opened this to see.
+      */}
       <BreadcrumbJsonLd items={crumbs} origin={config.store.canonicalOrigin} />
       <ProductJsonLd
         product={product}
@@ -164,7 +208,7 @@ export default async function ProductPage({ params }: PageProps) {
 
       {reviews ? (
         <section id="reviews" className="mt-14 scroll-mt-24">
-          <h2 className="text-xl font-semibold sm:text-2xl">Customer reviews</h2>
+          <h2 className="text-xl font-semibold sm:text-2xl">{t('Customer reviews')}</h2>
 
           <ReviewSummaryPanel summary={reviews.summary} productSlug={slug} className="mt-4" />
           <ReviewList reviews={reviews.items} locale={locale.language} className="mt-2" />
@@ -176,12 +220,12 @@ export default async function ProductPage({ params }: PageProps) {
           anything the catalogue thinks is adjacent to them. */}
       {aisle && aisleProducts.length > 0 ? (
         <ProductRail
-          title={`More in ${aisle.name}`}
+          title={t('More in {name}', { name: aisle.name })}
           products={aisleProducts}
           perView={template.preset.carouselPerView}
           cardVariant={template.cardVariant}
           locale={locale.language}
-          action={{ label: 'View all', href: `/category/${aisle.slug}` }}
+          action={{ label: t('View all'), href: `/category/${aisle.slug}` }}
           className="mt-16"
         />
       ) : null}
@@ -191,14 +235,17 @@ export default async function ProductPage({ params }: PageProps) {
           it was always the only source of. It hides itself when that is
           nothing, rather than repeating the rail under a vaguer heading. */}
       <ProductRail
-        title="You may also like"
+        title={t('You may also like')}
         products={relatedProducts}
         perView={template.preset.carouselPerView}
         cardVariant={template.cardVariant}
         locale={locale.language}
         action={
           aisleProducts.length === 0 && product.category
-            ? { label: `All ${product.category.name}`, href: `/category/${product.category.slug}` }
+            ? {
+                label: t('All {name}', { name: product.category.name }),
+                href: `/category/${product.category.slug}`,
+              }
             : undefined
         }
         className="mt-16"
@@ -216,11 +263,11 @@ export default async function ProductPage({ params }: PageProps) {
         when it is asked for.
       */}
       {browse && browseBatch && browseVisible.length > 0 ? (
-        <section className="mt-16" aria-label={`More from ${browse.name}`}>
+        <section className="mt-16" aria-label={t('More from {name}', { name: browse.name })}>
           <SectionHeading
-            title={`More from ${browse.name}`}
+            title={t('More from {name}', { name: browse.name })}
             size="sm"
-            action={{ label: 'Shop all', href: `/category/${browse.slug}` }}
+            action={{ label: t('Shop all'), href: `/category/${browse.slug}` }}
           />
           {/* Keyed on the batch for the reason the homepage feed is: when the
               first page has moved on, the pages appended below it belong to a
@@ -264,7 +311,7 @@ function ProductJsonLd({
     '@context': 'https://schema.org',
     '@type': 'Product',
     name: product.name,
-    description: product.shortDescription ?? undefined,
+    description: plainDescription(product.description),
     image: product.images.map((image) => image.url),
     sku: product.variants[0]?.sku ?? undefined,
     brand: product.brand ? { '@type': 'Brand', name: product.brand.name } : undefined,

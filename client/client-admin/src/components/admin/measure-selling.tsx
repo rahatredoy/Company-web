@@ -7,6 +7,7 @@ import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
   DEFAULT_MEASURE_OPTIONS,
@@ -47,6 +48,7 @@ export function MeasureSelling({
   price,
   currency,
   fieldErrors,
+  onEnabledChange,
 }: {
   product?: {
     sellBy?: 'unit' | 'measure' | null;
@@ -62,8 +64,19 @@ export function MeasureSelling({
   price: string;
   currency: string;
   fieldErrors: Record<string, string>;
+  /**
+   * Told when the switch moves, for a form that shows the price somewhere this
+   * block is not — the create panel keeps the price up front and this under
+   * Advanced options, and the price box has to say it has become a rate.
+   */
+  onEnabledChange?: (enabled: boolean) => void;
 }) {
-  const [enabled, setEnabled] = React.useState(product?.sellBy === 'measure');
+  const t = useT();
+  const [enabled, setEnabledState] = React.useState(product?.sellBy === 'measure');
+  const setEnabled = (next: boolean) => {
+    setEnabledState(next);
+    onEnabledChange?.(next);
+  };
   const [unit, setUnit] = React.useState<MeasureUnit>((product?.measureUnit as MeasureUnit) ?? 'g');
   const [pricingMeasure, setPricingMeasure] = React.useState(String(product?.pricingMeasure ?? 1000));
   const [minMeasure, setMinMeasure] = React.useState(product?.minMeasure ? String(product.minMeasure) : '');
@@ -111,11 +124,14 @@ export function MeasureSelling({
         <Switch id="sellByMeasure" checked={enabled} onCheckedChange={setEnabled} />
         <div className="space-y-0.5">
           <Label htmlFor="sellByMeasure" className="cursor-pointer">
-            Sold by weight or volume
+            {t('Sold by weight or volume')}
           </Label>
           <p className="text-xs text-muted-foreground">
-            The card shows a size picker — 1kg, 500gm, 250gm — and one price per{' '}
-            {unit === 'pc' ? 'piece' : unit === 'ml' ? 'litre' : 'kilo'} covers all of them.
+            {unit === 'pc'
+              ? t('The card shows a size picker — 1kg, 500gm, 250gm — and one price per piece covers all of them.')
+              : unit === 'ml'
+                ? t('The card shows a size picker — 1kg, 500gm, 250gm — and one price per litre covers all of them.')
+                : t('The card shows a size picker — 1kg, 500gm, 250gm — and one price per kilo covers all of them.')}
           </p>
         </div>
       </div>
@@ -136,7 +152,7 @@ export function MeasureSelling({
           />
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Measured in" htmlFor="measureUnitSelect" className={TIGHT}>
+            <Field label={t('Measured in')} htmlFor="measureUnitSelect" className={TIGHT}>
               <select
                 id="measureUnitSelect"
                 value={unit}
@@ -152,16 +168,20 @@ export function MeasureSelling({
               >
                 {MEASURE_UNIT_CHOICES.map((choice) => (
                   <option key={choice.value} value={choice.value}>
-                    {choice.label}
+                    {t(choice.label)}
                   </option>
                 ))}
               </select>
             </Field>
 
             <Field
-              label="Price is for"
+              label={t('Price is for')}
               htmlFor="pricingMeasureInput"
-              hint={'In ' + unit + '. 1000 means the price above is per ' + formatMeasure(1000, unit) + '.'}
+              hint={t('In {unit}. {amount} means the price above is per {measure}.', {
+                unit,
+                amount: '1000',
+                measure: formatMeasure(1000, unit),
+              })}
               error={fieldErrors.pricingMeasure}
               className={TIGHT}
             >
@@ -175,28 +195,28 @@ export function MeasureSelling({
             </Field>
 
             <Field
-              label="Label on the card"
+              label={t('Label on the card')}
               htmlFor="pricingLabel"
-              hint="Empty prints it from the amount above."
+              hint={t('Empty prints it from the amount above.')}
               className={TIGHT}
             >
               <Input
                 id="pricingLabel"
                 name="pricingLabel"
                 defaultValue={product?.pricingLabel ?? ''}
-                placeholder={'Per ' + formatMeasure(per, unit)}
+                placeholder={t('Per {measure}', { measure: formatMeasure(per, unit) })}
                 maxLength={24}
                 className={CONTROL}
               />
             </Field>
 
             <Field
-              label="Smallest order"
+              label={t('Smallest order')}
               htmlFor="minMeasureInput"
               hint={
                 minMeasure
-                  ? 'Shows as "Min. ' + formatMeasure(Number(minMeasure), unit) + '" on the card.'
-                  : 'Empty sells any size on the list.'
+                  ? t('Shows as "Min. {measure}" on the card.', { measure: formatMeasure(Number(minMeasure), unit) })
+                  : t('Empty sells any size on the list.')
               }
               error={fieldErrors.minMeasure}
               className={TIGHT}
@@ -206,7 +226,7 @@ export function MeasureSelling({
                 inputMode="numeric"
                 value={minMeasure}
                 onChange={(event) => setMinMeasure(event.target.value.replace(/[^0-9]/g, ''))}
-                placeholder={'e.g. 350'}
+                placeholder={t('e.g. {example}', { example: '350' })}
                 className={CONTROL}
               />
             </Field>
@@ -215,10 +235,10 @@ export function MeasureSelling({
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                Sizes a customer can pick
+                {t('Sizes a customer can pick')}
               </Label>
               {own === null ? (
-                <span className="text-xs text-muted-foreground">Using the shop&apos;s default list</span>
+                <span className="text-xs text-muted-foreground">{t("Using the shop's default list")}</span>
               ) : (
                 <Button
                   type="button"
@@ -227,7 +247,7 @@ export function MeasureSelling({
                   className="h-7 text-xs"
                   onClick={() => setOwn(null)}
                 >
-                  Use the shop&apos;s list
+                  {t("Use the shop's list")}
                 </Button>
               )}
             </div>
@@ -238,10 +258,11 @@ export function MeasureSelling({
                   <Input
                     value={option.label}
                     onChange={(event) => editOption(index, { label: event.target.value })}
+                    // i18n-ignore — a size, not language
                     placeholder="500gm"
                     maxLength={24}
                     className={cn(CONTROL, 'flex-1')}
-                    aria-label={'Size ' + (index + 1) + ' label'}
+                    aria-label={t('Size {number} label', { number: index + 1 })}
                   />
                   <Input
                     value={option.measure > 0 ? String(option.measure) : ''}
@@ -251,7 +272,7 @@ export function MeasureSelling({
                     placeholder={unit}
                     inputMode="numeric"
                     className={cn(CONTROL, 'w-24')}
-                    aria-label={'Size ' + (index + 1) + ' amount in ' + unit}
+                    aria-label={t('Size {number} amount in {unit}', { number: index + 1, unit })}
                   />
                   {/*
                     The price nobody works out in their head. Same helper the API
@@ -268,7 +289,7 @@ export function MeasureSelling({
                     size="icon"
                     className="size-8 shrink-0 text-muted-foreground"
                     onClick={() => removeOption(index)}
-                    aria-label={'Remove size ' + (index + 1)}
+                    aria-label={t('Remove size {number}', { number: index + 1 })}
                   >
                     <Trash2 className="size-3.5" aria-hidden />
                   </Button>
@@ -278,7 +299,7 @@ export function MeasureSelling({
 
             {options.length < MAX_MEASURE_OPTIONS ? (
               <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={addOption}>
-                <Plus className="mr-1 size-3.5" aria-hidden /> Add a size
+                <Plus className="mr-1 size-3.5" aria-hidden /> {t('Add a size')}
               </Button>
             ) : null}
 

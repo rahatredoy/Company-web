@@ -3,11 +3,15 @@ import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert } from '@/components/ui/alert';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = {
-  title: 'Payment problem',
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return {
+    title: t('Payment problem'),
+    robots: { index: false, follow: false },
+  };
+}
 
 /**
  * Payment failure.
@@ -29,6 +33,7 @@ export default async function CheckoutFailurePage({
   searchParams: Promise<{ order?: string; reason?: string }>;
 }) {
   const { order, reason } = await searchParams;
+  const t = await getT();
   const orderExists = Boolean(order);
 
   return (
@@ -39,26 +44,26 @@ export default async function CheckoutFailurePage({
         </span>
 
         <h1 className="text-2xl font-semibold sm:text-3xl">
-          {orderExists ? 'Payment was not completed' : 'Your order was not placed'}
+          {orderExists ? t('Payment was not completed') : t('Your order was not placed')}
         </h1>
 
         <p className="mt-3 text-muted">
           {orderExists
-            ? 'Your order is saved and nothing has been charged. You can try the payment again or choose another method.'
-            : 'Nothing has been charged and your basket is untouched. Please try again.'}
+            ? t('Your order is saved and nothing has been charged. You can try the payment again or choose another method.')
+            : t('Nothing has been charged and your basket is untouched. Please try again.')}
         </p>
       </div>
 
       {orderExists ? (
-        <Alert tone="info" title={`Order ${order}`} className="mt-8">
-          Do not place a second order — this one is waiting for payment.
+        <Alert tone="info" title={t('Order {orderNumber}', { orderNumber: order ?? '' })} className="mt-8">
+          {t('Do not place a second order — this one is waiting for payment.')}
         </Alert>
       ) : null}
 
       {/* A provider's own reason code, when it passed one back. Never a stack. */}
       {reason ? (
         <p className="mt-4 text-center text-xs text-subtle">
-          Reference: <code className="font-mono">{reason.slice(0, 64)}</code>
+          {t.rich('Reference: {code}', { code: <code className="font-mono">{reason.slice(0, 64)}</code> })}
         </p>
       ) : null}
 
@@ -66,30 +71,32 @@ export default async function CheckoutFailurePage({
         {orderExists ? (
           <>
             <Button asChild size="lg">
-              <Link href={`/account/orders/${order}`}>View order</Link>
+              <Link href={`/account/orders/${order}`}>{t('View order')}</Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link href="/checkout">Try payment again</Link>
+              <Link href="/checkout">{t('Try payment again')}</Link>
             </Button>
           </>
         ) : (
           <>
             <Button asChild size="lg">
-              <Link href="/checkout">Back to checkout</Link>
+              <Link href="/checkout">{t('Back to checkout')}</Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link href="/cart">View cart</Link>
+              <Link href="/cart">{t('View cart')}</Link>
             </Button>
           </>
         )}
       </div>
 
       <p className="mt-8 text-center text-sm text-muted">
-        Still stuck?{' '}
-        <Link href="/contact" className="font-medium text-primary hover:underline">
-          Contact us
-        </Link>{' '}
-        and we will sort it out.
+        {t.rich('Still stuck? {contactLink} and we will sort it out.', {
+          contactLink: (
+            <Link href="/contact" className="font-medium text-primary hover:underline">
+              {t('Contact us')}
+            </Link>
+          ),
+        })}
       </p>
     </div>
   );

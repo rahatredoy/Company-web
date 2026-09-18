@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Store } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
+import { getT } from '@/lib/i18n/server';
 import { serverGetOptional } from '@/lib/server-api';
 import type { SessionResponse } from '@/lib/types';
 
@@ -9,7 +10,10 @@ import type { SessionResponse } from '@/lib/types';
  * visitor sees whose store they are signing in to before the form appears.
  */
 export default async function AuthLayout({ children }: { children: React.ReactNode }) {
-  const session = await serverGetOptional<SessionResponse>('/api/v1/admin/auth/session');
+  const [session, t] = await Promise.all([
+    serverGetOptional<SessionResponse>('/api/v1/admin/auth/session'),
+    getT(),
+  ]);
   const storeName = session && !session.authenticated ? session.store?.name : undefined;
 
   return (
@@ -25,8 +29,8 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
             <Store className="size-4.5" />
           </span>
           <span className="text-sm leading-tight">
-            {storeName ?? 'Store Admin'}
-            <span className="block text-xs font-normal text-muted-foreground">Admin panel</span>
+            {storeName ?? t('Store Admin')}
+            <span className="block text-xs font-normal text-muted-foreground">{t('Admin panel')}</span>
           </span>
         </Link>
         <ThemeToggle />

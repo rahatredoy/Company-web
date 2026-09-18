@@ -10,8 +10,8 @@ interface SessionContextValue {
   admin: SessionAdmin;
   store: SessionStore;
   can: (permission: Permission) => boolean;
-  refresh: () => Promise<void>;
-  signOut: () => Promise<void>;
+  refresh: () => Promise<void>; // i18n-ignore
+  signOut: () => Promise<void>; // i18n-ignore
 }
 
 const SessionContext = React.createContext<SessionContextValue | null>(null);

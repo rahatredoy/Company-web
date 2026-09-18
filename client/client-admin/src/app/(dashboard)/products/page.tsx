@@ -5,14 +5,13 @@ import {
   type ProductSort,
 } from '@/components/admin/product-manager';
 import {
-  currentStoreSlug,
   serverGet,
   serverGetAll,
   serverGetListed,
   serverGetOptional,
 } from '@/lib/server-api';
 import { BATCH_SIZE, PRODUCT_LIST_SORT } from '@/lib/list';
-import { storefrontUrl } from '@/lib/env';
+import { getT } from '@/lib/i18n/server';
 import {
   can,
   type BrandRow,
@@ -23,7 +22,11 @@ import {
   type StoreSettingsRow,
 } from '@/lib/types';
 
-export const metadata: Metadata = { title: 'Products' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Products') };
+}
+
 export const dynamic = 'force-dynamic';
 
 /**
@@ -55,6 +58,7 @@ export default async function ProductsPage({
     brandId: single('brand') ?? '',
     stock: oneOf('stock', ['all', 'in_stock', 'low', 'out', 'untracked'] as const, 'all'),
     featured: oneOf('featured', ['all', 'yes', 'no'] as const, 'all'),
+    reviews: oneOf('reviews', ['all', 'pending'] as const, 'all'),
     // The fallbacks come from `lib/list.ts`, not from `PRODUCT_DEFAULTS`: that
     // object lives in a `'use client'` module and arrives here as a client
     // reference, so `.sort` was `undefined` and the URL said so.
@@ -66,9 +70,8 @@ export default async function ProductsPage({
     order: oneOf('order', ['asc', 'desc'] as const, PRODUCT_LIST_SORT.order),
   };
 
-  const [session, slug, stats, categories, brands, settings, first] = await Promise.all([
+  const [session, stats, categories, brands, settings, first] = await Promise.all([
     serverGet<SessionResponse>('/api/v1/admin/auth/session'),
-    currentStoreSlug(),
     // A card missing beats the whole screen failing, so the tally is optional.
     serverGetOptional<ProductStats>('/api/v1/admin/products/stats'),
     serverGetAll<CategoryRow>('/api/v1/admin/categories', {}, { maxBatches: REFERENCE_CAP }),
@@ -93,6 +96,7 @@ export default async function ProductsPage({
       brandId: filters.brandId || undefined,
       stock: filters.stock,
       featured: filters.featured,
+      reviews: filters.reviews,
       sort: filters.sort,
       order: filters.order,
     }),
@@ -111,8 +115,8 @@ export default async function ProductsPage({
         create: can(admin, 'products.create'),
         update: can(admin, 'products.update'),
         delete: can(admin, 'products.delete'),
+        reviews: can(admin, 'reviews.view'),
       }}
-      storefrontBase={slug ? storefrontUrl(slug) : null}
       storeMeasureOptions={settings?.measureOptions}
       filters={filters}
       openCreate={single('new') === '1'}

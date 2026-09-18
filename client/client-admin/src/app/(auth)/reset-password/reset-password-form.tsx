@@ -13,27 +13,32 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { api, errorMessage } from '@/lib/api';
+import { useT, type Translator } from '@/lib/i18n';
 
-const schema = z
-  .object({
-    password: z
-      .string()
-      .min(10, 'Use at least 10 characters.')
-      .max(200, 'That password is too long.')
-      .refine((v) => /[a-z]/.test(v), 'Include a lowercase letter.')
-      .refine((v) => /[A-Z]/.test(v), 'Include an uppercase letter.')
-      .refine((v) => /[0-9]/.test(v), 'Include a number.'),
-    confirmPassword: z.string().min(1, 'Confirm your password.'),
-  })
-  .refine((value) => value.password === value.confirmPassword, {
-    message: 'Passwords do not match.',
-    path: ['confirmPassword'],
-  });
+/** Built per render language, so a validation message is in the store's language. */
+const resetSchema = (t: Translator) =>
+  z
+    .object({
+      password: z
+        .string()
+        .min(10, t('Use at least 10 characters.'))
+        .max(200, t('That password is too long.'))
+        .refine((v) => /[a-z]/.test(v), t('Include a lowercase letter.'))
+        .refine((v) => /[A-Z]/.test(v), t('Include an uppercase letter.'))
+        .refine((v) => /[0-9]/.test(v), t('Include a number.')),
+      confirmPassword: z.string().min(1, t('Confirm your password.')),
+    })
+    .refine((value) => value.password === value.confirmPassword, {
+      message: t('Passwords do not match.'),
+      path: ['confirmPassword'],
+    });
 
-type Values = z.input<typeof schema>;
+type Values = z.input<ReturnType<typeof resetSchema>>;
 
 export function ResetPasswordForm({ token }: { token: string }) {
   const router = useRouter();
+  const t = useT();
+  const schema = React.useMemo(() => resetSchema(t), [t]);
   const [done, setDone] = React.useState(false);
   const [formError, setFormError] = React.useState<string | null>(null);
 
@@ -46,12 +51,12 @@ export function ResetPasswordForm({ token }: { token: string }) {
     return (
       <Card className="shadow-[var(--shadow-raised)]">
         <CardHeader>
-          <CardTitle>This link is incomplete</CardTitle>
-          <CardDescription>Open the link from your email, or request a new one.</CardDescription>
+          <CardTitle>{t('This link is incomplete')}</CardTitle>
+          <CardDescription>{t('Open the link from your email, or request a new one.')}</CardDescription>
         </CardHeader>
         <CardContent>
           <Button asChild className="w-full">
-            <Link href="/forgot-password">Request a new link</Link>
+            <Link href="/forgot-password">{t('Request a new link')}</Link>
           </Button>
         </CardContent>
       </Card>
@@ -75,15 +80,15 @@ export function ResetPasswordForm({ token }: { token: string }) {
           <span className="mb-3 grid size-10 place-items-center rounded-xl bg-success-soft text-success">
             <CheckCircle2 className="size-5" />
           </span>
-          <CardTitle>Password changed</CardTitle>
+          <CardTitle>{t('Password changed')}</CardTitle>
           {/* A reset is how a compromise is undone, so every device is signed out. */}
           <CardDescription>
-            Every device has been signed out. Sign in again with your new password.
+            {t('Every device has been signed out. Sign in again with your new password.')}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button className="w-full" onClick={() => router.replace('/sign-in')}>
-            Go to sign in
+            {t('Go to sign in')}
           </Button>
         </CardContent>
       </Card>
@@ -93,8 +98,8 @@ export function ResetPasswordForm({ token }: { token: string }) {
   return (
     <Card className="shadow-[var(--shadow-raised)]">
       <CardHeader>
-        <CardTitle>Choose a new password</CardTitle>
-        <CardDescription>Pick something you have not used on this store before.</CardDescription>
+        <CardTitle>{t('Choose a new password')}</CardTitle>
+        <CardDescription>{t('Pick something you have not used on this store before.')}</CardDescription>
       </CardHeader>
 
       <CardContent>
@@ -102,16 +107,16 @@ export function ResetPasswordForm({ token }: { token: string }) {
           {formError ? <Alert variant="danger">{formError}</Alert> : null}
 
           <Field
-            label="New password"
+            label={t('New password')}
             htmlFor="password"
-            hint="At least 10 characters, with an uppercase letter and a number."
+            hint={t('At least 10 characters, with an uppercase letter and a number.')}
             error={form.formState.errors.password?.message}
           >
             <Input id="password" type="password" autoComplete="new-password" autoFocus {...form.register('password')} />
           </Field>
 
           <Field
-            label="Confirm password"
+            label={t('Confirm password')}
             htmlFor="confirmPassword"
             error={form.formState.errors.confirmPassword?.message}
           >
@@ -125,7 +130,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
 
           <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? <Loader2 className="animate-spin" /> : null}
-            Change password
+            {t('Change password')}
           </Button>
         </form>
       </CardContent>

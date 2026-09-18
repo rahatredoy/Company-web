@@ -50,12 +50,12 @@ function Piece({
         </div>
 
         <div className="space-y-1.5">
-          <h3 className="text-[15px] font-semibold">{title}</h3>
-          <p className="text-[13px] leading-relaxed text-muted-foreground">{description}</p>
+          <h3 className="text-[14px] font-semibold">{title}</h3>
+          <p className="text-[12px] leading-relaxed text-muted-foreground">{description}</p>
         </div>
 
         <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border px-3 py-8 text-center">
-          <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <span className="flex items-center gap-2 text-[12px] text-muted-foreground">
             <Placeholder className="size-4 shrink-0" aria-hidden />
             {placeholder}
           </span>
@@ -145,15 +145,15 @@ export function StoreStatusCards({
           </div>
 
           <div className="space-y-1.5">
-            <h3 className="text-[15px] font-semibold">Getting Started</h3>
-            <p className="text-[13px] leading-relaxed text-muted-foreground">
+            <h3 className="text-[14px] font-semibold">Getting Started</h3>
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
               Follow these steps to launch your store.
             </p>
           </div>
 
           <ul className="flex-1 space-y-3">
             {tasks.map((task) => (
-              <li key={task.label} className="flex items-center gap-2.5 text-[13px]">
+              <li key={task.label} className="flex items-center gap-2.5 text-[12px]">
                 <span
                   className={cn(
                     'grid size-4.5 shrink-0 place-items-center rounded-full border',

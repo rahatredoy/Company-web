@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, gt, isNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../../db/client';
-import { clientAccounts, clientBusinessProfiles, clientSessions, tenants } from '../../db/schema/index';
+import { clientAccounts, clientBusinessProfiles, tenants } from '../../db/schema/index';
 import { ERROR_CODES, unauthorized } from '../../lib/errors';
 import { hashPassword, verifyPassword } from '../../lib/password';
 import { ok, parseBody, parseParams, uuidParamSchema } from '../../lib/http';
-import { revokeAllClientSessions, revokeClientSession } from '../../lib/session';
+import { listClientSessions, revokeAllClientSessions, revokeClientSession } from '../../lib/session';
 import { latestInvoiceFor } from '../../services/billing';
 import { isPlaceholderSlug } from '../../services/onboarding';
 import { storeView, subscriptionView } from '../../services/views';
@@ -135,43 +135,47 @@ export default async function clientAccountRoutes(app: FastifyInstance) {
     return ok(reply, { updated: true });
   });
 
+  /**
+   * The signed-in browsers for this account.
+   *
+   * Read from the session records rather than a table: a JWT is not written
+   * down anywhere, so the Redis record its `jti` names is the only thing that
+   * knows this login exists. Only live ones can be returned — a record is gone
+   * the moment it expires or is revoked, so there is nothing here to filter.
+   */
   app.get('/sessions', { preHandler: app.requireClient }, async (request, reply) => {
-    const rows = await db
-      .select()
-      .from(clientSessions)
-      .where(
-        and(
-          eq(clientSessions.clientAccountId, request.clientAuth!.accountId),
-          isNull(clientSessions.revokedAt),
-          gt(clientSessions.expiresAt, new Date()),
-        ),
-      )
-      .orderBy(desc(clientSessions.lastSeenAt));
+    const sessions = await listClientSessions(request.clientAuth!.accountId);
 
     return ok(
       reply,
-      rows.map((row) => ({
-        id: row.id,
-        current: row.id === request.clientAuth!.sessionId,
-        ipAddress: row.ipAddress,
-        userAgent: row.userAgent,
-        createdAt: row.createdAt,
-        lastSeenAt: row.lastSeenAt,
-      })),
+      sessions
+        // A half-finished sign-in is not a device the account holder can act on,
+        // and showing one would invite them to revoke a challenge rather than a
+        // session.
+        .filter((session) => session.verified)
+        .map((session) => ({
+          id: session.id,
+          current: session.id === request.clientAuth!.sessionId,
+          ipAddress: session.ip,
+          userAgent: session.ua,
+          createdAt: session.createdAt,
+          lastSeenAt: session.lastSeenAt,
+        })),
     );
   });
 
   app.delete('/sessions/:id', { preHandler: app.requireClient }, async (request, reply) => {
     const { id } = parseParams(uuidParamSchema, request.params);
 
-    // Scope the lookup to this account so one client cannot revoke another's session.
-    const rows = await db
-      .select({ id: clientSessions.id })
-      .from(clientSessions)
-      .where(and(eq(clientSessions.id, id), eq(clientSessions.clientAccountId, request.clientAuth!.accountId)))
-      .limit(1);
+    /*
+     * Scoped to this account's own sessions, so one client cannot revoke
+     * another's by guessing an id. The check is against the account's index
+     * rather than against the record, because a record names its subject and
+     * comparing that would be trusting the thing being addressed.
+     */
+    const owned = await listClientSessions(request.clientAuth!.accountId);
+    if (owned.some((session) => session.id === id)) await revokeClientSession(id);
 
-    if (rows[0]) await revokeClientSession(rows[0].id);
     return ok(reply, { revoked: true });
   });
 

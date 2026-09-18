@@ -5,10 +5,8 @@ import { useRouter } from 'next/navigation';
 import {
   ChevronDown,
   Download,
-  ExternalLink,
   Eye,
   EyeOff,
-  GripVertical,
   Info,
   Link2Off,
   MoreVertical,
@@ -38,7 +36,7 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui/toaster';
 import { api, errorMessage } from '@/lib/api';
-import { formatNumber } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { BrandRow } from '@/lib/types';
 import { useViewTarget } from '@/hooks/use-detail';
@@ -56,8 +54,7 @@ import { SELECT_CLASS, tintFor } from './category-tree';
  *
  * Brands are flat and few — a shop has dozens, not thousands — so the page reads
  * the whole set once and the counts, the filters and the ordering are all derived
- * here. That is what makes "select all" mean every brand the filter kept, and
- * what lets a drag reorder renumber the real list rather than a page of it.
+ * here. That is what makes "select all" mean every brand the filter kept.
  *
  * There is therefore nothing to fetch as the reader scrolls — the list is
  * already in hand — but it is still rendered through `InfiniteTable`, which
@@ -102,6 +99,7 @@ export function BrandManager({
   initial: BrandFilterState;
 }) {
   const router = useRouter();
+  const t = useT();
 
   const [filters, setFilters] = React.useState({
     search: initial.search,
@@ -117,20 +115,16 @@ export function BrandManager({
   /*
    * The read-only panel `Eye` opens, which used to be the storefront.
    *
-   * It needs no fetch: this screen already holds every column of every brand,
-   * because a drag reorder renumbers the real list and the set is read whole.
+   * It needs no fetch: this screen already holds every column of every brand.
    * The storefront moved to `Store` beside it.
    */
   const viewing = useViewTarget<BrandRow>();
 
-  const [dragId, setDragId] = React.useState<string | null>(null);
-  const [dropId, setDropId] = React.useState<string | null>(null);
-
   // ---------------------------------------------------------------- derived
 
-  /** The storefront's own order: `sort_order`, then name. */
+  /** The storefront's own order: by name. */
   const ordered = React.useMemo(
-    () => [...rows].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
+    () => [...rows].sort((a, b) => a.name.localeCompare(b.name)),
     [rows],
   );
 
@@ -147,12 +141,6 @@ export function BrandManager({
       return true;
     });
   }, [ordered, filters]);
-
-  const filtering =
-    filters.search.trim() !== '' ||
-    filters.status !== 'all' ||
-    filters.featured !== 'all' ||
-    filters.usage !== 'all';
 
   const stats = React.useMemo(() => {
     const since = new Date(monthStart).getTime();
@@ -210,10 +198,14 @@ export function BrandManager({
     // confirmation says so rather than letting someone assume the worst.
     const warning =
       row.productCount > 0
-        ? `\n\n${formatNumber(row.productCount)} product${row.productCount === 1 ? '' : 's'} will stay, without a brand.`
+        ? `\n\n${t.plural(
+            row.productCount,
+            '{count} product will stay, without a brand.',
+            '{count} products will stay, without a brand.',
+          )}`
         : '';
-    if (!globalThis.confirm(`Delete “${row.name}”?${warning}`)) return;
-    await run('Brand deleted.', () => api.delete(`/api/v1/admin/brands/${row.id}`));
+    if (!globalThis.confirm(`${t('Delete “{name}”?', { name: row.name })}${warning}`)) return;
+    await run(t('Brand deleted.'), () => api.delete(`/api/v1/admin/brands/${row.id}`));
   }
 
   /**
@@ -221,7 +213,7 @@ export function BrandManager({
    * with its own rules. Failures are counted rather than thrown: one refusal must
    * not abandon the other nine.
    */
-  async function bulk(label: string, work: (id: string) => Promise<unknown>) {
+  async function bulk(success: (count: number) => string, work: (id: string) => Promise<unknown>) {
     const ids = [...selected];
     if (!ids.length) return;
 
@@ -230,9 +222,15 @@ export function BrandManager({
     const failed = results.filter((result) => result.status === 'rejected');
     setBusy(false);
 
-    if (failed.length === 0) toast.success(`${label} ${ids.length} brand${ids.length === 1 ? '' : 's'}.`);
+    if (failed.length === 0) toast.success(success(ids.length));
     else if (failed.length === ids.length) toast.error(errorMessage((failed[0] as PromiseRejectedResult).reason));
-    else toast.error(`${ids.length - failed.length} done, ${failed.length} refused — see each row.`);
+    else
+      toast.error(
+        t('{done} done, {failed} refused — see each row.', {
+          done: ids.length - failed.length,
+          failed: failed.length,
+        }),
+      );
 
     refresh();
   }
@@ -243,38 +241,13 @@ export function BrandManager({
 
     const attached = rows.filter((row) => ids.includes(row.id)).reduce((sum, row) => sum + row.productCount, 0);
     const note = attached
-      ? `\n\n${formatNumber(attached)} product${attached === 1 ? '' : 's'} will stay, without a brand.`
+      ? `\n\n${t.plural(attached, '{count} product will stay, without a brand.', '{count} products will stay, without a brand.')}`
       : '';
-    if (!globalThis.confirm(`Delete ${ids.length} brand${ids.length === 1 ? '' : 's'}?${note}`)) return;
+    if (!globalThis.confirm(`${t.plural(ids.length, 'Delete {count} brand?', 'Delete {count} brands?')}${note}`)) return;
 
-    await bulk('Deleted', (id) => api.delete(`/api/v1/admin/brands/${id}`));
-  }
-
-  // -------------------------------------------------------------- reorder
-
-  /**
-   * Dropping a row renumbers the whole list, because brands are flat: there is no
-   * parent to stay inside, so every brand is every other brand's sibling. Only
-   * offered while nothing is filtered — a drop in a filtered view would move a row
-   * past neighbours that are not on screen.
-   */
-  async function onDrop(target: BrandRow) {
-    const sourceId = dragId;
-    setDragId(null);
-    setDropId(null);
-    if (!sourceId || sourceId === target.id) return;
-
-    const ids = ordered.map((row) => row.id);
-    const from = ids.indexOf(sourceId);
-    const to = ids.indexOf(target.id);
-    if (from < 0 || to < 0) return;
-
-    ids.splice(to, 0, ids.splice(from, 1)[0]!);
-
-    await run('Order saved.', () =>
-      api.patch('/api/v1/admin/brands/reorder', {
-        order: ids.map((id, index) => ({ id, sortOrder: index })),
-      }),
+    await bulk(
+      (count) => t.plural(count, 'Deleted {count} brand.', 'Deleted {count} brands.'),
+      (id) => api.delete(`/api/v1/admin/brands/${id}`),
     );
   }
 
@@ -288,10 +261,6 @@ export function BrandManager({
       'products',
       'status',
       'featured',
-      'sort_order',
-      'website',
-      'seo_title',
-      'meta_description',
       'created_at',
     ];
     const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
@@ -304,10 +273,6 @@ export function BrandManager({
         row.productCount,
         row.isActive ? 'active' : 'hidden',
         row.isFeatured ? 'yes' : 'no',
-        row.sortOrder,
-        row.websiteUrl ?? '',
-        row.seoTitle ?? '',
-        row.seoDescription ?? '',
         row.createdAt,
       ]
         .map(cell)
@@ -337,34 +302,6 @@ export function BrandManager({
    */
   const columns: Column<BrandRow>[] = [
     {
-      key: 'grip',
-      width: '2.75rem',
-      className: 'pr-0',
-      header: '',
-      cell: (row) =>
-        canManage && !filtering ? (
-          <span
-            draggable
-            onDragStart={() => setDragId(row.id)}
-            onDragEnd={() => {
-              setDragId(null);
-              setDropId(null);
-            }}
-            role="button"
-            tabIndex={-1}
-            aria-label={`Reorder ${row.name}`}
-            title="Drag to reorder"
-            className="grid size-6 cursor-grab place-items-center text-muted-foreground active:cursor-grabbing"
-          >
-            <GripVertical className="size-4" aria-hidden />
-          </span>
-        ) : (
-          <span className="grid size-6 place-items-center text-border-strong" aria-hidden>
-            <GripVertical className="size-4" />
-          </span>
-        ),
-    },
-    {
       key: 'select',
       width: '2.75rem',
       className: 'pr-0',
@@ -381,7 +318,7 @@ export function BrandManager({
               return next;
             })
           }
-          aria-label="Select every brand the filters kept"
+          aria-label={t('Select every brand the filters kept')}
         />
       ),
       cell: (row) => (
@@ -395,13 +332,13 @@ export function BrandManager({
               return next;
             })
           }
-          aria-label={`Select ${row.name}`}
+          aria-label={t('Select {name}', { name: row.name })}
         />
       ),
     },
     {
       key: 'brand',
-      header: 'Brand',
+      header: t('Brand'),
       cell: (row) => (
         <div className="flex items-center gap-3">
           <LazyImage
@@ -423,56 +360,41 @@ export function BrandManager({
       ),
     },
     {
-      key: 'website',
-      width: '15rem',
-      className: 'text-sm text-muted-foreground',
-      header: 'Website',
-      cell: (row) =>
-        row.websiteUrl ? (
-          <a
-            href={row.websiteUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex max-w-full items-center gap-1.5 hover:text-foreground hover:underline"
-          >
-            <span className="truncate">{row.websiteUrl.replace(/^https?:\/\//, '')}</span>
-            <ExternalLink className="size-3 shrink-0" aria-hidden />
-          </a>
-        ) : (
-          '\u2014'
-        ),
-    },
-    {
       key: 'products',
       width: '7rem',
       headClassName: 'text-right',
       className: 'text-right tabular-nums text-muted-foreground',
-      header: 'Products',
-      cell: (row) => formatNumber(row.productCount),
+      header: t('Products'),
+      cell: (row) => t.number(row.productCount),
     },
     {
       key: 'status',
       width: '12rem',
       header: (
         <span className="inline-flex items-center gap-1.5">
-          Status
+          {t('Status')}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" aria-label="What these badges mean">
+              <button type="button" aria-label={t('What these badges mean')}>
                 <Info className="size-3.5" aria-hidden />
               </button>
             </TooltipTrigger>
             <TooltipContent className="max-w-64">
-              <b>Visible</b> — shoppers can browse it. <b>Featured</b> — it leads the storefront’s brand strip.
-              A hidden brand keeps its products; they just stop naming it.
+              {t.rich(
+                '{visible} — shoppers can browse it. {featured} — it leads the storefront’s brand strip. A hidden brand keeps its products; they just stop naming it.',
+                {
+                  visible: <b>{t('Visible')}</b>,
+                  featured: <b>{t('Featured')}</b>,
+                },
+              )}
             </TooltipContent>
           </Tooltip>
         </span>
       ),
       cell: (row) => (
         <div className="flex flex-wrap items-center gap-1.5">
-          {row.isFeatured ? <Badge variant="warning">Featured</Badge> : null}
-          <Badge variant={row.isActive ? 'success' : 'neutral'}>{row.isActive ? 'Visible' : 'Hidden'}</Badge>
+          {row.isFeatured ? <Badge variant="warning">{t('Featured')}</Badge> : null}
+          <Badge variant={row.isActive ? 'success' : 'neutral'}>{row.isActive ? t('Visible') : t('Hidden')}</Badge>
         </div>
       ),
     },
@@ -480,13 +402,13 @@ export function BrandManager({
       key: 'actions',
       width: '11rem',
       headClassName: 'text-right',
-      header: 'Actions',
+      header: t('Actions'),
       cell: (row) => (
         <div className="flex items-center justify-end gap-0.5">
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`View ${row.name}`}
+            aria-label={t('View {name}', { name: row.name })}
             onClick={() => viewing.view(row)}
           >
             <Eye />
@@ -498,7 +420,7 @@ export function BrandManager({
                 href={`${storefrontBase}/brand/${row.slug}`}
                 target="_blank"
                 rel="noreferrer"
-                aria-label={`Open ${row.name} on the storefront`}
+                aria-label={t('Open {name} on the storefront', { name: row.name })}
               >
                 <Store />
               </a>
@@ -510,7 +432,7 @@ export function BrandManager({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={`Edit ${row.name}`}
+                aria-label={t('Edit {name}', { name: row.name })}
                 onClick={() => setPanel({ open: true, row })}
               >
                 <Pencil />
@@ -518,33 +440,33 @@ export function BrandManager({
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" aria-label={`More actions for ${row.name}`}>
+                  <Button variant="ghost" size="icon-sm" aria-label={t('More actions for {name}', { name: row.name })}>
                     <MoreVertical />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
                     onSelect={() =>
-                      void run(row.isFeatured ? 'No longer featured.' : 'Featured.', () =>
+                      void run(row.isFeatured ? t('No longer featured.') : t('Featured.'), () =>
                         patch(row.id, { isFeatured: !row.isFeatured }),
                       )
                     }
                   >
-                    <Star /> {row.isFeatured ? 'Remove from featured' : 'Mark as featured'}
+                    <Star /> {row.isFeatured ? t('Remove from featured') : t('Mark as featured')}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={() =>
-                      void run(row.isActive ? 'Hidden.' : 'Visible.', () =>
+                      void run(row.isActive ? t('Hidden.') : t('Visible.'), () =>
                         patch(row.id, { isActive: !row.isActive }),
                       )
                     }
                   >
                     {row.isActive ? <EyeOff /> : <Eye />}
-                    {row.isActive ? 'Hide from storefront' : 'Show on storefront'}
+                    {row.isActive ? t('Hide from storefront') : t('Show on storefront')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem destructive onSelect={() => void removeOne(row)}>
-                    <Trash2 /> Delete
+                    <Trash2 /> {t('Delete')}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -559,41 +481,69 @@ export function BrandManager({
     <TooltipProvider delayDuration={200}>
       <div className="space-y-6">
         <PageHeader
-          title="Brands"
-          breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Brands' }]}
+          title={t('Brands')}
+          breadcrumb={[{ label: t('Dashboard'), href: '/dashboard' }, { label: t('Brands') }]}
           actions={
             <>
               <Button variant="outline" onClick={exportCsv} disabled={visible.length === 0}>
-                <Download /> Export
+                <Download /> {t('Export')}
               </Button>
 
               {canManage ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" disabled={selected.size === 0 || busy}>
-                      Bulk Actions
-                      {selected.size ? <Badge variant="primary">{selected.size}</Badge> : null}
+                      {t('Bulk Actions')}
+                      {selected.size ? <Badge variant="primary">{t.number(selected.size)}</Badge> : null}
                       <ChevronDown />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuLabel>{selected.size} selected</DropdownMenuLabel>
-                    <DropdownMenuItem onSelect={() => bulk('Made visible', (id) => patch(id, { isActive: true }))}>
-                      <Eye /> Make visible
+                    <DropdownMenuLabel>{t('{count} selected', { count: selected.size })}</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        bulk(
+                          (count) => t.plural(count, 'Made visible {count} brand.', 'Made visible {count} brands.'),
+                          (id) => patch(id, { isActive: true }),
+                        )
+                      }
+                    >
+                      <Eye /> {t('Make visible')}
                     </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => bulk('Hidden', (id) => patch(id, { isActive: false }))}>
-                      <EyeOff /> Hide
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        bulk(
+                          (count) => t.plural(count, 'Hidden {count} brand.', 'Hidden {count} brands.'),
+                          (id) => patch(id, { isActive: false }),
+                        )
+                      }
+                    >
+                      <EyeOff /> {t('Hide')}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={() => bulk('Featured', (id) => patch(id, { isFeatured: true }))}>
-                      <Star /> Mark featured
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        bulk(
+                          (count) => t.plural(count, 'Featured {count} brand.', 'Featured {count} brands.'),
+                          (id) => patch(id, { isFeatured: true }),
+                        )
+                      }
+                    >
+                      <Star /> {t('Mark featured')}
                     </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => bulk('Unfeatured', (id) => patch(id, { isFeatured: false }))}>
-                      <Star /> Remove featured
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        bulk(
+                          (count) => t.plural(count, 'Unfeatured {count} brand.', 'Unfeatured {count} brands.'),
+                          (id) => patch(id, { isFeatured: false }),
+                        )
+                      }
+                    >
+                      <Star /> {t('Remove featured')}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem destructive onSelect={bulkDelete}>
-                      <Trash2 /> Delete
+                      <Trash2 /> {t('Delete')}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -601,7 +551,7 @@ export function BrandManager({
 
               {canManage ? (
                 <Button onClick={() => setPanel({ open: true, row: null })}>
-                  <Plus /> Add Brand
+                  <Plus /> {t('Add Brand')}
                 </Button>
               ) : null}
             </>
@@ -613,38 +563,38 @@ export function BrandManager({
           <StatCard
             icon={Tags}
             tint="primary"
-            label="Total Brands"
+            label={t('Total Brands')}
             value={stats.total}
             note={
               stats.addedThisMonth > 0
-                ? `+${formatNumber(stats.addedThisMonth)} added this month`
-                : 'None added this month'
+                ? t('+{count} added this month', { count: stats.addedThisMonth })
+                : t('None added this month')
             }
             good={stats.addedThisMonth > 0}
           />
           <StatCard
             icon={Package}
             tint="success"
-            label="Branded Products"
+            label={t('Branded Products')}
             value={stats.products}
-            note="Products naming one of these"
+            note={t('Products naming one of these')}
           />
           <StatCard
             icon={Star}
             tint="warning"
-            label="Featured Brands"
+            label={t('Featured Brands')}
             value={stats.featured}
-            note="Promoted on the storefront"
+            note={t('Promoted on the storefront')}
           />
           <StatCard
             icon={Link2Off}
             tint="danger"
-            label="Unused Brands"
+            label={t('Unused Brands')}
             value={stats.unused}
             note={
               stats.hidden > 0
-                ? `${formatNumber(stats.hidden)} hidden from shoppers`
-                : 'No products name them yet'
+                ? t('{count} hidden from shoppers', { count: stats.hidden })
+                : t('No products name them yet')
             }
           />
         </div>
@@ -665,8 +615,8 @@ export function BrandManager({
             <Input
               value={term}
               onChange={(event) => setTerm(event.target.value)}
-              placeholder="Search brands…"
-              aria-label="Search brands"
+              placeholder={t('Search brands…')}
+              aria-label={t('Search brands')}
               className="pl-9"
             />
           </div>
@@ -674,39 +624,39 @@ export function BrandManager({
           <select
             value={filters.status}
             onChange={(event) => change('status', event.target.value as BrandFilterState['status'])}
-            aria-label="Status"
+            aria-label={t('Status')}
             className={cn(SELECT_CLASS, 'lg:w-40')}
           >
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Hidden</option>
+            <option value="all">{t('All Status')}</option>
+            <option value="active">{t('Active')}</option>
+            <option value="inactive">{t('Hidden')}</option>
           </select>
 
           <select
             value={filters.featured}
             onChange={(event) => change('featured', event.target.value as BrandFilterState['featured'])}
-            aria-label="Featured"
+            aria-label={t('Featured')}
             className={cn(SELECT_CLASS, 'lg:w-44')}
           >
-            <option value="all">All Brands</option>
-            <option value="yes">Featured only</option>
-            <option value="no">Not featured</option>
+            <option value="all">{t('All Brands')}</option>
+            <option value="yes">{t('Featured only')}</option>
+            <option value="no">{t('Not featured')}</option>
           </select>
 
           <select
             value={filters.usage}
             onChange={(event) => change('usage', event.target.value as BrandFilterState['usage'])}
-            aria-label="Products"
+            aria-label={t('Products')}
             className={cn(SELECT_CLASS, 'lg:w-44')}
           >
-            <option value="all">Used or not</option>
-            <option value="used">With products</option>
-            <option value="unused">Without products</option>
+            <option value="all">{t('Used or not')}</option>
+            <option value="used">{t('With products')}</option>
+            <option value="unused">{t('Without products')}</option>
           </select>
 
           <div className="flex items-center gap-2 lg:ml-auto">
             <Button type="submit" variant="outline">
-              <SlidersHorizontal /> Filter
+              <SlidersHorizontal /> {t('Filter')}
             </Button>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -718,12 +668,12 @@ export function BrandManager({
                     setFilters({ search: '', status: 'all', featured: 'all', usage: 'all' });
                     setTerm('');
                   }}
-                  aria-label="Reset filters"
+                  aria-label={t('Reset filters')}
                 >
                   <RotateCcw />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Reset filters</TooltipContent>
+              <TooltipContent>{t('Reset filters')}</TooltipContent>
             </Tooltip>
           </div>
         </form>
@@ -735,36 +685,20 @@ export function BrandManager({
           total={visible.length}
           noun="brand"
           /*
-           * Nothing to fetch: the whole set arrived with the page, because a drag
-           * reorder has to renumber the real list rather than a slice of it. This
-           * is here for the virtualisation and for one consistent table.
+           * Nothing to fetch: the whole set arrived with the page. This is here
+           * for the virtualisation and for one consistent table.
            */
           hasMore={false}
           loading={false}
           error={null}
           onLoadMore={() => {}}
           onRetry={() => {}}
-          minWidth="72rem"
+          minWidth="54rem"
           estimateRowHeight={65}
-          rowProps={(row) => ({
-            onDragOver: (event) => {
-              if (!dragId) return;
-              event.preventDefault();
-              setDropId(row.id);
-            },
-            onDragLeave: () => setDropId((current) => (current === row.id ? null : current)),
-            onDrop: (event) => {
-              event.preventDefault();
-              void onDrop(row);
-            },
-          })}
-          rowClassName={(row) =>
-            cn(dropId === row.id && dragId !== row.id && 'bg-primary-soft/60', dragId === row.id && 'opacity-50')
-          }
           empty={
             rows.length === 0
-              ? 'No brands yet. Add one to label who makes what you sell.'
-              : 'No brand matches these filters.'
+              ? t('No brands yet. Add one to label who makes what you sell.')
+              : t('No brand matches these filters.')
           }
         />
 

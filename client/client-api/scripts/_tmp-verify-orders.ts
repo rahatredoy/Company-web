@@ -6,11 +6,12 @@
  * transition map forbids (refused) and one that is a no-op (same status), so a
  * shop's real order book is never advanced by a verification run.
  */
-import { randomBytes, createHash } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { config } from '../src/config/index';
 import { openTenantPoolForSlug } from '../src/db/tenant-manager';
 import { closeRedis } from '../src/lib/redis';
+import { fetchTenantBySlug } from '../src/lib/company-client';
+import { createAdminSession, revokeSession } from '../src/lib/session';
 import { ORDER_TRANSITIONS, type OrderStatus } from '../src/lib/constants';
 
 const SLUG = config.devStoreSlug ?? 'e-comarch';
@@ -63,19 +64,22 @@ async function main() {
   const pool = await openTenantPoolForSlug(SLUG);
   const admin = (await pool.query<{ id: string }>('select id from store_admins limit 1')).rows[0];
   if (!admin) throw new Error(`No store admin in ${SLUG}.`);
-  const ref = (
-    await pool.query<{ tenant_ref: string }>('select tenant_ref from admin_sessions order by created_at desc limit 1')
-  ).rows[0];
-  if (!ref) throw new Error('No previous session to read tenantRef from.');
+  /*
+   * A short-lived panel session, minted through the API's own session module.
+   * There is no table to plant a row in any more — the cookie carries a signed
+   * JWT — and the tenant reference now comes from the control plane rather than
+   * from whatever session happened to be lying about.
+   */
+  const tenant = await fetchTenantBySlug(SLUG);
+  if (!tenant) throw new Error(`No tenant registered for ${SLUG}.`);
 
-  const token = randomBytes(32).toString('base64url');
-  const session = (
-    await pool.query<{ id: string }>(
-      `insert into admin_sessions (admin_id, token_hash, tenant_ref, mfa_verified, remember, expires_at)
-       values ($1, $2, $3, true, false, now() + interval '30 minutes') returning id`,
-      [admin.id, createHash('sha256').update(token).digest('hex'), ref.tenant_ref],
-    )
-  ).rows[0]!;
+  const session = await createAdminSession(null, {
+    adminId: admin.id,
+    tenantRef: tenant.tenantRef,
+    mfaVerified: true,
+    remember: false,
+  });
+  const token = session.token;
   cookie = `store_admin_session=${token}`;
 
   /*
@@ -324,18 +328,17 @@ async function main() {
     check('PATCH /orders/:id/note → 200', noted.status === 200, noted.body);
     check('the note is stored', noted.body?.data?.adminNote === 'zz-verify note', noted.body?.data);
 
-    // -------------------------------------------------------------- shipments
+    // ------------------------------------------------- no shipment tracking
     const shipment = await call(`/api/v1/admin/orders/${planted[1]}/shipments`, {
       method: 'POST',
       body: { carrier: 'ZZ Courier', trackingNumber: 'ZZ123', trackingUrl: 'https://example.com/track/ZZ123' },
     });
-    check('POST /orders/:id/shipments → 201', shipment.status === 201, shipment.body);
-    check('the tracking number is stored', shipment.body?.data?.trackingNumber === 'ZZ123', shipment.body?.data);
+    check('POST /orders/:id/shipments is gone → 404', shipment.status === 404, shipment.body);
   } finally {
     for (const id of planted) {
       await pool.query('delete from orders where id = $1', [id]).catch(() => {});
     }
-    await pool.query('delete from admin_sessions where id = $1', [session.id]);
+    await revokeSession(tenant.tenantRef, session.id);
     await pool.end();
     await closeRedis().catch(() => {});
   }

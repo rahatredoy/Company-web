@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
-import { formatNumber } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -14,6 +14,10 @@ import { cn } from '@/lib/utils';
  * strip is a summary, not the screen. Stacked, four of these pushed the table
  * itself below the fold on a laptop; beside each other they read the same and
  * cost about a third less height.
+ *
+ * Rendered only by client components (the list managers), which is what lets it
+ * read the translator with `useT()` for the count; `label` and `note` arrive
+ * already translated.
  */
 
 const TINTS = {
@@ -45,6 +49,7 @@ export function StatCard({
   /** Makes the card a link, for a figure that is really a filtered list. */
   href?: string;
 }) {
+  const t = useT();
   /*
    * Every gap here is set rather than inherited. A heading size carries a line
    * height half again its own — enough that the three lines sat unevenly inside
@@ -60,14 +65,14 @@ export function StatCard({
 
       <div className="min-w-0 space-y-1">
         <p className="truncate text-xs leading-4 font-medium text-muted-foreground">{label}</p>
-        <p className="text-[22px] leading-none font-bold tracking-tight tabular-nums">
-          {typeof value === 'number' ? formatNumber(value) : value}
+        <p className="text-[20px] leading-none font-bold tracking-tight tabular-nums">
+          {typeof value === 'number' ? t.number(value) : value}
         </p>
         {/* Titled as well as truncated: the note is the only place a card says
             what its number is counted from. */}
         <p
           title={note}
-          className={cn('truncate text-[11px] leading-4', good ? 'text-success' : 'text-muted-foreground')}
+          className={cn('truncate text-[10.5px] leading-4', good ? 'text-success' : 'text-muted-foreground')}
         >
           {note}
         </p>

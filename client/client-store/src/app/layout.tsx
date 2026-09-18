@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Geist, Playfair_Display, Space_Grotesk } from 'next/font/google';
+import { Geist, Noto_Sans_Bengali, Playfair_Display, Space_Grotesk } from 'next/font/google';
 import { DESKTOP_LAYOUT_WIDTH, PHONE_SCREEN_MAX_WIDTH, publicConfig } from '@/config';
 import { getStoreConfig } from '@/lib/api/store';
 import { getTemplate } from '@/templates/registry';
@@ -7,11 +7,14 @@ import { resolveTheme } from '@/themes';
 import { ThemeStyle } from '@/components/layout/theme-style';
 import { StoreGate, isStoreTrading } from '@/components/layout/store-gate';
 import { BackToTop } from '@/components/layout/back-to-top';
+import { CartCurrencySync } from '@/components/commerce/cart-currency-sync';
 import { WhatsAppButton } from '@/components/layout/whatsapp-button';
 import { MobileBottomNav, MobileBottomNavSpacer } from '@/components/layout/mobile-bottom-nav';
 import { DesignSwitcherMount } from '@/components/design/design-switcher-mount';
 import { StorefrontProviders } from './providers';
 import { readLocalePreference } from '@/lib/locale/preference';
+import { I18nProvider } from '@/lib/i18n';
+import { getLanguage, getMessages, getT } from '@/lib/i18n/server';
 import './globals.css';
 
 /**
@@ -56,7 +59,21 @@ const technical = Space_Grotesk({
   preload: false,
 });
 
-const FONT_VARIABLES = `${sans.variable} ${display.variable} ${technical.variable}`;
+/*
+ * None of the three faces has Bengali glyphs, so a Bangla shop would otherwise
+ * be set in whatever each shopper's operating system falls back to. It is named
+ * after the template's face in every stack (`globals.css`), so Latin text keeps
+ * the template's voice, and it is not preloaded: the file is fetched only once
+ * Bengali text is actually painted, which an English store never does.
+ */
+const bengali = Noto_Sans_Bengali({
+  variable: '--font-bengali-family',
+  subsets: ['bengali'],
+  display: 'swap',
+  preload: false,
+});
+
+const FONT_VARIABLES = `${sans.variable} ${display.variable} ${technical.variable} ${bengali.variable}`;
 
 /**
  * Metadata is per store, so it is generated rather than static — one deployment
@@ -164,15 +181,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const config = await getStoreConfig();
   const template = await getTemplate(config.design.templateKey);
   const locale = await readLocalePreference(config);
+  // The language the shop is drawn in, and the dictionary its client components
+  // need for it — `null` for English, which ships none.
+  const [language, messages, t] = await Promise.all([getLanguage(), getMessages(), getT()]);
 
   return (
-    <html lang={locale.language} suppressHydrationWarning>
+    <html lang={language} suppressHydrationWarning>
       <head>
         {/* Painted before any content, so the first frame is already on-brand. */}
         <ThemeStyle themeKey={config.design.colorThemeKey} />
         {publicConfig.mobileLayout === 'desktop' ? <PhoneScreenFlag /> : null}
       </head>
       <body className={`${FONT_VARIABLES} ${template.bodyClassName} antialiased`}>
+        <I18nProvider language={language} messages={messages}>
         <StorefrontProviders>
         {/*
           The gate wraps the template rather than the other way round. Header,
@@ -185,7 +206,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             href="#main"
             className="sr-only-focusable absolute left-4 top-4 z-50 rounded-(--radius-button) bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
           >
-            Skip to content
+            {t('Skip to content')}
           </a>
 
           <template.Header config={config} locale={locale} />
@@ -207,10 +228,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           ) : null}
         </StoreGate>
 
+        <CartCurrencySync currency={config.store.currency} />
         <BackToTop enabled={template.preset.showBackToTop} offset={template.mobileBottomNav} />
         <WhatsAppButton contact={config.contact} offset={template.mobileBottomNav} />
         <DesignSwitcherMount />
         </StorefrontProviders>
+        </I18nProvider>
       </body>
     </html>
   );

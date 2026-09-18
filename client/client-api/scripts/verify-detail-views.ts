@@ -7,9 +7,9 @@
  * endpoint it asserts the fields the panel renders are actually present — not
  * merely that a 200 came back, which a handler returning `{}` would also manage.
  *
- * It also asserts the two things that must *not* be present. `password_hash` on
- * a customer and `unsubscribe_token_hash` on a subscriber are credentials, and a
- * panel that displays everything is exactly the change most likely to leak one.
+ * It also asserts what must *not* be present. `password_hash` on a customer is a
+ * credential, and a panel that displays everything is exactly the change most
+ * likely to leak one.
  *
  * Read-only: it creates nothing, changes nothing and deletes nothing, so it is
  * safe against `e-comarch` — unlike `verify-commerce.ts` and `verify-admin.ts`.
@@ -121,11 +121,11 @@ async function main(): Promise<void> {
     check('answers 200', status === 200, `got ${status}`);
     const missing = has(
       body,
-      'id', 'name', 'slug', 'status', 'type', 'categoryId', 'brandId', 'shortDescription',
+      'id', 'name', 'slug', 'status', 'type', 'categoryId', 'brandId',
       'description', 'priceFrom', 'salePriceFrom', 'isFeatured', 'isNewArrival', 'videoUrl',
       'trackInventory', 'soldCount', 'viewCount', 'ratingAverage', 'ratingCount',
       'returnWindowDays', 'isReturnable', 'minOrderQuantity', 'maxOrderQuantity', 'seoTitle',
-      'seoDescription', 'publishedAt', 'createdAt', 'updatedAt', 'variants', 'defaultVariant',
+      'seoDescription', 'ownerNote', 'publishedAt', 'createdAt', 'updatedAt', 'variants', 'defaultVariant',
       'media', 'specifications', 'attributeValueIds', 'bundleProductIds',
     );
     check('carries every products column the panel shows', missing.length === 0, `missing ${missing.join(', ')}`);
@@ -173,13 +173,12 @@ async function main(): Promise<void> {
     check('answers 200', status === 200, `got ${status}`);
     const missing = has(
       body,
-      'id', 'orderNumber', 'status', 'paymentStatus', 'shippingStatus', 'subtotal', 'discountTotal',
-      'taxTotal', 'shippingTotal', 'grandTotal', 'refundedTotal', 'couponCode', 'couponId',
-      'paymentProvider', 'paymentMethodLabel', 'shippingMethodId', 'shippingMethodLabel',
-      'estimatedDeliveryAt', 'customerNote', 'adminNote', 'cancelReason', 'cancelledAt',
+      'id', 'orderNumber', 'status', 'paymentStatus', 'subtotal', 'discountTotal',
+      'taxTotal', 'grandTotal', 'refundedTotal', 'couponCode', 'couponId',
+      'paymentProvider', 'paymentMethodLabel', 'customerNote', 'adminNote', 'cancelReason', 'cancelledAt',
       'inventoryReleased', 'placedAt', 'confirmedAt', 'shippedAt', 'deliveredAt', 'ipAddress',
       'metadata', 'createdAt', 'updatedAt', 'lines', 'addresses', 'history', 'payments',
-      'shipments', 'customer', 'refunds', 'returns', 'allowedTransitions',
+      'customer', 'refunds', 'returns', 'allowedTransitions',
     );
     check('carries every orders column plus its relations', missing.length === 0, `missing ${missing.join(', ')}`);
     check('refunds raised against it are listed', Array.isArray(body.refunds));
@@ -275,22 +274,25 @@ async function main(): Promise<void> {
     );
   }
 
-  // -------------------------------------------------------------- coupon ----
-  console.log('\nGET /admin/coupons/:id');
-  const coupon = await firstOf<{ id: string }>('/api/v1/admin/coupons');
-  if (!coupon) {
-    skip('coupon detail', 'this store has no coupons');
+  // ------------------------------------------------------------ discount ----
+  console.log('\nGET /admin/discounts/:id');
+  const discount = await firstOf<{ id: string }>('/api/v1/admin/discounts');
+  if (!discount) {
+    skip('discount detail', 'this store has no discounts');
   } else {
-    const { status, body } = await call<Record<string, unknown>>(`/api/v1/admin/coupons/${coupon.id}`);
+    const { status, body } = await call<Record<string, unknown>>(`/api/v1/admin/discounts/${discount.id}`);
     check('answers 200', status === 200, `got ${status}`);
     const missing = has(
       body,
-      'id', 'code', 'description', 'type', 'value', 'maxDiscountAmount', 'minOrderAmount',
-      'scope', 'targetIds', 'usageLimit', 'perCustomerLimit', 'usedCount', 'startsAt', 'endsAt',
-      'status', 'isStackable', 'createdAt', 'updatedAt', 'redemptionCount', 'totalDiscounted',
-      'redemptions',
+      'id', 'kind', 'name', 'code', 'title', 'summary', 'notes', 'valueType', 'value', 'maxDiscountAmount',
+      'minOrderAmount', 'minQuantity', 'maxDiscountedQuantity', 'minSubtotalAfterDiscount',
+      'productRules', 'purchaseRules', 'rewardRules', 'customerRules', 'paymentRules', 'areaRules',
+      'scheduleRules', 'combinationRules', 'issueRules', 'usageLimit', 'perCustomerLimit', 'usedCount',
+      'cooldownAmount', 'cooldownUnit', 'startsAt', 'endsAt', 'startsAtLocal', 'endsAtLocal', 'timezone',
+      'resolvedTimezone', 'priority', 'status', 'state', 'archivedAt', 'createdAt', 'updatedAt',
+      'labels', 'customers', 'customerIds', 'customerCount', 'analytics', 'redemptions',
     );
-    check('carries every rule plus its redemptions', missing.length === 0, `missing ${missing.join(', ')}`);
+    check('carries every rule, its analytics and its redemptions', missing.length === 0, `missing ${missing.join(', ')}`);
     check('redemptions are a list', Array.isArray(body.redemptions));
   }
 
@@ -310,27 +312,6 @@ async function main(): Promise<void> {
       'isActive', 'sortOrder', 'createdAt', 'updatedAt',
     );
     check('carries the whole row and its category', missing.length === 0, `missing ${missing.join(', ')}`);
-  }
-
-  // ---------------------------------------------------------- subscriber ----
-  console.log('\nGET /admin/newsletter/:id');
-  const subscriber = await firstOf<{ id: string }>('/api/v1/admin/newsletter');
-  if (!subscriber) {
-    skip('subscriber detail', 'nobody has signed up to this store');
-  } else {
-    const { status, body } = await call<Record<string, unknown>>(`/api/v1/admin/newsletter/${subscriber.id}`);
-    check('answers 200', status === 200, `got ${status}`);
-    const missing = has(
-      body,
-      'id', 'email', 'status', 'customerId', 'source', 'subscribedAt', 'unsubscribedAt',
-      'hasUnsubscribeToken', 'customerName', 'customerEmail', 'customerStatus', 'acceptsMarketing',
-    );
-    check('carries the row and any account behind it', missing.length === 0, `missing ${missing.join(', ')}`);
-
-    // The unsubscribe token is a credential: reporting that one exists is fine,
-    // sending it would hand the reader the power to unsubscribe that address.
-    check('never sends unsubscribeTokenHash', body.unsubscribeTokenHash === undefined);
-    check('reports whether a token exists instead', typeof body.hasUnsubscribeToken === 'boolean');
   }
 
   // ------------------------------------------------------------- message ----
@@ -357,9 +338,8 @@ async function main(): Promise<void> {
   for (const path of [
     `/api/v1/admin/reviews/${ghost}`,
     `/api/v1/admin/refunds/${ghost}`,
-    `/api/v1/admin/coupons/${ghost}`,
+    `/api/v1/admin/discounts/${ghost}`,
     `/api/v1/admin/banners/${ghost}`,
-    `/api/v1/admin/newsletter/${ghost}`,
     `/api/v1/admin/contact-messages/${ghost}`,
     `/api/v1/admin/inventory/${ghost}`,
   ]) {

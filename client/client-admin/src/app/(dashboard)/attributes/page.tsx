@@ -1,9 +1,14 @@
 import type { Metadata } from 'next';
 import { AttributeManager, type AttributeFilterState } from '@/components/admin/attribute-manager';
+import { getT } from '@/lib/i18n/server';
 import { serverGet } from '@/lib/server-api';
 import { can, type AttributeRow, type SessionResponse } from '@/lib/types';
 
-export const metadata: Metadata = { title: 'Attributes' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Attributes') };
+}
+
 export const dynamic = 'force-dynamic';
 
 export default async function AttributesPage({

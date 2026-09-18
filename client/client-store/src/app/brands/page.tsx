@@ -3,29 +3,27 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { getStoreConfig } from '@/lib/api/store';
 import { getBrands } from '@/lib/api/catalog';
-import { Breadcrumb } from '@/components/catalog/product-listing';
-import { pluralise } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const config = await getStoreConfig();
+  const [config, t] = await Promise.all([getStoreConfig(), getT()]);
   return {
-    title: 'Brands',
-    description: `Shop by brand at ${config.store.name}.`,
+    title: t('Brands'),
+    description: t('Shop by brand at {store}.', { store: config.store.name }),
     alternates: { canonical: '/brands' },
   };
 }
 
 export default async function BrandsPage() {
-  const brands = await getBrands();
+  const [brands, t] = await Promise.all([getBrands(), getT()]);
 
   return (
     <div className="container-store py-6">
-      <Breadcrumb trail={[{ name: 'Brands' }]} />
-      <h1 className="mb-6 text-2xl font-semibold sm:text-3xl">Brands</h1>
+      <h1 className="sr-only">{t('Brands')}</h1>
 
       {brands.length === 0 ? (
         <p className="rounded-(--radius-card) border border-border bg-surface px-6 py-16 text-center text-sm text-muted">
-          This store has not added any brands yet.
+          {t('This store has not added any brands yet.')}
         </p>
       ) : (
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -41,7 +39,7 @@ export default async function BrandsPage() {
                   <span className="text-base font-semibold">{brand.name}</span>
                 )}
                 <span className="text-xs text-subtle">
-                  {brand.productCount} {pluralise(brand.productCount, 'product')}
+                  {t.plural(brand.productCount, '{count} product', '{count} products')}
                 </span>
               </Link>
             </li>

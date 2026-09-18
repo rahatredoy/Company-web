@@ -6,6 +6,7 @@ import { PaymentBadges } from './payment-badges';
 import { SocialLinks } from './social-links';
 import { LocaleSelects } from './locale-selects';
 import { StoreLogo } from '@/templates/chrome';
+import { getT } from '@/lib/i18n/server';
 
 /**
  * The footer every template uses.
@@ -51,7 +52,7 @@ export function buildFooterColumns(config: StoreConfig): FooterColumn[] {
   ];
 }
 
-export function SiteFooter({
+export async function SiteFooter({
   config,
   locale,
   tone = 'surface',
@@ -64,6 +65,7 @@ export function SiteFooter({
   serif?: boolean;
   className?: string;
 }) {
+  const t = await getT();
   const columns = buildFooterColumns(config);
   const year = new Date().getFullYear();
   const dark = tone === 'dark';
@@ -102,8 +104,8 @@ export function SiteFooter({
           {/* Link columns — a grid on desktop, an accordion on a phone. */}
           <div className="hidden gap-8 sm:grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
             {columns.map((column) => (
-              <nav key={column.id} aria-label={column.title}>
-                <h2 className="mb-3 text-sm font-semibold">{column.title}</h2>
+              <nav key={column.id} aria-label={t.loose(column.title)}>
+                <h2 className="mb-3 text-sm font-semibold">{t.loose(column.title)}</h2>
                 <ul className="space-y-2">
                   {column.links.map((link) => (
                     <li key={`${column.id}-${link.href}-${link.label}`}>
@@ -114,7 +116,7 @@ export function SiteFooter({
                           dark ? 'opacity-75 hover:opacity-100' : 'text-muted',
                         )}
                       >
-                        {link.label}
+                        {t.loose(link.label)}
                       </Link>
                     </li>
                   ))}
@@ -127,13 +129,13 @@ export function SiteFooter({
             <Accordion type="multiple" className="border-t border-current/10">
               {columns.map((column) => (
                 <AccordionItem key={column.id} value={column.id} className="border-current/10">
-                  <AccordionTrigger>{column.title}</AccordionTrigger>
+                  <AccordionTrigger>{t.loose(column.title)}</AccordionTrigger>
                   <AccordionContent>
                     <ul className="space-y-2.5">
                       {column.links.map((link) => (
                         <li key={`${column.id}-${link.href}-${link.label}`}>
                           <Link href={link.href} className="text-sm hover:text-primary">
-                            {link.label}
+                            {t.loose(link.label)}
                           </Link>
                         </li>
                       ))}
@@ -151,7 +153,7 @@ export function SiteFooter({
       <div className={cn('border-t', dark ? 'border-white/10' : 'border-border')}>
         <div className="container-store flex flex-wrap items-center justify-between gap-3 py-5 text-xs">
           <p className={dark ? 'opacity-70' : 'text-subtle'}>
-            © {year} {config.store.name}. All rights reserved.
+            {t('© {year} {store}. All rights reserved.', { year: String(year), store: config.store.name })}
           </p>
 
           <LocaleSelects

@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Grid2x2,
-  Heart,
   Home,
   Search,
   ShoppingBag,
@@ -14,7 +13,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { MobileNavItem } from '@/types';
+import { WishlistIcon } from '@/lib/commerce/wishlist-icon';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * The fixed bottom bar on phones.
@@ -42,7 +43,7 @@ const ICONS: Record<string, LucideIcon> = {
   home: Home,
   categories: Grid2x2,
   shop: ShoppingBag,
-  wishlist: Heart,
+  wishlist: WishlistIcon,
   account: User,
   cart: ShoppingCart,
   search: Search,
@@ -59,6 +60,7 @@ const COLUMNS: Record<number, string> = {
 };
 
 export function MobileBottomNav({ items }: { items: MobileNavItem[] }) {
+  const t = useT();
   const pathname = usePathname();
   const shown = items.filter((item) => ICONS[item.icon]).slice(0, 5);
 
@@ -66,7 +68,7 @@ export function MobileBottomNav({ items }: { items: MobileNavItem[] }) {
 
   return (
     <nav
-      aria-label="Quick navigation"
+      aria-label={t('Quick navigation')}
       className={cn(
         'fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface lg:hidden',
         'pb-[env(safe-area-inset-bottom)]',
@@ -89,7 +91,7 @@ export function MobileBottomNav({ items }: { items: MobileNavItem[] }) {
                 )}
               >
                 <Icon className="size-5" aria-hidden />
-                {item.label}
+                {t.loose(item.label)}
               </Link>
             </li>
           );

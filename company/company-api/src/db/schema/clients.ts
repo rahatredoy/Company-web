@@ -44,43 +44,6 @@ export const clientAccounts = pgTable(
   ],
 );
 
-/**
- * A row here is either a signed-in session or a half-finished one: `otpVerified`
- * false means the password was accepted but the emailed passcode has not been,
- * so the row lives under the challenge cookie and can never satisfy
- * `requireClient`.
- */
-export const clientSessions = pgTable(
-  'client_sessions',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    clientAccountId: uuid('client_account_id')
-      .notNull()
-      .references(() => clientAccounts.id, { onDelete: 'cascade' }),
-    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
-    ipAddress: varchar('ip_address', { length: 64 }),
-    userAgent: text('user_agent'),
-    /** Chosen at the password step, applied when the passcode promotes the session. */
-    remember: boolean('remember').notNull().default(false),
-    otpVerified: boolean('otp_verified').notNull().default(false),
-    /** SHA-256 of the passcode — never the passcode itself. */
-    otpCodeHash: varchar('otp_code_hash', { length: 64 }),
-    otpExpiresAt: timestamp('otp_expires_at', { withTimezone: true }),
-    otpSentAt: timestamp('otp_sent_at', { withTimezone: true }),
-    otpAttempts: integer('otp_attempts').notNull().default(0),
-    authenticatedAt: timestamp('authenticated_at', { withTimezone: true }).notNull().defaultNow(),
-    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
-    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-    revokedAt: timestamp('revoked_at', { withTimezone: true }),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('client_sessions_token_key').on(table.tokenHash),
-    index('client_sessions_account_idx').on(table.clientAccountId),
-    index('client_sessions_expires_idx').on(table.expiresAt),
-  ],
-);
-
 export const clientLoginAttempts = pgTable(
   'client_login_attempts',
   {

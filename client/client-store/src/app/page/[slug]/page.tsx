@@ -2,11 +2,8 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getCmsPage } from '@/lib/api/content';
 import { getPublishedStoreConfig } from '@/lib/api/store';
-import { readLocalePreference } from '@/lib/locale/preference';
-import { getStoreConfig } from '@/lib/api/store';
-import { Breadcrumbs } from '@/components/layout/breadcrumbs';
+import { getT } from '@/lib/i18n/server';
 import { sanitiseHtml } from '@/lib/sanitise-html';
-import { formatDate } from '@/lib/utils';
 
 /**
  * Store-authored content: policies, about, anything the owner publishes.
@@ -24,13 +21,15 @@ interface PageProps {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const [page, config] = await Promise.all([getCmsPage(slug), getPublishedStoreConfig()]);
+  const [page, config, t] = await Promise.all([getCmsPage(slug), getPublishedStoreConfig(), getT()]);
 
-  if (!page) return { title: 'Page not found', robots: { index: false, follow: true } };
+  if (!page) return { title: t('Page not found'), robots: { index: false, follow: true } };
 
+  // The seeded policy pages' titles and summaries are translated while they are
+  // still the seed's words; an SEO title is the owner's by definition.
   return {
-    title: page.seo.title ?? page.title,
-    description: page.seo.description ?? page.excerpt ?? undefined,
+    title: page.seo.title ?? t.loose(page.title),
+    description: page.seo.description ?? (page.excerpt ? t.loose(page.excerpt) : undefined),
     alternates: { canonical: `${config.store.canonicalOrigin}/page/${page.slug}` },
   };
 }
@@ -40,20 +39,20 @@ export default async function CmsPageRoute({ params }: PageProps) {
   const page = await getCmsPage(slug);
   if (!page) notFound();
 
-  const config = await getStoreConfig();
-  const locale = await readLocalePreference(config);
+  const t = await getT();
   const body = sanitiseHtml(page.bodyHtml);
 
   return (
     <div className="container-store max-w-3xl py-6">
-      <Breadcrumbs items={[{ label: page.title }]} className="mb-6" />
-
       <header>
-        <h1 className="text-2xl font-semibold sm:text-3xl">{page.title}</h1>
-        {page.excerpt ? <p className="mt-2 text-muted">{page.excerpt}</p> : null}
+        {/* The body is HTML the owner writes and is never passed through the
+            dictionary; the title and summary above it are plain text and are. */}
+        <h1 className="text-2xl font-semibold sm:text-3xl">{t.loose(page.title)}</h1>
+        {page.excerpt ? <p className="mt-2 text-muted">{t.loose(page.excerpt)}</p> : null}
         <p className="mt-3 text-xs text-subtle">
-          Last updated{' '}
-          <time dateTime={page.updatedAt}>{formatDate(page.updatedAt, locale.language)}</time>
+          {t.rich('Last updated {date}', {
+            date: <time dateTime={page.updatedAt}>{t.date(page.updatedAt)}</time>,
+          })}
         </p>
       </header>
 
@@ -64,7 +63,7 @@ export default async function CmsPageRoute({ params }: PageProps) {
           dangerouslySetInnerHTML={{ __html: body }}
         />
       ) : (
-        <p className="mt-8 text-muted">This page has no content yet.</p>
+        <p className="mt-8 text-muted">{t('This page has no content yet.')}</p>
       )}
     </div>
   );

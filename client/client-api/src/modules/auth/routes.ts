@@ -3,18 +3,21 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import { config } from '../../config/index';
-import { adminSessions, storeAdmins } from '../../db/schema/index';
+import { storeAdmins } from '../../db/schema/index';
 import { RATE_LIMITS, STORE_ROLES, type StoreRole } from '../../lib/constants';
 import { audit, securityEvent } from '../../lib/audit';
 import { decryptSecret, encryptSecret } from '../../lib/crypto';
 import { ERROR_CODES, badRequest, forbidden, unauthorized } from '../../lib/errors';
 import { clientIp, noContent, ok, parseBody, parseParams } from '../../lib/http';
 import { fakeVerify, verifyPassword } from '../../lib/password';
+import { languageOf, translateFor } from '../../lib/i18n/index';
 import { enforce, enforceDual } from '../../lib/rate-limit';
+import { loadStoreCurrency, loadStoreLanguage } from '../../lib/store-currency';
 import {
   clearSessionCookie,
   createAdminSession,
   findAdminSession,
+  listAdminSessions,
   promoteAdminSession,
   readSessionToken,
   refreshSessionAuth,
@@ -100,10 +103,17 @@ async function sessionPayload(request: FastifyRequest, adminId: string) {
 
   if (!admin) throw unauthorized('Your session is no longer valid.', ERROR_CODES.SESSION_EXPIRED);
 
-  const permissions = await effectivePermissions(store.db, {
-    id: admin.id,
-    roleKey: admin.roleKey as StoreRole,
-  });
+  const [permissions, currency, language] = await Promise.all([
+    effectivePermissions(store.db, {
+      id: admin.id,
+      roleKey: admin.roleKey as StoreRole,
+    }),
+    // The store's own setting, not the control plane's copy on `store` — every
+    // money figure in the panel is printed in whatever this says.
+    loadStoreCurrency(store),
+    // Likewise the language: it is what the whole panel is drawn in.
+    loadStoreLanguage(store),
+  ]);
 
   return {
     authenticated: true as const,
@@ -118,8 +128,8 @@ async function sessionPayload(request: FastifyRequest, adminId: string) {
     store: {
       slug: store.slug,
       name: store.storeName,
-      currency: store.currency,
-      language: store.language,
+      currency,
+      language,
       timezone: store.timezone,
       status: store.status,
       planCode: store.entitlements?.planCode ?? null,
@@ -142,7 +152,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     const token = readSessionToken(request, 'admin');
 
     if (token) {
-      const session = await findAdminSession(store.db, token);
+      const session = await findAdminSession(store.tenantRef, token);
       if (session?.mfaVerified && session.tenantRef === store.tenantRef) {
         await app.requireStoreAdmin(request, reply);
         return ok(reply, await sessionPayload(request, session.adminId));
@@ -152,12 +162,13 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     // An in-flight MFA challenge is reported so the panel can show the code form
     // instead of the password form after a refresh.
     const challenge = readSessionToken(request, 'adminMfa');
-    const pending = challenge ? await findAdminSession(store.db, challenge) : null;
+    const pending = challenge ? await findAdminSession(store.tenantRef, challenge) : null;
 
     return ok(reply, {
       authenticated: false as const,
       mfaPending: Boolean(pending && !pending.mfaVerified && pending.tenantRef === store.tenantRef),
-      store: { slug: store.slug, name: store.storeName, status: store.status },
+      // The language too, so the sign-in screen is already in the store's own.
+      store: { slug: store.slug, name: store.storeName, status: store.status, language: await loadStoreLanguage(store) },
     });
   });
 
@@ -239,10 +250,10 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
 
     await clearFailures(store.db, admin.id, clientIp(request));
     // Any half-finished challenge from a previous attempt is dead now.
-    await revokeUnverifiedSessions(store.db, admin.id);
+    await revokeUnverifiedSessions(store.tenantRef, admin.id);
 
     if (admin.mfaEnabled) {
-      const challenge = await createAdminSession(store.db, request, {
+      const challenge = await createAdminSession(request, {
         adminId: admin.id,
         tenantRef: store.tenantRef,
         mfaVerified: false,
@@ -253,7 +264,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       return ok(reply, { authenticated: false as const, mfaRequired: true as const });
     }
 
-    const session = await createAdminSession(store.db, request, {
+    const session = await createAdminSession(request, {
       adminId: admin.id,
       tenantRef: store.tenantRef,
       mfaVerified: true,
@@ -313,7 +324,12 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const remember = body.remember || partial.remember;
-      const promoted = await promoteAdminSession(store.db, partial.sessionId, remember);
+      const promoted = await promoteAdminSession(store.tenantRef, partial.sessionId, remember);
+      // The challenge expired between being read and being promoted — rare, and
+      // indistinguishable to the caller from having taken too long over the code.
+      if (!promoted) {
+        throw unauthorized('Start again from the sign-in page.', ERROR_CODES.SESSION_EXPIRED);
+      }
       setSessionCookie(request, reply, 'admin', promoted);
       clearSessionCookie(request, reply, 'adminMfa');
 
@@ -334,15 +350,15 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     for (const audience of ['admin', 'adminMfa'] as const) {
       const token = readSessionToken(request, audience);
       if (!token) continue;
-      const session = await findAdminSession(store.db, token);
+      const session = await findAdminSession(store.tenantRef, token);
       if (session) {
-        await revokeSession(store.db, session.id);
+        await revokeSession(store.tenantRef, session.id);
         await securityEvent(store.db, request, 'logout', { adminId: session.adminId });
       }
       clearSessionCookie(request, reply, audience);
     }
 
-    return ok(reply, { message: 'Signed out.' });
+    return ok(reply, { message: await translateFor(request, 'Signed out.') });
   });
 
   // -------------------------------------------------------------- recovery ----
@@ -372,11 +388,12 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
         email: admin.email,
         fullName: admin.fullName,
         token,
+        language: await languageOf(request),
       });
       await securityEvent(store.db, request, 'password_reset_requested', { adminId: admin.id });
     }
 
-    return ok(reply, { message: 'If that address has an account, a reset link is on its way.' });
+    return ok(reply, { message: await translateFor(request, 'If that address has an account, a reset link is on its way.') });
   });
 
   app.post('/auth/reset-password', async (request, reply) => {
@@ -391,7 +408,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
 
     await setPassword(store.db, redeemed.adminId, body.password);
     // Every other device is signed out — a reset is how a compromise is undone.
-    await revokeAllSessions(store.db, redeemed.adminId);
+    await revokeAllSessions(store.tenantRef, redeemed.adminId);
     await securityEvent(store.db, request, 'password_changed', {
       adminId: redeemed.adminId,
       description: 'Password reset by email link',
@@ -399,7 +416,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
 
     clearSessionCookie(request, reply, 'admin');
     clearSessionCookie(request, reply, 'adminMfa');
-    return ok(reply, { message: 'Your password has been changed. Sign in with it now.' });
+    return ok(reply, { message: await translateFor(request, 'Your password has been changed. Sign in with it now.') });
   });
 
   /**
@@ -430,8 +447,8 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
       throw unauthorized('That did not match. Try again.', ERROR_CODES.INVALID_CREDENTIALS);
     }
 
-    await refreshSessionAuth(store.db, admin.sessionId, admin.remember);
-    return ok(reply, { message: 'Confirmed.' });
+    await refreshSessionAuth(store.tenantRef, admin.sessionId, admin.remember);
+    return ok(reply, { message: await translateFor(request, 'Confirmed.') });
   });
 
   // ------------------------------------------------------------------ MFA ----
@@ -516,7 +533,7 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
 
       await securityEvent(store.db, request, 'mfa_disabled', { adminId: admin.adminId });
       await audit(store.db, request, { action: 'mfa.disable', module: 'security', entity: 'admin', entityId: admin.adminId });
-      return ok(reply, { message: 'Two-factor authentication is off.' });
+      return ok(reply, { message: await translateFor(request, 'Two-factor authentication is off.') });
     },
   );
 
@@ -557,29 +574,31 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     const store = storeOf(request);
     const admin = request.storeAdmin!;
 
-    const rows = await store.db
-      .select({
-        id: adminSessions.id,
-        ipAddress: adminSessions.ipAddress,
-        userAgent: adminSessions.userAgent,
-        lastSeenAt: adminSessions.lastSeenAt,
-        createdAt: adminSessions.createdAt,
-        expiresAt: adminSessions.expiresAt,
-      })
-      .from(adminSessions)
-      .where(
-        and(
-          eq(adminSessions.adminId, admin.adminId),
-          eq(adminSessions.mfaVerified, true),
-          isNull(adminSessions.revokedAt),
-        ),
-      )
-      .orderBy(desc(adminSessions.lastSeenAt))
-      .limit(50);
+    /*
+     * Read from the session records rather than a table: a JWT is not written
+     * down anywhere, so the Redis record its `jti` names is the only thing that
+     * knows this login exists. Only live ones can come back — a record is gone
+     * the moment it expires or is revoked — so there is nothing here to filter
+     * for expiry or revocation.
+     */
+    const sessions = await listAdminSessions(store.tenantRef, admin.adminId);
 
     return ok(
       reply,
-      rows.map((row) => ({ ...row, current: row.id === admin.sessionId })),
+      sessions
+        // An unfinished MFA challenge is not a device to act on, and offering
+        // one would invite revoking a challenge rather than a session.
+        .filter((session) => session.mfaVerified)
+        .slice(0, 50)
+        .map((session) => ({
+          id: session.id,
+          ipAddress: session.ip,
+          userAgent: session.ua,
+          lastSeenAt: session.lastSeenAt,
+          createdAt: session.createdAt,
+          expiresAt: session.expiresAt,
+          current: session.id === admin.sessionId,
+        })),
     );
   });
 
@@ -588,16 +607,18 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     const admin = request.storeAdmin!;
     const { id } = parseParams(z.object({ id: z.string().uuid() }), request.params);
 
-    // Ownership check: a session id from another admin must not be revocable.
-    const [session] = await store.db
-      .select({ id: adminSessions.id })
-      .from(adminSessions)
-      .where(and(eq(adminSessions.id, id), eq(adminSessions.adminId, admin.adminId)))
-      .limit(1);
+    /*
+     * Ownership check: a session id from another admin must not be revocable.
+     * Asked of this admin's own index rather than of the record, because a
+     * record names its subject and comparing that would be trusting the very
+     * thing being addressed.
+     */
+    const owned = await listAdminSessions(store.tenantRef, admin.adminId);
+    if (!owned.some((session) => session.id === id)) {
+      throw forbidden('That session does not belong to you.');
+    }
 
-    if (!session) throw forbidden('That session does not belong to you.');
-
-    await revokeSession(store.db, id);
+    await revokeSession(store.tenantRef, id);
     await securityEvent(store.db, request, 'session_revoked', { adminId: admin.adminId });
 
     if (id === admin.sessionId) clearSessionCookie(request, reply, 'admin');
@@ -608,12 +629,12 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
     const store = storeOf(request);
     const admin = request.storeAdmin!;
 
-    await revokeAllSessions(store.db, admin.adminId, admin.sessionId);
+    await revokeAllSessions(store.tenantRef, admin.adminId, admin.sessionId);
     await securityEvent(store.db, request, 'session_revoked', {
       adminId: admin.adminId,
       description: 'Signed out of all other devices',
     });
-    return ok(reply, { message: 'Signed out everywhere else.' });
+    return ok(reply, { message: await translateFor(request, 'Signed out everywhere else.') });
   });
 
   // ------------------------------------------------------------- profile ----
@@ -641,11 +662,11 @@ export default async function authRoutes(app: FastifyInstance): Promise<void> {
 
       await setPassword(store.db, admin.adminId, body.newPassword);
       // Keep this device signed in; drop every other one.
-      await revokeAllSessions(store.db, admin.adminId, admin.sessionId);
-      await refreshSessionAuth(store.db, admin.sessionId, admin.remember);
+      await revokeAllSessions(store.tenantRef, admin.adminId, admin.sessionId);
+      await refreshSessionAuth(store.tenantRef, admin.sessionId, admin.remember);
       await securityEvent(store.db, request, 'password_changed', { adminId: admin.adminId });
 
-      return ok(reply, { message: 'Password changed. Other devices have been signed out.' });
+      return ok(reply, { message: await translateFor(request, 'Password changed. Other devices have been signed out.') });
     },
   );
 

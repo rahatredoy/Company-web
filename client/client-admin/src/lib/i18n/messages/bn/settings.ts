@@ -1,0 +1,42 @@
+import type { Messages } from '../index';
+
+/** The Settings screen: store, contact, payment methods, currency and language. */
+const settings = {
+  'Settings saved.': 'সেটিংস সংরক্ষিত হয়েছে।',
+  'Settings saved. Your store now uses {currency}.': 'সেটিংস সংরক্ষিত হয়েছে। আপনার স্টোর এখন {currency} ব্যবহার করছে।',
+  '{method} switched off.': '{method} বন্ধ করা হয়েছে।',
+  '{method} switched on.': '{method} চালু করা হয়েছে।',
+  'Payment methods': 'পেমেন্ট পদ্ধতি',
+  'No payment method is set up, so nobody can check out.': 'কোনো পেমেন্ট পদ্ধতি চালু নেই, তাই কেউ চেকআউট করতে পারবে না।',
+  'Disable {method}': '{method} বন্ধ করুন',
+  'Enable {method}': '{method} চালু করুন',
+  'Your store at {slug}.': '{slug} ঠিকানায় আপনার স্টোর।',
+  'Save settings': 'সেটিংস সংরক্ষণ করুন',
+  'Store name': 'স্টোরের নাম',
+  'Prices show as': 'দাম দেখাবে এভাবে',
+  '{currency} — current': '{currency} — বর্তমান',
+  'Most used': 'বেশি ব্যবহৃত',
+  'All currencies': 'সব মুদ্রা',
+  'The admin panel and your storefront are shown in this language.': 'অ্যাডমিন প্যানেল ও আপনার স্টোরফ্রন্ট এই ভাষায় দেখানো হবে।',
+  'Switching from {from} to {to}': '{from} থেকে {to}-তে পরিবর্তন',
+  'Prices are not converted — each keeps its number and takes the new symbol. The {count} order already taken keeps its own currency. You will be asked to confirm.': 'দাম রূপান্তর করা হবে না — প্রতিটি দামের সংখ্যা একই থাকবে, শুধু নতুন চিহ্ন বসবে। আগে নেওয়া {count}টি অর্ডার নিজের মুদ্রাতেই থাকবে। আপনাকে নিশ্চিত করতে বলা হবে।',
+  'Prices are not converted — each keeps its number and takes the new symbol. The {count} orders already taken keep their own currency. You will be asked to confirm.': 'দাম রূপান্তর করা হবে না — প্রতিটি দামের সংখ্যা একই থাকবে, শুধু নতুন চিহ্ন বসবে। আগে নেওয়া {count}টি অর্ডার নিজের মুদ্রাতেই থাকবে। আপনাকে নিশ্চিত করতে বলা হবে।',
+  'Orders taken before a currency switch ({orders}) are left out of revenue totals, which add up {currency} orders only.': 'মুদ্রা পরিবর্তনের আগে নেওয়া অর্ডার ({orders}) আয়ের হিসাবে ধরা হয় না; হিসাবে শুধু {currency} অর্ডার যোগ হয়।',
+  '{count} in {currency}': '{currency}-তে {count}টি',
+  'Contact': 'যোগাযোগ',
+  'WhatsApp button': 'WhatsApp বাটন',
+  'Business name': 'ব্যবসার নাম',
+  'WhatsApp number': 'WhatsApp নম্বর',
+  'Switch your store to {currency}?': 'আপনার স্টোর {currency}-তে পরিবর্তন করবেন?',
+  'This store has taken orders in {currency}. Here is what the switch does and does not do.': 'এই স্টোর {currency}-তে অর্ডার নিয়েছে। পরিবর্তনে কী হবে আর কী হবে না, তা নিচে দেওয়া হলো।',
+  '{lead} Nothing is converted: {before} becomes {after}. Products and coupon amounts all change symbol the same way.': '{lead} কিছুই রূপান্তর হয় না: {before} হয়ে যাবে {after}। পণ্য ও কুপনের অঙ্কও একইভাবে চিহ্ন বদলাবে।',
+  'Every price keeps its number.': 'প্রতিটি দামের সংখ্যা একই থাকবে।',
+  '{lead} show {currency} straight away, and new orders are charged in it.': '{lead} সঙ্গে সঙ্গে {currency} দেখাবে, আর নতুন অর্ডারের দাম এতেই নেওয়া হবে।',
+  'The admin panel and your storefront': 'অ্যাডমিন প্যানেল ও আপনার স্টোরফ্রন্ট',
+  '{lead} They stay in the currency they were charged in, and revenue totals count {currency} orders only.': '{lead} সেগুলো যে মুদ্রায় নেওয়া হয়েছিল সেই মুদ্রাতেই থাকবে, আর আয়ের হিসাবে শুধু {currency} অর্ডার গোনা হবে।',
+  'Orders already taken are not touched.': 'আগে নেওয়া অর্ডারে কোনো পরিবর্তন হবে না।',
+  'Keep {currency}': '{currency} রাখুন',
+  'Switch to {currency}': '{currency}-তে পরিবর্তন করুন',
+} satisfies Messages;
+
+export default settings;

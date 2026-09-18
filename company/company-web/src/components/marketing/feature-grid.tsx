@@ -52,7 +52,7 @@ export function FeatureGrid({
               >
                 <FeatureIcon name={feature.icon} className="size-5" />
               </span>
-              <h3 className="text-[15px] font-semibold">{feature.title}</h3>
+              <h3 className="text-[14px] font-semibold">{feature.title}</h3>
               <p className="mt-1.5 text-sm text-pretty text-muted-foreground">{feature.description}</p>
             </article>
           ))}

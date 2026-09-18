@@ -13,7 +13,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { addressType, orderStatus, paymentStatus, shippingStatus } from './enums';
+import { addressType, orderStatus, paymentStatus } from './enums';
 import { productVariants, products } from './catalog';
 import { customers } from './customers';
 
@@ -41,26 +41,33 @@ export const orders = pgTable(
 
     status: orderStatus('status').notNull().default('new'),
     paymentStatus: paymentStatus('payment_status').notNull().default('pending'),
-    shippingStatus: shippingStatus('shipping_status').notNull().default('not_shipped'),
 
     currency: varchar('currency', { length: 3 }).notNull().default('USD'),
     subtotal: numeric('subtotal', { precision: 14, scale: 2 }).notNull().default('0'),
     discountTotal: numeric('discount_total', { precision: 14, scale: 2 }).notNull().default('0'),
     taxTotal: numeric('tax_total', { precision: 14, scale: 2 }).notNull().default('0'),
-    shippingTotal: numeric('shipping_total', { precision: 14, scale: 2 }).notNull().default('0'),
     grandTotal: numeric('grand_total', { precision: 14, scale: 2 }).notNull().default('0'),
     /** Sum of completed refunds. Caps any further refund. */
     refundedTotal: numeric('refunded_total', { precision: 14, scale: 2 }).notNull().default('0'),
 
-    couponCode: varchar('coupon_code', { length: 40 }),
+    /**
+     * Every code the shopper entered that was applied, comma-separated, as a
+     * snapshot for the receipt. What each one gave is in `discount_redemptions`.
+     */
+    couponCode: varchar('coupon_code', { length: 200 }),
+    /** The discount behind the first of those codes. */
     couponId: uuid('coupon_id'),
 
     paymentProvider: varchar('payment_provider', { length: 24 }),
     paymentMethodLabel: varchar('payment_method_label', { length: 60 }),
-
-    shippingMethodId: uuid('shipping_method_id'),
-    shippingMethodLabel: varchar('shipping_method_label', { length: 80 }),
-    estimatedDeliveryAt: timestamp('estimated_delivery_at', { withTimezone: true }),
+    /**
+     * What the shopper said they were paying with — `card`, `bkash`, `cod` — and,
+     * for a card, its first digits. Kept because a bank or wallet offer was
+     * granted against them, and a real gateway's report of the instrument
+     * actually charged is what they must be checked against.
+     */
+    paymentChannel: varchar('payment_channel', { length: 24 }),
+    cardBin: varchar('card_bin', { length: 8 }),
 
     customerNote: varchar('customer_note', { length: 500 }),
     /** Staff-only. Never returned by a customer endpoint. */

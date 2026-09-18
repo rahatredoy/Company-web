@@ -3,6 +3,7 @@ import { config, isProduction } from './config/index';
 import { logger } from './lib/logger';
 import { pingDatabase } from './db/client';
 import { pingRedis } from './lib/redis';
+import httpsPlugin from './plugins/https';
 import securityPlugin from './plugins/security';
 import requestContextPlugin from './plugins/request-context';
 import errorHandlerPlugin from './plugins/error-handler';
@@ -22,8 +23,22 @@ export async function buildApp() {
     ajv: { customOptions: { removeAdditional: 'all' } },
   });
 
-  // Order matters: context (raw body) → security → errors → auth → routes.
+  // Order matters: context (raw body) → transport → security → errors → auth → routes.
   await app.register(requestContextPlugin);
+
+  /*
+   * Transport before anything reads the request.
+   *
+   * A plaintext request has already spent whatever it was carrying by the time
+   * it arrives, so the only thing left to do about it is answer before a handler
+   * acts on credentials that crossed the wire in the clear — ahead of CORS,
+   * which would otherwise decide an http origin was acceptable, and ahead of the
+   * rate limiter, which would spend a Redis round trip on a request that cannot
+   * be served. Registering it before the error handler costs nothing: a route's
+   * error handler is resolved from its own context at request time, not from the
+   * order the plugins went on.
+   */
+  await app.register(httpsPlugin);
   await app.register(securityPlugin);
   await app.register(errorHandlerPlugin);
   await app.register(authPlugin);

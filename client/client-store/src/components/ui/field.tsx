@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
+import { TranslatedText } from './translated-text';
 
 /**
  * Label + control + error + hint, wired together.
@@ -67,7 +68,10 @@ export function Field({
             <span aria-hidden className="ml-0.5 text-error">
               *
             </span>
-            <span className="sr-only"> (required)</span>
+            <span className="sr-only">
+              {' '}
+              <TranslatedText text="(required)" />
+            </span>
           </>
         ) : null}
       </label>

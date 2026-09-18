@@ -72,6 +72,7 @@ export interface StorefrontTemplate extends TemplateChrome {
  * template key arrives from tenant configuration, and turning attacker- or
  * admin-supplied text into a module path would be a code-execution hole.
  */
+// i18n-ignore
 type TemplateLoader = () => Promise<StorefrontTemplate>;
 
 const REGISTRY: Partial<Record<TemplateKey, TemplateLoader>> = {

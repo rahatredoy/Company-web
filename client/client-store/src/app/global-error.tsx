@@ -1,5 +1,7 @@
 'use client';
 
+import { useT } from '@/lib/i18n';
+
 /**
  * The last resort.
  *
@@ -16,6 +18,9 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  // Outside the root layout, so outside the provider too: this is always English.
+  const t = useT();
+
   return (
     <html lang="en">
       <body
@@ -32,9 +37,9 @@ export default function GlobalError({
         }}
       >
         <div style={{ maxWidth: '28rem' }}>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 600, margin: 0 }}>Something went wrong</h1>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 600, margin: 0 }}>{t('Something went wrong')}</h1>
           <p style={{ marginTop: '0.75rem', color: '#475569', lineHeight: 1.6 }}>
-            This store could not be loaded. Please refresh the page and try again.
+            {t('This store could not be loaded. Please refresh the page and try again.')}
           </p>
           <button
             type="button"
@@ -52,11 +57,11 @@ export default function GlobalError({
               cursor: 'pointer',
             }}
           >
-            Try again
+            {t('Try again')}
           </button>
           {error.digest ? (
             <p style={{ marginTop: '2rem', fontSize: '0.75rem', color: '#94a3b8' }}>
-              Reference {error.digest}
+              {t('Reference {code}', { code: error.digest })}
             </p>
           ) : null}
         </div>

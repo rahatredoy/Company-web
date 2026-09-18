@@ -154,7 +154,7 @@ export function NotificationsMenu({ initialUnread }: { initialUnread: number }) 
                         <span className="block truncate text-xs text-muted-foreground">
                           {item.businessName ?? item.subject}
                         </span>
-                        <span className="block text-[11px] text-muted-foreground/70">
+                        <span className="block text-[10.5px] text-muted-foreground/70">
                           {formatRelative(item.createdAt)}
                         </span>
                       </span>

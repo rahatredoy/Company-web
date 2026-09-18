@@ -33,7 +33,7 @@ function NavLinks({ billingComplete, onNavigate }: { billingComplete: boolean; o
       {ACCOUNT_NAV.map((group, index) => (
         <div key={group.label ?? `group-${index}`} className="space-y-1">
           {group.label ? (
-            <p className="px-3 pb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+            <p className="px-3 pb-1 text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">
               {group.label}
             </p>
           ) : null}

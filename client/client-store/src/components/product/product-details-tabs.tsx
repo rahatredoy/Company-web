@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import type { ProductDetail } from '@/types';
+import { useT } from '@/lib/i18n';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Accordion,
@@ -11,9 +12,9 @@ import {
 } from '@/components/ui/accordion';
 
 /**
- * Description, specifications, shipping and returns.
+ * Description, specifications and returns.
  *
- * A tab bar on desktop, an accordion on a phone — the same four panels either
+ * A tab bar on desktop, an accordion on a phone — the same panels either
  * way. Four tabs across a 390px screen either wrap into an unreadable stack or
  * scroll sideways past content nobody knows is there.
  *
@@ -21,13 +22,15 @@ import {
  * and reachable by find-in-page even while collapsed.
  */
 export function ProductDetailsTabs({ product }: { product: ProductDetail }) {
+  const t = useT();
+
   const panels = React.useMemo(() => {
     const entries: { key: string; label: string; content: React.ReactNode }[] = [];
 
     if (product.description) {
       entries.push({
         key: 'description',
-        label: 'Description',
+        label: t('Description'),
         content: (
           <div className="max-w-prose space-y-4 text-sm leading-relaxed text-muted">
             {product.description.split('\n\n').map((paragraph, index) => (
@@ -41,7 +44,7 @@ export function ProductDetailsTabs({ product }: { product: ProductDetail }) {
     if (product.specifications.length > 0) {
       entries.push({
         key: 'specifications',
-        label: 'Specifications',
+        label: t('Specifications'),
         content: (
           <dl className="max-w-2xl divide-y divide-border text-sm">
             {product.specifications.map((spec) => (
@@ -55,28 +58,22 @@ export function ProductDetailsTabs({ product }: { product: ProductDetail }) {
       });
     }
 
-    if (product.shippingInfo) {
-      entries.push({
-        key: 'shipping',
-        label: 'Shipping',
-        content: <p className="max-w-prose text-sm leading-relaxed text-muted">{product.shippingInfo}</p>,
-      });
-    }
-
     entries.push({
       key: 'returns',
-      label: 'Returns',
+      label: t('Returns'),
       content: (
         <p className="max-w-prose text-sm leading-relaxed text-muted">
           {product.isReturnable
-            ? (product.returnInfo ?? 'Thirty-day returns on unworn items with tags attached.')
-            : 'This item cannot be returned once opened, for hygiene reasons. Your statutory rights are unaffected.'}
+            ? (product.returnInfo ?? t('Thirty-day returns on unworn items with tags attached.'))
+            : t(
+                'This item cannot be returned once opened, for hygiene reasons. Your statutory rights are unaffected.',
+              )}
         </p>
       ),
     });
 
     return entries;
-  }, [product]);
+  }, [product, t]);
 
   if (panels.length === 0) return null;
 

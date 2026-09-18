@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
+import { LooseText } from './translated-text';
 
 /**
  * Status and merchandising badges.
@@ -11,7 +12,7 @@ import { cn } from '@/lib/utils';
  * badge decorative. Only `brand` and `sale` track the theme.
  */
 const badgeVariants = cva(
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-(--radius-button) px-2 py-1 text-[11px] font-semibold leading-none',
+  'inline-flex items-center gap-1 whitespace-nowrap rounded-(--radius-button) px-2 py-1 text-[10.5px] font-semibold leading-none',
   {
     variants: {
       tone: {
@@ -80,7 +81,12 @@ export function statusTone(status: string): BadgeProps['tone'] {
   return STATUS_TONES[status.toLowerCase()] ?? 'neutral';
 }
 
-/** `out_for_delivery` → `Out for delivery`. */
+/**
+ * `out_for_delivery` → `Out for delivery`.
+ *
+ * English, and the dictionary key: `StatusBadge` translates it at render, and a
+ * status the dictionary does not know yet is shown in these words.
+ */
 export function statusLabel(status: string): string {
   const words = status.replace(/[_-]+/g, ' ').trim().toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
@@ -89,7 +95,7 @@ export function statusLabel(status: string): string {
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
   return (
     <Badge tone={statusTone(status)} className={className}>
-      {statusLabel(status)}
+      <LooseText text={statusLabel(status)} />
     </Badge>
   );
 }

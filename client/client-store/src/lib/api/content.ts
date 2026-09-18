@@ -5,8 +5,8 @@ import { cookieHeader, storeCall } from '@/lib/tenant';
 import { apiFetch } from './client';
 
 /**
- * Editorial content: CMS pages, policies, FAQs, and the two forms that write
- * back — newsletter and contact.
+ * Editorial content: CMS pages, policies, FAQs, and the one form that writes
+ * back — contact.
  *
  * The reads are identical for every visitor and carry a revalidation window.
  * The writes deliberately do not: a submission must reach the API every time.
@@ -37,23 +37,6 @@ export const getFaqs = cache(async (): Promise<Faq[]> => {
     tags: ['faqs'],
   });
 });
-
-/**
- * Newsletter sign-up.
- *
- * Resolves for both a new subscriber and one who is already on the list. The
- * caller must not be able to tell the two apart — a subscribe box that reports
- * "this address is already registered" is a free account-enumeration oracle for
- * anyone with a word list.
- */
-export async function subscribeNewsletter(email: string): Promise<void> {
-  await apiFetch<unknown>('/api/v1/storefront/newsletter', {
-    method: 'POST',
-    body: { email },
-    ...(await storeCall()),
-    cookieHeader: await cookieHeader(),
-  });
-}
 
 export async function submitContactMessage(input: ContactInput): Promise<void> {
   await apiFetch<unknown>('/api/v1/storefront/contact', {

@@ -1,5 +1,6 @@
 import { Check } from 'lucide-react';
 import type { OrderTimelineEntry } from '@/types';
+import { getT } from '@/lib/i18n/server';
 import { formatDate } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
@@ -14,7 +15,7 @@ import { cn } from '@/lib/utils';
  * Steps a cancelled or returned order never reached are simply not marked
  * reached; the server decides which those are.
  */
-export function OrderTimeline({
+export async function OrderTimeline({
   timeline,
   locale,
   className,
@@ -24,6 +25,7 @@ export function OrderTimeline({
   className?: string;
 }) {
   if (timeline.length === 0) return null;
+  const t = await getT();
 
   const currentIndex = timeline.reduce(
     (latest, entry, index) => (entry.reached ? index : latest),
@@ -63,9 +65,10 @@ export function OrderTimeline({
 
             <div className="min-w-0 flex-1 pt-0.5">
               <p className={cn('text-sm', isCurrent ? 'font-semibold' : 'font-medium')}>
-                {entry.label}
+                {/* The API names its steps in English; they are translated here. */}
+                {t.loose(entry.label)}
                 <span className="sr-only">
-                  {entry.reached ? ' — completed' : ' — not yet reached'}
+                  {` — ${entry.reached ? t('completed') : t('not yet reached')}`}
                 </span>
               </p>
 

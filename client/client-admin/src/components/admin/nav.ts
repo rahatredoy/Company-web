@@ -2,42 +2,35 @@ import type { LucideIcon } from 'lucide-react';
 import {
   BadgePercent,
   Boxes,
-  ChartNoAxesCombined,
   CircleHelp,
   FileText,
   Gauge,
-  Globe,
   Image,
   LayoutGrid,
-  LayoutTemplate,
   Mail,
-  MessageSquareText,
   Package,
   RotateCcw,
   Settings,
-  ShieldCheck,
   ShoppingCart,
-  Star,
   Tags,
-  Truck,
   Users,
-  Wallet,
-  Warehouse,
 } from 'lucide-react';
+import type { MessageKey } from '@/lib/i18n';
 import type { Permission } from '@/lib/types';
 
+/** Labels are dictionary keys, translated where they are drawn. */
 export interface NavItem {
-  label: string;
+  label: MessageKey;
   href: string;
   icon: LucideIcon;
-  /** Hidden unless the signed-in admin holds this. The API enforces it too. */
-  permission: Permission;
+  /** Hidden unless the signed-in admin holds this (any one, for a list). The API enforces it too. */
+  permission: Permission | Permission[];
   /** Matches child routes as well, e.g. /products/<id>. */
   exact?: boolean;
 }
 
 export interface NavSection {
-  label: string;
+  label: MessageKey;
   items: NavItem[];
 }
 
@@ -59,17 +52,19 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Operations',
     items: [
       { label: 'Orders', href: '/orders', icon: ShoppingCart, permission: 'orders.view' },
-      { label: 'Inventory', href: '/inventory', icon: Warehouse, permission: 'inventory.view' },
-      { label: 'Shipping', href: '/shipping', icon: Truck, permission: 'orders.view' },
-      { label: 'Returns', href: '/returns', icon: RotateCcw, permission: 'returns.view' },
-      { label: 'Refunds', href: '/refunds', icon: Wallet, permission: 'refunds.view' },
+      // One screen, two tabs: a refund is raised by a completed return.
+      {
+        label: 'Returns & refunds',
+        href: '/returns',
+        icon: RotateCcw,
+        permission: ['returns.view', 'refunds.view'],
+      },
     ],
   },
   {
     label: 'Customers',
     items: [
       { label: 'Customers', href: '/customers', icon: Users, permission: 'customers.view' },
-      { label: 'Reviews', href: '/reviews', icon: Star, permission: 'reviews.view' },
     ],
   },
   {
@@ -77,29 +72,19 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Discounts', href: '/discounts', icon: BadgePercent, permission: 'marketing.view' },
       { label: 'Banners', href: '/banners', icon: Image, permission: 'marketing.view' },
-      { label: 'Newsletter', href: '/newsletter', icon: MessageSquareText, permission: 'marketing.view' },
       { label: 'Messages', href: '/messages', icon: Mail, permission: 'marketing.view' },
     ],
   },
   {
     label: 'Website',
     items: [
-      { label: 'Design', href: '/website/design', icon: Globe, permission: 'website.view' },
-      { label: 'Homepage', href: '/website/homepage', icon: LayoutTemplate, permission: 'website.view' },
       { label: 'Pages', href: '/website/pages', icon: FileText, permission: 'website.view' },
       { label: 'FAQs', href: '/website/faqs', icon: CircleHelp, permission: 'website.view' },
     ],
   },
   {
-    label: 'Insight',
-    items: [{ label: 'Reports', href: '/reports', icon: ChartNoAxesCombined, permission: 'reports.view' }],
-  },
-  {
     label: 'Store',
-    items: [
-      { label: 'Staff', href: '/staff', icon: ShieldCheck, permission: 'staff.view' },
-      { label: 'Settings', href: '/settings', icon: Settings, permission: 'settings.view' },
-    ],
+    items: [{ label: 'Settings', href: '/settings', icon: Settings, permission: 'settings.view' }],
   },
 ];
 

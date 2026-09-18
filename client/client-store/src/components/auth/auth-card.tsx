@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { getT } from '@/lib/i18n/server';
 import { cn } from '@/lib/utils';
 
 /**
@@ -8,7 +9,7 @@ import { cn } from '@/lib/utils';
  * decoration that costs a large download on the one screen where someone is
  * trying to do a single thing quickly.
  */
-export function AuthCard({
+export async function AuthCard({
   title,
   description,
   children,
@@ -21,6 +22,8 @@ export function AuthCard({
   footer?: React.ReactNode;
   className?: string;
 }) {
+  const t = await getT();
+
   return (
     <div className="container-store grid min-h-[70vh] place-items-center py-10">
       <div className={cn('w-full max-w-md', className)}>
@@ -34,15 +37,18 @@ export function AuthCard({
         {footer ? <div className="mt-5 text-center text-sm text-muted">{footer}</div> : null}
 
         <p className="mt-6 text-center text-xs text-subtle">
-          By continuing you agree to our{' '}
-          <Link href="/page/terms" className="underline underline-offset-2 hover:text-primary">
-            terms
-          </Link>{' '}
-          and{' '}
-          <Link href="/page/privacy" className="underline underline-offset-2 hover:text-primary">
-            privacy policy
-          </Link>
-          .
+          {t.rich('By continuing you agree to our {terms} and {privacy}.', {
+            terms: (
+              <Link href="/page/terms" className="underline underline-offset-2 hover:text-primary">
+                {t('terms')}
+              </Link>
+            ),
+            privacy: (
+              <Link href="/page/privacy" className="underline underline-offset-2 hover:text-primary">
+                {t('privacy policy')}
+              </Link>
+            ),
+          })}
         </p>
       </div>
     </div>

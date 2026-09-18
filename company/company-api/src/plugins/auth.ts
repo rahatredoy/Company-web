@@ -118,19 +118,22 @@ export default fp(async function auth(app: FastifyInstance) {
 
     // Sliding expiry; "remember me" sessions were created with a longer window.
     const auth = request.clientAuth!;
-    const expiresAt = await touchClientSession(auth.sessionId, auth.remember);
+    const slid = await touchClientSession(auth.sessionId, auth.remember);
 
     /*
-     * The cookie has to slide with the row. It was written once at sign-in with
-     * a fixed expiry, so without this the browser throws the session away on
-     * that schedule no matter how recently it was used — someone working
-     * through the day is signed out mid-task while the API still holds a
-     * perfectly live session.
+     * The cookie has to slide with the record, and a JWT cannot be slid in
+     * place: its expiry is signed into it, so `touch` mints a **new token** for
+     * the same session and this writes that one back. Re-writing the cookie with
+     * the string the browser already sent would move the cookie's expiry and
+     * leave the token's where it was — someone working through the day would
+     * still be signed out mid-task, and the bug would look like the refresh had
+     * simply not run.
+     *
+     * Only every few minutes, though: a Set-Cookie on every response is noise.
      */
-    const token = readSessionToken(request, 'client');
     const idleMinutes = (Date.now() - auth.lastSeenAt.getTime()) / 60_000;
-    if (reply && token && idleMinutes >= COOKIE_REFRESH_AFTER_MINUTES) {
-      setSessionCookie(reply, 'client', { id: auth.sessionId, token, expiresAt });
+    if (reply && slid && idleMinutes >= COOKIE_REFRESH_AFTER_MINUTES) {
+      setSessionCookie(reply, 'client', { id: auth.sessionId, ...slid });
     }
   });
 
@@ -188,6 +191,7 @@ export default fp(async function auth(app: FastifyInstance) {
       sessionId: session.id,
       otpVerified: session.otpVerified,
       authenticatedAt: session.authenticatedAt,
+      lastSeenAt: session.lastSeenAt,
     };
   });
 
@@ -196,7 +200,18 @@ export default fp(async function auth(app: FastifyInstance) {
     if (!request.adminAuth!.otpVerified) {
       throw new AppError(ERROR_CODES.OTP_REQUIRED, 'Enter the passcode we emailed you.', 401);
     }
-    await touchAdminSession(request.adminAuth!.sessionId);
+    /*
+     * The admin cookie slides for the same reason the client one does, and it
+     * matters more here than it did against a database row: the row could be
+     * pushed forward on its own, but a JWT expires exactly when it was signed to
+     * and would sign a working administrator out mid-task.
+     */
+    const auth = request.adminAuth!;
+    const slid = await touchAdminSession(auth.sessionId);
+    const idleMinutes = (Date.now() - auth.lastSeenAt.getTime()) / 60_000;
+    if (reply && slid && idleMinutes >= COOKIE_REFRESH_AFTER_MINUTES) {
+      setSessionCookie(reply, 'admin', { id: auth.sessionId, ...slid });
+    }
   });
 
   /**

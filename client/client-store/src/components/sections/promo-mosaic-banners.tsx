@@ -2,7 +2,7 @@
 
 import type { PromoBanner } from '@/types';
 import { PromoBannerCard } from './promo-banner-grid';
-import { BannerRotationDots, useBannerRotation } from './banner-rotation';
+import { useBannerRotation } from './banner-rotation';
 
 /**
  * The mosaic's campaign column: two panels side by side with a wide one under
@@ -14,7 +14,7 @@ import { BannerRotationDots, useBannerRotation } from './banner-rotation';
  * browser just because the panels next to it move.
  */
 export function PromoMosaicBanners({ banners }: { banners: PromoBanner[] }) {
-  const { visible, page, pages, select, pauseProps, frameClassName } = useBannerRotation(banners, 3);
+  const { visible, page, pauseProps, frameClassName } = useBannerRotation(banners, 3);
   const [first, second, third] = visible;
 
   return (
@@ -43,8 +43,6 @@ export function PromoMosaicBanners({ banners }: { banners: PromoBanner[] }) {
           </div>
         ) : null}
       </div>
-
-      <BannerRotationDots pages={pages} page={page} onSelect={select} className="mt-4" />
     </div>
   );
 }

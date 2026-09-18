@@ -23,8 +23,8 @@ export function AdminLogo({ collapsed }: { collapsed?: boolean }) {
       </span>
       {collapsed ? null : (
         <span className="flex flex-col leading-none">
-          <span className="text-[15px] font-semibold tracking-tight">{publicEnv.platformName}</span>
-          <span className="mt-0.5 text-[11px] text-muted-foreground">Company Admin</span>
+          <span className="text-[14px] font-semibold tracking-tight">{publicEnv.platformName}</span>
+          <span className="mt-0.5 text-[10.5px] text-muted-foreground">Company Admin</span>
         </span>
       )}
     </Link>

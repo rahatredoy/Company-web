@@ -71,15 +71,22 @@ const WhatsApp: Glyph = ({ className }) => (
   </svg>
 );
 
-/** Platform key → mark. A profile naming a key not in here is dropped. */
+/** Platform key → mark. A profile naming a key not in here is dropped. The labels are brand names, and stay as they are in every language. */
 const GLYPHS: Record<string, { label: string; Glyph: Glyph }> = {
+  // i18n-ignore
   facebook: { label: 'Facebook', Glyph: Facebook },
+  // i18n-ignore
   instagram: { label: 'Instagram', Glyph: Instagram },
   x: { label: 'X', Glyph: X },
+  // i18n-ignore
   youtube: { label: 'YouTube', Glyph: YouTube },
+  // i18n-ignore
   tiktok: { label: 'TikTok', Glyph: TikTok },
+  // i18n-ignore
   linkedin: { label: 'LinkedIn', Glyph: LinkedIn },
+  // i18n-ignore
   pinterest: { label: 'Pinterest', Glyph: Pinterest },
+  // i18n-ignore
   whatsapp: { label: 'WhatsApp', Glyph: WhatsApp },
 };
 

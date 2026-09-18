@@ -3,7 +3,6 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   customerAddresses,
-  customerSessions,
   customers,
   orders,
   reviews,
@@ -14,6 +13,8 @@ import { audit } from '../../lib/audit';
 import { notFound } from '../../lib/errors';
 import { cursorField, listed, ok, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
 import { keyset } from '../../lib/keyset';
+import { listCustomerSessions, revokeAllCustomerSessions } from '../../lib/session';
+import { loadStoreCurrency } from '../../lib/store-currency';
 import { storeOf } from '../../plugins/tenant';
 
 const listQuerySchema = z.object({
@@ -28,6 +29,12 @@ const listQuerySchema = z.object({
 
 const patchSchema = z.object({
   status: z.enum(['active', 'blocked']).optional(),
+  /**
+   * The group a discount can be aimed at. Set by the owner: nothing derives it
+   * from order history yet, so a VIP offer reaches exactly the customers the
+   * owner has marked VIP.
+   */
+  customerType: z.enum(['new', 'repeat', 'vip', 'high_value']).optional(),
   adminNote: z.string().trim().max(4000).nullable().optional(),
   acceptsMarketing: z.boolean().optional(),
 });
@@ -67,13 +74,16 @@ export default async function customerRoutes(app: FastifyInstance) {
       ].filter(Boolean);
 
       const where = filters.length ? and(...filters) : undefined;
+      const currency = await loadStoreCurrency(store);
 
       // Spend and order count come from `orders` rather than `customer_stats`,
       // which is a rollup nothing maintains yet — a figure that is stale is
-      // worse than one that costs a subquery.
+      // worse than one that costs a subquery. Only orders in the store's
+      // current currency are added: the panel prints the sum with its symbol.
       const spent = sql<string>`(
         select coalesce(sum(o.grand_total), 0)::text from ${orders} o
         where o.customer_id = ${customers.id} and o.status not in ('cancelled', 'failed')
+          and o.currency = ${currency}
       )`;
 
       /*
@@ -168,6 +178,7 @@ export default async function customerRoutes(app: FastifyInstance) {
           phone: customers.phone,
           status: customers.status,
           customerType: customers.customerType,
+          birthDate: customers.birthDate,
           emailVerifiedAt: customers.emailVerifiedAt,
           acceptsMarketing: customers.acceptsMarketing,
           failedLoginCount: customers.failedLoginCount,
@@ -187,6 +198,8 @@ export default async function customerRoutes(app: FastifyInstance) {
 
       if (!customer) throw notFound('That customer does not exist.');
 
+      const currency = await loadStoreCurrency(store);
+
       const [customerOrders, addresses, tally, sessions, reviewTally, wishlist] = await Promise.all([
         store.db
           .select({
@@ -194,7 +207,6 @@ export default async function customerRoutes(app: FastifyInstance) {
             orderNumber: orders.orderNumber,
             status: orders.status,
             paymentStatus: orders.paymentStatus,
-            shippingStatus: orders.shippingStatus,
             itemCount: sql<number>`(
               select coalesce(sum(oi.quantity), 0)::int from order_items oi where oi.order_id = ${orders.id}
             )`,
@@ -215,37 +227,37 @@ export default async function customerRoutes(app: FastifyInstance) {
           .orderBy(desc(customerAddresses.isDefault)),
 
         // Counted on the same basis as the list's columns: a cancelled or failed
-        // order is still an order placed, but is not money the shop took.
+        // order is still an order placed, but is not money the shop took — and
+        // an order in a currency the store no longer trades in is still an
+        // order, but not one whose total can be added to today's.
         store.db
           .select({
             orderCount: count(),
             totalSpent: sql<string>`coalesce(sum(${orders.grandTotal}) filter (
-              where ${orders.status} not in ('cancelled', 'failed')
+              where ${orders.status} not in ('cancelled', 'failed') and ${orders.currency} = ${currency}
             ), 0)::text`,
-            refunded: sql<string>`coalesce(sum(${orders.refundedTotal}), 0)::text`,
+            refunded: sql<string>`coalesce(sum(${orders.refundedTotal}) filter (
+              where ${orders.currency} = ${currency}
+            ), 0)::text`,
             firstOrderAt: sql<string | null>`min(${orders.placedAt})::text`,
             lastOrderAt: sql<string | null>`max(${orders.placedAt})::text`,
           })
           .from(orders)
           .where(eq(orders.customerId, id)),
 
-        // Where they are signed in. `token_hash` is a credential and is not
-        // selected; the device it was last seen on is not one.
-        store.db
-          .select({
-            id: customerSessions.id,
-            ipAddress: customerSessions.ipAddress,
-            userAgent: customerSessions.userAgent,
-            remember: customerSessions.remember,
-            lastSeenAt: customerSessions.lastSeenAt,
-            expiresAt: customerSessions.expiresAt,
-            revokedAt: customerSessions.revokedAt,
-            createdAt: customerSessions.createdAt,
-          })
-          .from(customerSessions)
-          .where(eq(customerSessions.customerId, id))
-          .orderBy(desc(customerSessions.lastSeenAt))
-          .limit(10),
+        /*
+         * Where they are signed in.
+         *
+         * Read from the session records rather than a table: a JWT is not
+         * written down anywhere, so the Redis record its `jti` names is the only
+         * thing that knows a login exists. Nothing here is a credential — the
+         * token is not stored in any form, so unlike the column this replaced
+         * there is nothing to remember to leave out.
+         *
+         * Only live sessions can come back, so there is no revoked state to
+         * report: a revoked session is a deleted record.
+         */
+        listCustomerSessions(store.tenantRef, id),
 
         store.db.select({ total: count() }).from(reviews).where(eq(reviews.customerId, id)),
 
@@ -288,11 +300,14 @@ export default async function customerRoutes(app: FastifyInstance) {
           createdAt: address.createdAt.toISOString(),
           updatedAt: address.updatedAt.toISOString(),
         })),
-        sessions: sessions.map((session) => ({
-          ...session,
+        sessions: sessions.slice(0, 10).map((session) => ({
+          id: session.id,
+          ipAddress: session.ip,
+          userAgent: session.ua,
+          remember: session.remember,
           lastSeenAt: session.lastSeenAt.toISOString(),
           expiresAt: session.expiresAt.toISOString(),
-          revokedAt: session.revokedAt?.toISOString() ?? null,
+          revokedAt: null,
           createdAt: session.createdAt.toISOString(),
         })),
       });
@@ -319,6 +334,7 @@ export default async function customerRoutes(app: FastifyInstance) {
         .update(customers)
         .set({
           ...(body.status === undefined ? {} : { status: body.status }),
+          ...(body.customerType === undefined ? {} : { customerType: body.customerType }),
           ...(body.adminNote === undefined ? {} : { adminNote: body.adminNote }),
           ...(body.acceptsMarketing === undefined ? {} : { acceptsMarketing: body.acceptsMarketing }),
           updatedAt: new Date(),
@@ -327,6 +343,7 @@ export default async function customerRoutes(app: FastifyInstance) {
         .returning({
           id: customers.id,
           status: customers.status,
+          customerType: customers.customerType,
           adminNote: customers.adminNote,
           acceptsMarketing: customers.acceptsMarketing,
         });
@@ -337,10 +354,7 @@ export default async function customerRoutes(app: FastifyInstance) {
        * is the opposite of what whoever pressed it expected.
        */
       if (body.status === 'blocked' && existing.status !== 'blocked') {
-        await store.db.execute(
-          sql`update customer_sessions set revoked_at = now()
-              where customer_id = ${id}::uuid and revoked_at is null`,
-        );
+        await revokeAllCustomerSessions(store.tenantRef, id);
       }
 
       await audit(store.db, request, {
@@ -348,7 +362,7 @@ export default async function customerRoutes(app: FastifyInstance) {
         module: 'customers',
         entity: 'customer',
         entityId: id,
-        entityLabel: existing.email,
+        entityLabel: existing.email ?? existing.id,
         oldValues: { status: existing.status },
         newValues: updated,
       });

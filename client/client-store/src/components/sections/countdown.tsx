@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useHydrated } from '@/lib/hooks/use-hydrated';
 
@@ -79,7 +80,7 @@ export function Countdown({
   className,
   size = 'md',
   tone = 'surface',
-  expiredLabel = 'This offer has ended',
+  expiredLabel,
 }: {
   /** Epoch milliseconds. */
   deadline: number;
@@ -88,23 +89,28 @@ export function Countdown({
   tone?: 'surface' | 'primary' | 'plain';
   expiredLabel?: string;
 }) {
+  const t = useT();
   const hydrated = useHydrated();
   const second = React.useSyncExternalStore(subscribeToSecond, readSecond, readSecondOnServer);
   const remaining = hydrated ? remainingFrom(deadline, second * 1000) : null;
 
   if (hydrated && remaining?.done) {
-    return <p className={cn('text-sm font-medium text-muted', className)}>{expiredLabel}</p>;
+    return (
+      <p className={cn('text-sm font-medium text-muted', className)}>
+        {expiredLabel ?? t('This offer has ended')}
+      </p>
+    );
   }
 
   // Days only appear once there is at least one, so a 23-hour deal does not
   // display a permanent "00".
   const showDays = (remaining?.days ?? 0) > 0;
 
-  const units: { label: string; short: string; value: number | null }[] = [
-    ...(showDays ? [{ label: 'Days', short: 'Days', value: remaining?.days ?? null }] : []),
-    { label: 'Hours', short: 'Hrs', value: remaining?.hours ?? null },
-    { label: 'Minutes', short: 'Mins', value: remaining?.minutes ?? null },
-    { label: 'Seconds', short: 'Secs', value: remaining?.seconds ?? null },
+  const units: { key: string; short: string; value: number | null }[] = [
+    ...(showDays ? [{ key: 'days', short: t('Days'), value: remaining?.days ?? null }] : []),
+    { key: 'hours', short: t('Hrs'), value: remaining?.hours ?? null },
+    { key: 'minutes', short: t('Mins'), value: remaining?.minutes ?? null },
+    { key: 'seconds', short: t('Secs'), value: remaining?.seconds ?? null },
   ];
 
   return (
@@ -115,7 +121,7 @@ export function Countdown({
       aria-live="off"
     >
       {units.map((unit, index) => (
-        <React.Fragment key={unit.label}>
+        <React.Fragment key={unit.key}>
           {index > 0 ? (
             <span
               aria-hidden
@@ -140,7 +146,9 @@ export function Countdown({
                 size === 'lg' && 'min-w-14 px-2.5 py-3 text-2xl',
               )}
             >
-              {unit.value === null ? '––' : String(unit.value).padStart(2, '0')}
+              {unit.value === null
+                ? '––'
+                : t.number(unit.value, { minimumIntegerDigits: 2, useGrouping: false })}
             </span>
             <span className="mt-1 text-[10px] font-medium uppercase tracking-wide text-subtle">
               {unit.short}
@@ -151,8 +159,17 @@ export function Countdown({
 
       <span className="sr-only">
         {remaining
-          ? `Offer ends in ${showDays ? `${remaining.days} days, ` : ''}${remaining.hours} hours and ${remaining.minutes} minutes.`
-          : 'Loading time remaining.'}
+          ? showDays
+            ? t('Offer ends in {days} days, {hours} hours and {minutes} minutes.', {
+                days: remaining.days,
+                hours: remaining.hours,
+                minutes: remaining.minutes,
+              })
+            : t('Offer ends in {hours} hours and {minutes} minutes.', {
+                hours: remaining.hours,
+                minutes: remaining.minutes,
+              })
+          : t('Loading time remaining.')}
       </span>
     </div>
   );

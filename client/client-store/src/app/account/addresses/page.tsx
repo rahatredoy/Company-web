@@ -1,8 +1,12 @@
 import type { Metadata } from 'next';
 import { getAddresses } from '@/lib/api/account';
 import { AddressBook } from '@/components/account/address-book';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = { title: 'Addresses', robots: { index: false, follow: false } };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Addresses'), robots: { index: false, follow: false } };
+}
 
 /**
  * Saved delivery addresses.
@@ -12,12 +16,11 @@ export const metadata: Metadata = { title: 'Addresses', robots: { index: false, 
  * browser cannot read for itself.
  */
 export default async function AddressesPage() {
-  const addresses = await getAddresses();
+  const [addresses, t] = await Promise.all([getAddresses(), getT()]);
 
   return (
     <>
-      <h1 className="text-2xl font-semibold sm:text-3xl">Addresses</h1>
-      <p className="mt-2 text-muted">Where we send your orders.</p>
+      <h1 className="sr-only">{t('Addresses')}</h1>
 
       <AddressBook addresses={addresses} />
     </>

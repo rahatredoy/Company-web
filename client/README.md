@@ -140,9 +140,23 @@ is a provisioning failure to be fixed on the company side, not something a visit
 
 ### Sessions
 
-Opaque 32-byte tokens; only the SHA-256 is stored. The row lives in the tenant's own database and
-carries `tenant_ref`, so a token minted for one store is simply absent from another store's table —
-cross-tenant replay fails before the `tenant_ref` comparison, which is the second line of defence.
+A **JWT in an HttpOnly cookie**, with a Redis record behind it. The JWT (HS256, `lib/jwt.ts`)
+answers *is this real, who is it for, and which store* — signature, expiry, audience and the `tnt`
+claim are all checked with no I/O, so a forged or expired cookie is refused before Redis is asked
+anything. The record its `jti` names answers *is it still live*: a JWT cannot be recalled once
+issued, and signing out, signing out everywhere and a password change ending every other login are
+exactly that, so **no record means no session**.
+
+The token is never written down in any form — there is no `token_hash` column and no session table.
+The record is keyed `t:<tenantRef>:session:<family>:<jti>`, so a token minted for one store cannot
+even be looked up through another store's request; the `tnt` claim is checked against the host as
+well, because a store's identity is the whole of this API's isolation model.
+
+Each principal signs with a key derived from `STORE_AUTH_SECRET` for its own family, so a shopper's
+token is not merely labelled differently from an admin's — it cannot be verified as one.
+
+Sliding expiry costs one extra step: a JWT's expiry is signed into it, so `touch*` mints a **new
+token for the same `jti`** and the guards write it back every five minutes.
 
 | Audience | Cookie | Never interoperates with |
 | --- | --- | --- |
@@ -284,14 +298,57 @@ which is a deliberate trade and the honest ceiling on freshness.
 
 ---
 
+## Three ways in
+
+Email and password, a phone number and a six-digit code, or Google. They make one
+kind of account: whichever way somebody arrives, they end up as a row in
+`customers` on that store and nothing downstream can tell the difference.
+
+- **Phone.** `customers.phone_e164` is the identity and is written **only by a
+  passed code**, which is why it can carry a unique index while `customers.phone`
+  — free text an admin could type anything into — cannot.
+  `lib/phone.ts#toE164` is the one normaliser, and `verify-auth-methods.ts` puts
+  six spellings of one Bangladeshi mobile through sign-in and asserts they land
+  on one account. Three steps: `request` sends a code and reveals nothing,
+  `verify` signs in a known number or returns a ticket for an unknown one, and
+  `register` spends the ticket. No password is set at any point.
+- **Google.** One redirect URI serves the whole platform, because Google matches
+  them exactly and has no wildcards:
+  `{API_PUBLIC_URL}/api/v1/oauth/google/callback`, the only tenant-free route on
+  this API. The store rides in `state`; the callback parks the profile under a
+  single-use code and bounces back to the shop, where the exchange runs under the
+  store's own hostname so the cookie lands on the right origin. Accounts are
+  matched on Google's `sub`, and an existing password account is linked only when
+  Google says `email_verified`.
+- **Email.** Unchanged.
+
+`customers.email` is nullable as a result — an account made from a handset has no
+address until its owner adds one — and checkout is where a phone-only shopper is
+asked for one, because that is where a receipt actually needs somewhere to go.
+
+Codes go through `lib/sms.ts`, which has a single `log` driver: in development
+the code is in the API log, exactly as a reset link is. `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` are both-or-neither, and with neither the button is not
+drawn and every Google route answers 503.
+
+```bash
+npx tsx scripts/verify-auth-methods.ts        # 48 checks
+```
+
+---
+
 ## Taking an order
 
-The account half of the surface is guarded by `requireCustomer` — `store_customer_session`, rows in
-`customer_sessions`, a fourth cookie family that satisfies none of the other three and carries no
-permissions at all. Checkout itself uses `optionalCustomer`: it is a **guest flow**, because
-requiring an account in order to buy something is how a shop loses the sale.
+The account half of the surface is guarded by `requireCustomer` — `store_customer_session`, a JWT
+signed with a key of its own and naming a tenant-scoped Redis record, a fourth cookie family that
+satisfies none of the other three and carries no permissions at all. **Checkout is guarded by it too**:
+`POST /checkout` requires a customer, so a signed-out basket is refused with a 401 rather than taken
+as a guest, and every order belongs to a customer record. The `/checkout` page redirects to
+`/login?next=/checkout` first, but that is a courtesy to a browser — the guard is what makes it true
+of a POST from anything else. `/coupons/validate` deliberately keeps `optionalCustomer`: it is asked
+from the basket, before the sign-in the order will demand.
 
-**The request carries ids and quantities and no money.** Price, sale window, coupon, shipping and
+**The request carries ids and quantities and no money.** Price, sale price, coupon, shipping and
 every total are recomputed from the tenant database, because the basket lives in `localStorage` and
 anything priced there is a number the customer could have edited. Stock moves `available → reserved`
 in a single conditional `UPDATE`; the `>= 0` CHECK constraints turn a race for the last unit into
@@ -301,8 +358,9 @@ Three details that are easy to get wrong and are checked by the script:
 
 - `GET /account/me` answers **404, not 401**, when signed out. The account layout redirects on a
   null customer; a 401 would throw and take the page out instead.
-- A guest who has just paid gets back onto their own receipt through `store_guest_orders` — an
-  opaque cookie whose SHA-256 keys a Redis set of the orders that browser placed. An order number
+- `store_guest_orders` — an opaque cookie whose SHA-256 keys a Redis set of the orders a browser
+  placed — is no longer written, now that every buyer has a session to authorise their own receipt
+  with. It is still read, so receipts from the guest-checkout era keep opening. An order number
   alone is still never enough to read an order.
 - Coupons are validated **only** on the server. The storefront used to hold two hardcoded tables
   that already disagreed with each other about one code's minimum; both are gone.
@@ -319,18 +377,18 @@ SSLCommerz are adapter seams.
 | 0 — foundation, tenant resolution, store-admin auth, admin shell | **done, verified** |
 | 1 — catalogue: categories, brands, products | **done, verified** (`scripts/verify-catalog.ts`, 40 checks) |
 | 9 — storefront **read** path, `client-store` on live data | **done, verified** (`scripts/verify-storefront.ts`, 34 checks) |
-| 10–12 — customer accounts, checkout, orders, tracking, returns, reviews | **done, verified** (`scripts/verify-commerce.ts`, 55 checks) |
-| 2–8 — the admin panel's own sections | **done, verified** (`scripts/verify-admin.ts`, 96 checks) |
+| 10–12 — customer accounts, checkout, orders, tracking, returns, reviews | **done, verified** (`scripts/verify-commerce.ts`, 57 checks) |
+| 2–8 — the admin panel's own sections | **done, verified** (`scripts/verify-admin.ts`, 91 checks) |
 
-The storefront is a working shop: a visitor can register, buy as a guest or as an account holder,
-pay by cash on delivery or through the test gateway, track, cancel and return an order, and leave a
-review that waits for moderation. Cart, wishlist and compare stay in the visitor's own browser by
+The storefront is a working shop: a visitor can register, sign in and buy — an account is required
+to place an order — pay by cash on delivery or through the test gateway, track, cancel and return an
+order, and leave a review that waits for moderation. Cart, wishlist and compare stay in the visitor's own browser by
 design.
 
-**All 20 of `client-admin`'s sidebar destinations are built.** An owner can run the shop end to end:
+**All 18 of `client-admin`'s sidebar destinations are built.** An owner can run the shop end to end:
 take an order through to delivery, adjust stock against a ledger, moderate reviews, quote delivery,
 work a return through to a refund, issue discount codes, edit the pages the storefront renders, and
-change the layout and colour. `app/(dashboard)/[...section]/page.tsx` is now a plain 404 — its
+change the layout and colour (the Design tab of Settings). `app/(dashboard)/[...section]/page.tsx` is now a plain 404 — its
 "coming soon" branch is unreachable and was removed.
 
 Images upload straight from the panel to Cloudflare R2 — product photos, banners, logo and favicon.

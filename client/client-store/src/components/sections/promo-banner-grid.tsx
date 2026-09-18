@@ -4,8 +4,9 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import type { PromoBanner } from '@/types';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { BannerRotationDots, useBannerRotation } from './banner-rotation';
+import { useBannerRotation } from './banner-rotation';
 
 /**
  * Campaign banners: one wide, two side by side, or a row of three.
@@ -77,10 +78,7 @@ export function PromoBannerGrid({
   className?: string;
 }) {
   const cols = columns ?? (Math.min(Math.max(banners.length, 1), 3) as 1 | 2 | 3);
-  const { visible, page, pages, select, pauseProps, frameClassName } = useBannerRotation(
-    banners,
-    cols,
-  );
+  const { visible, page, pauseProps, frameClassName } = useBannerRotation(banners, cols);
 
   // After the hook, not before it: an early return above a hook is the one way
   // to break the rules of hooks that a store with no banners would trigger.
@@ -103,8 +101,6 @@ export function PromoBannerGrid({
           </li>
         ))}
       </ul>
-
-      <BannerRotationDots pages={pages} page={page} onSelect={select} className="mt-4" />
     </div>
   );
 }
@@ -121,6 +117,7 @@ export function PromoBannerCard({
   sizes?: string;
   className?: string;
 }) {
+  const t = useT();
   const tinted = isTinted(banner);
   const onDark = banner.tone === 'dark' || banner.tone === 'primary';
   /*
@@ -177,7 +174,7 @@ export function PromoBannerCard({
         {banner.eyebrow ? (
           <span
             className={cn(
-              'mb-1.5 text-[11px] font-semibold uppercase tracking-[0.16em]',
+              'mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em]',
               banner.imageUrl ? 'text-white/80' : onDark ? 'opacity-80' : 'text-primary',
             )}
           >
@@ -207,7 +204,7 @@ export function PromoBannerCard({
               banner.imageUrl || onDark ? 'bg-white/15 text-current' : 'bg-surface text-foreground',
             )}
           >
-            <span className="opacity-70">Use Code:</span>
+            <span className="opacity-70">{t('Use Code:')}</span>
             <span className="font-mono tracking-wide">{banner.couponCode}</span>
           </span>
         ) : null}

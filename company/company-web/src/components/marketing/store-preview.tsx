@@ -45,7 +45,7 @@ export function StorePreview({ className }: { className?: string }) {
         <BrowserChrome label="your-store.company.com" />
 
         <div className="flex items-center justify-between border-b border-white/8 px-4 py-2.5">
-          <span className="text-[11px] font-semibold text-white">Your Store</span>
+          <span className="text-[10.5px] font-semibold text-white">Your Store</span>
           <div className="hidden gap-3 text-[10px] text-white/45 sm:flex">
             <span>Home</span>
             <span>Shop</span>
@@ -73,7 +73,7 @@ export function StorePreview({ className }: { className?: string }) {
               <br />
               Up to 50% Off
             </p>
-            <p className="text-[10px] text-white/55 sm:text-[11px]">
+            <p className="text-[10px] text-white/55 sm:text-[10.5px]">
               Discover amazing products at unbeatable prices.
             </p>
             <span className="inline-flex rounded-md bg-[#6d4aff] px-3 py-1.5 text-[10px] font-semibold text-white">

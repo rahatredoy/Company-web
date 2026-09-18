@@ -3,7 +3,6 @@ import { PackageSearch } from 'lucide-react';
 import { getStoreConfig } from '@/lib/api/store';
 import { trackOrder } from '@/lib/api/orders';
 import { readLocalePreference } from '@/lib/locale/preference';
-import { Breadcrumbs } from '@/components/layout/breadcrumbs';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
@@ -11,12 +10,16 @@ import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/badge';
 import { OrderTimeline } from '@/components/account/order-timeline';
 import { OrderLines, AddressBlock } from '@/components/account/order-detail-parts';
+import { getT } from '@/lib/i18n/server';
 import { formatDate } from '@/lib/utils';
 
-export const metadata: Metadata = {
-  title: 'Track your order',
-  description: 'Look up an order with your order number and email address.',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return {
+    title: t('Track your order'),
+    description: t('Look up an order with your order number and email address.'),
+  };
+}
 
 /**
  * Guest order tracking.
@@ -41,19 +44,18 @@ export default async function TrackOrderPage({
   const submitted = Boolean(orderNumber && email);
 
   const config = await getStoreConfig();
-  const locale = await readLocalePreference(config);
+  const [locale, t] = await Promise.all([readLocalePreference(config), getT()]);
   const order = submitted ? await trackOrder(orderNumber!, email!) : null;
 
   return (
     <div className="container-store max-w-3xl py-6">
-      <Breadcrumbs items={[{ label: 'Track your order' }]} className="mb-6" />
-      <h1 className="text-2xl font-semibold sm:text-3xl">Track your order</h1>
+      <h1 className="text-2xl font-semibold sm:text-3xl">{t('Track your order')}</h1>
       <p className="mt-2 text-muted">
-        Enter your order number and the email address you used, and we will show you where it is.
+        {t('Enter your order number and the email address you used, and we will show you where it is.')}
       </p>
 
       <form method="get" className="mt-8 grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-        <Field name="order" label="Order number" required>
+        <Field name="order" label={t('Order number')} required>
           {(props) => (
             <Input
               {...props}
@@ -64,12 +66,13 @@ export default async function TrackOrderPage({
           )}
         </Field>
 
-        <Field name="email" label="Email address" required>
+        <Field name="email" label={t('Email address')} required>
           {(props) => (
             <Input
               {...props}
               type="email"
               defaultValue={email ?? ''}
+              // i18n-ignore — an example address, not copy
               placeholder="you@example.com"
               autoComplete="email"
             />
@@ -77,14 +80,15 @@ export default async function TrackOrderPage({
         </Field>
 
         <Button type="submit" size="lg">
-          Track
+          {t('Track')}
         </Button>
       </form>
 
       {submitted && !order ? (
-        <Alert tone="warning" title="We could not find that order" className="mt-8">
-          Check the order number and the email address you used, then try again. If you have just
-          ordered, it can take a few minutes to appear.
+        <Alert tone="warning" title={t('We could not find that order')} className="mt-8">
+          {t(
+            'Check the order number and the email address you used, then try again. If you have just ordered, it can take a few minutes to appear.',
+          )}
         </Alert>
       ) : null}
 
@@ -94,7 +98,7 @@ export default async function TrackOrderPage({
             <div>
               <p className="font-mono text-lg font-semibold">{order.orderNumber}</p>
               <p className="text-sm text-muted">
-                Placed {formatDate(order.placedAt, locale.language)}
+                {t('Placed {date}', { date: formatDate(order.placedAt, locale.language) })}
               </p>
             </div>
 
@@ -104,51 +108,20 @@ export default async function TrackOrderPage({
             </div>
           </div>
 
-          {order.tracking?.number ? (
-            <dl className="grid gap-4 border-b border-border py-4 text-sm sm:grid-cols-2">
-              <div>
-                <dt className="text-subtle">Courier</dt>
-                <dd className="mt-0.5 font-medium">{order.tracking.carrier ?? '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-subtle">Tracking number</dt>
-                <dd className="mt-0.5 font-mono font-medium">
-                  {order.tracking.url ? (
-                    <a
-                      href={order.tracking.url}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="text-primary hover:underline"
-                    >
-                      {order.tracking.number}
-                    </a>
-                  ) : (
-                    order.tracking.number
-                  )}
-                </dd>
-              </div>
-            </dl>
-          ) : null}
-
           <div className="grid gap-6 py-4 sm:grid-cols-2">
             <div>
-              <h2 className="mb-3 text-sm font-semibold">Progress</h2>
+              <h2 className="mb-3 text-sm font-semibold">{t('Progress')}</h2>
               <OrderTimeline timeline={order.timeline} locale={locale.language} />
-              {order.estimatedDeliveryAt ? (
-                <p className="mt-4 text-sm text-muted">
-                  Estimated delivery {formatDate(order.estimatedDeliveryAt, locale.language)}
-                </p>
-              ) : null}
             </div>
 
             <div>
-              <h2 className="mb-3 text-sm font-semibold">Delivering to</h2>
+              <h2 className="mb-3 text-sm font-semibold">{t('Delivering to')}</h2>
               <AddressBlock address={order.shippingAddress} />
             </div>
           </div>
 
           <div className="border-t border-border pt-4">
-            <h2 className="mb-3 text-sm font-semibold">Items</h2>
+            <h2 className="mb-3 text-sm font-semibold">{t('Items')}</h2>
             <OrderLines lines={order.lines} currency={order.currency} locale={locale.language} />
           </div>
         </div>
@@ -158,8 +131,10 @@ export default async function TrackOrderPage({
         <div className="mt-10 flex items-start gap-3 rounded-(--radius-card) bg-surface-alt p-5 text-sm text-muted">
           <PackageSearch className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
           <p>
-            Your order number is in your confirmation email and starts with <code>ORD-</code>. If
-            you have an account, your orders are listed there without needing this page.
+            {t.rich(
+              'Your order number is in your confirmation email and starts with {prefix}. If you have an account, your orders are listed there without needing this page.',
+              { prefix: <code>ORD-</code> },
+            )}
           </p>
         </div>
       ) : null}

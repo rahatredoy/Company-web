@@ -1,12 +1,15 @@
 import Link from 'next/link';
 import type { StorefrontTemplate, TemplateChromeProps, TemplateHomepageProps, TemplatePreset } from '../registry';
+import { TEMPLATE_META } from '../meta';
 import { StoreLogo } from '../chrome';
 import { AnnouncementBar } from '@/components/layout/announcement-bar';
 import { HeaderActions } from '@/components/layout/header-actions';
 import { MobileNav } from '@/components/layout/mobile-nav';
+import { BackButton } from '@/components/layout/back-button';
 import { SearchBox } from '@/components/layout/search-box';
 import { SiteFooter } from '@/components/layout/site-footer';
 import { HomepageSections } from '@/sections/section-renderer';
+import { getT } from '@/lib/i18n/server';
 
 /**
  * Minimal Store — restraint as the design.
@@ -37,18 +40,21 @@ const preset: TemplatePreset = {
   sectionRhythm: 'airy',
 };
 
-function Header({ config }: TemplateChromeProps) {
+async function Header({ config }: TemplateChromeProps) {
+  const t = await getT();
+
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-surface">
       <AnnouncementBar announcement={config.announcement} />
 
       <div className="container-store flex h-[4.5rem] items-center gap-4">
         <MobileNav config={config} />
+        <BackButton />
         <StoreLogo config={config} priority />
 
         {/* Only the first few links — a minimal header listing everything is not
             a minimal header. */}
-        <nav aria-label="Main" className="ml-10 hidden lg:block">
+        <nav aria-label={t('Main')} className="ml-10 hidden lg:block">
           <ul className="flex items-center gap-8">
             {config.navigation.header.slice(0, 4).map((item) => (
               <li key={item.id}>
@@ -56,7 +62,7 @@ function Header({ config }: TemplateChromeProps) {
                   href={item.href}
                   className="text-sm text-muted transition-colors hover:text-foreground"
                 >
-                  {item.label}
+                  {t.loose(item.label)}
                 </Link>
               </li>
             ))}
@@ -102,7 +108,7 @@ const GRID = 'product-grid grid grid-cols-1 gap-x-6 gap-y-12 sm:grid-cols-2 lg:g
 const template: StorefrontTemplate = {
   key: 'minimal_store',
   name: 'Minimal Store',
-  description: 'Restrained and premium, for small curated catalogues.',
+  description: TEMPLATE_META.minimal_store.description,
   Header,
   Footer,
   Homepage,

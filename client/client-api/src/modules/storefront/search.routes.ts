@@ -74,8 +74,7 @@ async function loadSuggestions(db: TenantDb, q: string, limit: number): Promise<
         name: products.name,
         slug: products.slug,
         price: products.priceFrom,
-        // The live sale, so a search result cannot quote a price the
-        // product page then refuses. See `service.ts#liveSalePriceSql`.
+        // The active variants' sale. See `service.ts#liveSalePriceSql`.
         salePrice: liveSalePriceSql,
         brandName: brands.name,
         imageUrl: sql<string | null>`(

@@ -44,7 +44,8 @@ declare module 'fastify' {
      */
     customer?: {
       customerId: string;
-      email: string;
+      /** Null on an account that signed up with a phone number and added none. */
+      email: string | null;
       fullName: string;
       sessionId: string;
       tenantRef: string;

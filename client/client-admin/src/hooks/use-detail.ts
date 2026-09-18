@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { api, errorMessage } from '@/lib/api';
+import { useT, type MessageKey } from '@/lib/i18n';
 
 /**
  * The record behind a **View** panel.
@@ -24,6 +25,15 @@ import { api, errorMessage } from '@/lib/api';
  * the slower request would paint its error and its spinner over the right row.
  */
 
+/**
+ * What a failed read says when the failure carried no message of its own.
+ *
+ * Stored as the English key and translated on the way out, rather than
+ * translated inside the effect: that would make the translator a dependency of
+ * the read, and the effect is written to run once per row.
+ */
+const LOAD_FAILED: MessageKey = 'That record could not be loaded.';
+
 export interface Detail<T> {
   data: T | null;
   loading: boolean;
@@ -34,15 +44,19 @@ export interface Detail<T> {
 export function useDetail<T>({
   path,
   id,
+  suffix = '',
   enabled = true,
 }: {
   /** The collection, without the id — `/api/v1/admin/orders`. */
   path: string;
   /** Which row the panel is pointed at. Null while it has never been opened. */
   id: string | null;
+  /** Appended after the id, for a read about the row — `/insights?days=30`. */
+  suffix?: string;
   /** False while the panel is shut, so opening is what triggers the read. */
   enabled?: boolean;
 }): Detail<T> {
+  const t = useT();
   const [cache, setCache] = React.useState<Record<string, T>>({});
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -62,7 +76,7 @@ export function useDetail<T>({
   React.useEffect(() => {
     if (!enabled || !id) return;
 
-    const key = `${path}:${id}:${generation}`;
+    const key = `${path}:${id}${suffix}:${generation}`;
     if (asked.current.has(key)) return;
     asked.current.add(key);
 
@@ -71,7 +85,7 @@ export function useDetail<T>({
     setError(null);
 
     api
-      .get<T>(`${path}/${id}`)
+      .get<T>(`${path}/${id}${suffix}`)
       .then((data) => {
         if (cancelled) return;
         setCache((previous) => ({ ...previous, [id]: data }));
@@ -82,7 +96,7 @@ export function useDetail<T>({
         // Forgotten, so closing and reopening the row retries rather than
         // leaving an error the reader has no way to clear.
         asked.current.delete(key);
-        setError(errorMessage(cause, 'That record could not be loaded.'));
+        setError(errorMessage(cause, LOAD_FAILED));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -91,7 +105,7 @@ export function useDetail<T>({
     return () => {
       cancelled = true;
     };
-  }, [path, id, enabled, generation]);
+  }, [path, id, suffix, enabled, generation]);
 
   const cached = id ? cache[id] : undefined;
 
@@ -100,7 +114,7 @@ export function useDetail<T>({
     // Only while there is nothing to show. A `reload` over a record already on
     // screen refreshes it in place rather than replacing it with skeletons.
     loading: loading && cached === undefined && error === null,
-    error,
+    error: error === LOAD_FAILED ? t(LOAD_FAILED) : error,
     reload,
   };
 }
@@ -127,4 +141,41 @@ export function useViewTarget<T>() {
   }, []);
 
   return { row, open, view, onOpenChange: setOpen };
+}
+
+/**
+ * A list's panel, opened on arrival when the address names a row.
+ *
+ * Other screens link to one record as `/<list>?view=<id>` — a return, a
+ * customer — because a record has no screen of its own; it is read in its
+ * list's panel. The page reads that id on the server and hands the row in, and
+ * this opens the panel once for it. Closing drops `view` from the address
+ * without a navigation, so a refresh or a filter change does not reopen a
+ * record the reader shut. `OrderManager` does the same by hand.
+ */
+export function useAddressedView<T extends { id: string }>(initialView: T | null | undefined) {
+  const viewing = useViewTarget<T>();
+  const { view, onOpenChange } = viewing;
+
+  const openedFor = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (initialView && initialView.id !== openedFor.current) {
+      openedFor.current = initialView.id;
+      view(initialView);
+    }
+  }, [initialView, view]);
+
+  const changeOpen = React.useCallback(
+    (open: boolean) => {
+      onOpenChange(open);
+      const url = new URL(window.location.href);
+      if (!open && url.searchParams.has('view')) {
+        url.searchParams.delete('view');
+        window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+      }
+    },
+    [onOpenChange],
+  );
+
+  return { ...viewing, onOpenChange: changeOpen };
 }

@@ -196,18 +196,6 @@ async function main(): Promise<void> {
     // ------------------------------------------------------- the refusals ----
     console.log('\nWhat checkout refuses');
 
-    /*
-     * The shop's own shipping method, quoted for the address below. Checkout
-     * refuses an id it did not quote, so a made-up one fails the whole basket
-     * for a reason that has nothing to do with what is being tested.
-     */
-    const quoted = await call<{ id: string }[]>(
-      '/api/v1/storefront/checkout/shipping-methods?country=Bangladesh&city=Dhaka',
-      { auth: false },
-    );
-    const shippingMethodId = quoted.body?.[0]?.id ?? 'any';
-    check('the shop quotes a shipping method for the test address', Boolean(quoted.body?.[0]?.id));
-
     const buy = (lines: { quantity: number; measure?: number }[]) =>
       call<{ orderNumber?: string; message?: string }>('/api/v1/storefront/checkout', {
         method: 'POST',
@@ -223,7 +211,6 @@ async function main(): Promise<void> {
             city: 'Dhaka',
             country: 'Bangladesh',
           },
-          shippingMethodId,
           paymentProvider: 'cod',
         },
       });

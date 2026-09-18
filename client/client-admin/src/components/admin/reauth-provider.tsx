@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ReauthCancelledError, api, errorCode, errorMessage } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 
 interface ReauthContextValue {
   /**
@@ -22,9 +23,9 @@ interface ReauthContextValue {
    * password (and second factor), then retries the action exactly once.
    * Rejects with ReauthCancelledError if the prompt is dismissed.
    */
-  run: <T>(action: () => Promise<T>) => Promise<T>;
+  run: <T>(action: () => Promise<T>) => Promise<T>; // i18n-ignore
   /** Imperative prompt. Resolves true once identity is confirmed. */
-  confirm: () => Promise<boolean>;
+  confirm: () => Promise<boolean>; // i18n-ignore
 }
 
 const ReauthContext = React.createContext<ReauthContextValue | null>(null);
@@ -44,6 +45,7 @@ export function ReauthProvider({
   mfaEnabled: boolean;
   children: React.ReactNode;
 }) {
+  const t = useT();
   const [open, setOpen] = React.useState(false);
   const [step, setStep] = React.useState<Step>('password');
   const [password, setPassword] = React.useState('');
@@ -77,6 +79,7 @@ export function ReauthProvider({
   }, []);
 
   const run = React.useCallback(
+    // i18n-ignore
     async <T,>(action: () => Promise<T>): Promise<T> => {
       try {
         return await action();
@@ -109,13 +112,13 @@ export function ReauthProvider({
       if (codeValue === 'MFA_REQUIRED') {
         // MFA was turned on elsewhere since this page loaded.
         setStep('mfa');
-        setError('Enter the code from your authenticator app to continue.');
+        setError(t('Enter the code from your authenticator app to continue.'));
       } else if (codeValue === 'MFA_INVALID') {
         setCode('');
-        setError('That code was not accepted. Codes rotate every 30 seconds.');
+        setError(t('That code was not accepted. Codes rotate every 30 seconds.'));
       } else if (codeValue === 'INVALID_CREDENTIALS') {
         setPassword('');
-        setError('Your password is incorrect.');
+        setError(t('Your password is incorrect.'));
       } else {
         setError(errorMessage(err));
       }
@@ -143,17 +146,17 @@ export function ReauthProvider({
                 ) : (
                   <ShieldCheck className="size-5 text-primary" aria-hidden />
                 )}
-                Confirm your identity
+                {t('Confirm your identity')}
               </DialogTitle>
               <DialogDescription>
-                This action is protected. Re-enter your password to continue.
+                {t('This action is protected. Re-enter your password to continue.')}
               </DialogDescription>
             </DialogHeader>
 
             <div className="my-5 space-y-4">
               {error ? <Alert variant="danger">{error}</Alert> : null}
 
-              <Field label="Password" htmlFor="reauth-password" required>
+              <Field label={t('Password')} htmlFor="reauth-password" required>
                 <Input
                   id="reauth-password"
                   type="password"
@@ -165,7 +168,7 @@ export function ReauthProvider({
               </Field>
 
               {needsCode ? (
-                <Field label="Authentication code" htmlFor="reauth-code" required>
+                <Field label={t('Authentication code')} htmlFor="reauth-code" required>
                   <Input
                     id="reauth-code"
                     inputMode="numeric"
@@ -180,7 +183,7 @@ export function ReauthProvider({
               ) : null}
 
               {step === 'recovery' ? (
-                <Field label="Recovery code" htmlFor="reauth-recovery" required>
+                <Field label={t('Recovery code')} htmlFor="reauth-recovery" required>
                   <Input
                     id="reauth-recovery"
                     placeholder="XXXX-XXXX-XXXX"
@@ -200,17 +203,19 @@ export function ReauthProvider({
                   }}
                   className="text-xs text-muted-foreground hover:text-primary"
                 >
-                  {step === 'recovery' ? 'Use your authenticator app instead' : 'Lost your device? Use a recovery code'}
+                  {step === 'recovery'
+                    ? t('Use your authenticator app instead')
+                    : t('Lost your device? Use a recovery code')}
                 </button>
               ) : null}
             </div>
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => settle(false)} disabled={busy}>
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button type="submit" loading={busy} disabled={!password}>
-                Confirm
+                {t('Confirm')}
               </Button>
             </DialogFooter>
           </form>

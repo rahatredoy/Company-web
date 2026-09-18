@@ -31,7 +31,7 @@ export interface StoreContext {
 }
 
 /** Routes that are deliberately tenant-free. */
-const EXEMPT_PREFIXES = ['/health', '/api/v1/webhooks'];
+const EXEMPT_PREFIXES = ['/health', '/api/v1/webhooks', '/api/v1/oauth'];
 
 /**
  * Derives the store slug from trusted signals only.

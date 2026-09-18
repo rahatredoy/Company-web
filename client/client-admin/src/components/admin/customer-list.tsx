@@ -1,16 +1,20 @@
 'use client';
 
-import Link from 'next/link';
 import { Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ListMeta } from '@/lib/api';
-import { formatDate, formatMoney } from '@/lib/format';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
-import { useViewTarget } from '@/hooks/use-detail';
+import { useAddressedView } from '@/hooks/use-detail';
 import type { CustomerRow } from '@/lib/types';
+import { useT, type MessageKey } from '@/lib/i18n';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { CustomerDetail } from './customer-detail';
 import { InfiniteTable, type Column } from './infinite-table';
+
+const STATUS_LABELS: Record<CustomerRow['status'], MessageKey> = {
+  active: 'Active',
+  blocked: 'Blocked',
+};
 
 /**
  * The customer list. The server renders the first batch and this appends the
@@ -27,27 +31,37 @@ export function CustomerList({
   currency,
   query,
   filtered,
+  canUpdate,
+  initialView,
 }: {
   initial: { rows: CustomerRow[]; meta: ListMeta };
   currency: string;
   /** The filters the first batch was read with; every later batch repeats them. */
   query: Record<string, string | undefined>;
   filtered: boolean;
+  canUpdate: boolean;
+  /** A customer named by `?view=<id>` — how every other screen links to one. */
+  initialView: CustomerRow | null;
 }) {
+  const t = useT();
   const list = useInfiniteList<CustomerRow>({ path: '/api/v1/admin/customers', query, initial });
 
   /** One panel for the whole list; a row's button names which record it shows. */
-  const viewing = useViewTarget<CustomerRow>();
+  const viewing = useAddressedView<CustomerRow>(initialView);
 
   const columns: Column<CustomerRow>[] = [
     {
       key: 'customer',
-      header: 'Customer',
+      header: t('Customer'),
       cell: (row) => (
         <>
-          <Link href={`/customers/${row.id}`} className="block truncate font-medium hover:underline">
+          <button
+            type="button"
+            onClick={() => viewing.view(row)}
+            className="block max-w-full truncate text-left font-medium hover:underline"
+          >
             {row.fullName}
-          </Link>
+          </button>
           <span className="block truncate text-xs text-muted-foreground">{row.email}</span>
         </>
       ),
@@ -55,20 +69,20 @@ export function CustomerList({
     {
       key: 'joined',
       width: '10rem',
-      header: 'Joined',
+      header: t('Joined'),
       className: 'text-sm text-muted-foreground',
-      cell: (row) => formatDate(row.createdAt),
+      cell: (row) => t.date(row.createdAt),
     },
     {
       key: 'status',
       width: '8rem',
-      header: 'Status',
-      cell: (row) => <StatusBadge status={row.status} />,
+      header: t('Status'),
+      cell: (row) => <StatusBadge status={row.status} label={t(STATUS_LABELS[row.status])} />,
     },
     {
       key: 'orders',
       width: '7rem',
-      header: 'Orders',
+      header: t('Orders'),
       headClassName: 'text-right',
       className: 'text-right tabular-nums',
       cell: (row) => row.orderCount,
@@ -76,10 +90,10 @@ export function CustomerList({
     {
       key: 'spent',
       width: '9rem',
-      header: 'Spent',
+      header: t('Spent'),
       headClassName: 'text-right',
       className: 'text-right font-medium tabular-nums',
-      cell: (row) => formatMoney(row.totalSpent, currency),
+      cell: (row) => t.money(row.totalSpent, currency),
     },
     {
       key: 'view',
@@ -90,7 +104,7 @@ export function CustomerList({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`View ${row.fullName}`}
+          aria-label={t('View {name}', { name: row.fullName })}
           onClick={() => viewing.view(row)}
         >
           <Eye />
@@ -113,7 +127,7 @@ export function CustomerList({
         onRetry={list.retry}
         minWidth="52rem"
         estimateRowHeight={62}
-        empty={filtered ? 'No customer matches those filters.' : 'No customers yet.'}
+        empty={filtered ? t('No customer matches those filters.') : t('No customers yet.')}
       />
 
       <CustomerDetail
@@ -121,6 +135,7 @@ export function CustomerList({
         open={viewing.open}
         onOpenChange={viewing.onOpenChange}
         currency={currency}
+        canUpdate={canUpdate}
       />
     </>
   );

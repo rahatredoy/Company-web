@@ -1,4 +1,7 @@
+'use client';
+
 import { Star } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -19,9 +22,11 @@ export function RatingStars({
   size?: 'xs' | 'sm' | 'md';
   className?: string;
 }) {
+  const t = useT();
   const rounded = Math.round(rating * 2) / 2;
+  const average = t.number(rating, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const starSize = { xs: 'size-3', sm: 'size-3.5', md: 'size-4' }[size];
-  const textSize = { xs: 'text-[11px]', sm: 'text-xs', md: 'text-sm' }[size];
+  const textSize = { xs: 'text-[10.5px]', sm: 'text-xs', md: 'text-sm' }[size];
 
   return (
     <span className={cn('inline-flex items-center gap-1.5', className)}>
@@ -46,13 +51,14 @@ export function RatingStars({
       </span>
 
       <span className="sr-only">
-        Rated {rating.toFixed(1)} out of 5
-        {typeof count === 'number' ? ` from ${count} reviews` : ''}
+        {typeof count === 'number'
+          ? t('Rated {rating} out of 5 from {count} reviews', { rating: average, count })
+          : t('Rated {rating} out of 5', { rating: average })}
       </span>
 
       {showCount && typeof count === 'number' ? (
         <span className={cn(textSize, 'text-subtle')} aria-hidden>
-          ({count})
+          ({t.number(count)})
         </span>
       ) : null}
     </span>

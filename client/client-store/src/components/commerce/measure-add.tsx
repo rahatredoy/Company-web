@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import type { ProductSummary } from '@/types';
 import { useCart } from '@/lib/commerce/cart';
 import { defaultOption, priceForMeasure, startingQuantity } from '@/lib/commerce/measure';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -37,6 +38,7 @@ export function MeasureAdd({
   product: ProductSummary;
   className?: string;
 }) {
+  const t = useT();
   const router = useRouter();
   const { cart, add, updateQuantity } = useCart();
   const measure = product.measure!;
@@ -91,8 +93,8 @@ export function MeasureAdd({
     // is 350gm puts four in the basket rather than one the till would refuse.
     addToBasket(Math.min(ceiling, floor));
 
-    toast.success(product.name + ' (' + option.label + ') added to your cart', {
-      action: { label: 'View cart', onClick: () => router.push('/cart') },
+    toast.success(t('{name} ({size}) added to your cart', { name: product.name, size: option.label }), {
+      action: { label: t('View cart'), onClick: () => router.push('/cart') },
     });
   };
 
@@ -113,7 +115,7 @@ export function MeasureAdd({
     <div className={cn('flex items-center gap-1.5', className)}>
       {measure.options.length > 1 ? (
         <label className="relative min-w-0 flex-1">
-          <span className="sr-only">Size for {product.name}</span>
+          <span className="sr-only">{t('Size for {name}', { name: product.name })}</span>
           <select
             value={option.measure}
             onChange={(event) => setSize(Number(event.target.value))}
@@ -140,18 +142,18 @@ export function MeasureAdd({
           <button
             type="button"
             onClick={() => step(-1)}
-            aria-label={'Less ' + product.name}
+            aria-label={t('Less {name}', { name: product.name })}
             className="grid size-7 place-items-center text-primary"
           >
             <Minus className="size-3.5" aria-hidden />
           </button>
           <span className="min-w-4 text-center text-xs font-semibold tabular-nums" aria-live="polite">
-            {line.quantity}
+            {t.number(line.quantity)}
           </span>
           <button
             type="button"
             onClick={() => step(1)}
-            aria-label={'More ' + product.name}
+            aria-label={t('More {name}', { name: product.name })}
             disabled={line.quantity >= ceiling}
             className="grid size-7 place-items-center text-primary disabled:opacity-40"
           >
@@ -162,7 +164,7 @@ export function MeasureAdd({
         <button
           type="button"
           onClick={onFirstAdd}
-          aria-label={'Add ' + option.label + ' of ' + product.name + ' to cart'}
+          aria-label={t('Add {size} of {name} to cart', { size: option.label, name: product.name })}
           className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground shadow-[var(--shadow-card)] transition-transform hover:scale-105 active:scale-95"
         >
           <Plus className="size-4" aria-hidden />

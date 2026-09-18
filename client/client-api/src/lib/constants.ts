@@ -23,10 +23,20 @@ export const SESSION_COOKIE = {
 } as const;
 
 /**
- * Token audience. A company-admin or company-client session can never
- * authenticate here, and a store-admin session can never authenticate there.
+ * The `aud` claim on every session JWT this API issues.
+ *
+ * A company-admin or company-client token can never authenticate here, and none
+ * of these can authenticate there — different secrets as well as different
+ * audiences. Each principal gets one of its own rather than a flag inside a
+ * shared audience: `verifyJwt` is handed the single value it will accept, so an
+ * unfinished MFA challenge or a shopper's token presented to a store-admin route
+ * does not merely fail a check further in, it fails to verify at all.
  */
-export const AUTH_AUDIENCE = 'commerce-admin' as const;
+export const AUTH_AUDIENCE = {
+  admin: 'commerce-admin',
+  adminMfa: 'commerce-admin-mfa',
+  customer: 'commerce-customer',
+} as const;
 
 export const STORE_ROLES = {
   superAdmin: 'STORE_SUPER_ADMIN',
@@ -83,13 +93,6 @@ export const PERMISSIONS = [
   'website.view',
   'website.manage',
 
-  'reports.view',
-
-  'staff.view',
-  'staff.create',
-  'staff.update',
-  'staff.delete',
-
   'settings.view',
   'settings.update',
 ] as const;
@@ -109,8 +112,6 @@ export const PERMISSION_GROUPS: { group: string; permissions: Permission[] }[] =
   { group: 'Reviews', permissions: ['reviews.view', 'reviews.manage'] },
   { group: 'Marketing', permissions: ['marketing.view', 'marketing.manage'] },
   { group: 'Website', permissions: ['website.view', 'website.manage'] },
-  { group: 'Reports', permissions: ['reports.view'] },
-  { group: 'Staff', permissions: ['staff.view', 'staff.create', 'staff.update', 'staff.delete'] },
   { group: 'Settings', permissions: ['settings.view', 'settings.update'] },
 ];
 
@@ -129,7 +130,6 @@ export const DEFAULT_STORE_ADMIN_PERMISSIONS: Permission[] = [
   'reviews.view',
   'marketing.view',
   'website.view',
-  'reports.view',
 ];
 
 /** Storefront templates — underscore keys, authoritative in `storefront_settings`. */
@@ -178,38 +178,6 @@ export function normaliseTemplateKey(value: string | null | undefined): Storefro
     ? (key as StorefrontTemplate)
     : DEFAULT_TEMPLATE;
 }
-
-/**
- * The homepage blocks a store may arrange, mirroring the `homepage_section_type`
- * enum exactly.
- *
- * Validated here rather than left to Postgres: an unknown value would otherwise
- * surface as a 500 from the driver on insert, when it is really a 422 about one
- * field. The storefront skips any type it does not recognise, so this list is
- * also the ceiling on what a compromised admin session can put on a shopfront.
- */
-export const HOMEPAGE_SECTION_TYPES = [
-  'hero',
-  'category_grid',
-  'category_circle',
-  'product_grid',
-  'product_carousel',
-  'banner',
-  'deal',
-  'promo_trio',
-  'flash_sale',
-  'benefits',
-  'lookbook',
-  'testimonial',
-  'brands',
-  'newsletter',
-  'text',
-  'collection',
-  'social_gallery',
-  'recently_viewed',
-] as const;
-
-export type HomepageSectionType = (typeof HOMEPAGE_SECTION_TYPES)[number];
 
 /**
  * Closed vocabularies for the icons a store may pick.

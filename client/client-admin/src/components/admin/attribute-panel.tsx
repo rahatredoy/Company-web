@@ -22,6 +22,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
 import { api, ApiError, errorMessage } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { slugify } from '@/lib/slugify';
 import { cn } from '@/lib/utils';
 import type { AttributeRow, AttributeValueRow } from '@/lib/types';
@@ -100,6 +101,7 @@ export function AttributePanel({
   attribute: AttributeRow | null;
   onSaved: () => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = React.useState<Draft>(() => draftFrom(attribute));
   /** The slug follows the name until somebody edits it, then it stays put. */
   const [slugTouched, setSlugTouched] = React.useState(Boolean(attribute));
@@ -143,13 +145,13 @@ export function AttributePanel({
       return;
     }
 
-    if (!globalThis.confirm(`Delete the value “${row.value}”? This cannot be undone.`)) return;
+    if (!globalThis.confirm(t('Delete the value “{value}”? This cannot be undone.', { value: row.value }))) return;
 
     setRemoving(row.key);
     try {
       await api.delete(`/api/v1/admin/attributes/${attribute.id}/values/${row.id}`);
       setDraft((current) => ({ ...current, values: current.values.filter((value) => value.key !== row.key) }));
-      toast.success('Value deleted.');
+      toast.success(t('Value deleted.'));
       onSaved();
     } catch (caught) {
       // Refused while products point at it — the API's own words are the useful
@@ -204,7 +206,7 @@ export function AttributePanel({
       if (attribute) await api.put(`/api/v1/admin/attributes/${attribute.id}`, payload);
       else await api.post('/api/v1/admin/attributes', payload);
 
-      toast.success(attribute ? 'Attribute saved.' : 'Attribute added.');
+      toast.success(attribute ? t('Attribute saved.') : t('Attribute added.'));
       onOpenChange(false);
       onSaved();
     } catch (caught) {
@@ -226,9 +228,9 @@ export function AttributePanel({
       <SheetContent>
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
           <SheetHeader>
-            <SheetTitle>{attribute ? 'Edit Attribute' : 'Add Attribute'}</SheetTitle>
+            <SheetTitle>{attribute ? t('Edit Attribute') : t('Add Attribute')}</SheetTitle>
             <SheetDescription>
-              Size, Colour, Material — anything a product varies by, or that a shopper filters on.
+              {t('Size, Colour, Material — anything a product varies by, or that a shopper filters on.')}
             </SheetDescription>
           </SheetHeader>
 
@@ -242,7 +244,7 @@ export function AttributePanel({
             <SheetColumns>
               <SheetColumn>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Attribute Name" htmlFor="attr-name" required error={fieldErrors.name}>
+                  <Field label={t('Attribute Name')} htmlFor="attr-name" required error={fieldErrors.name}>
                     <Input
                       id="attr-name"
                       value={draft.name}
@@ -253,7 +255,7 @@ export function AttributePanel({
                       required
                       maxLength={80}
                       autoFocus
-                      placeholder="Size"
+                      placeholder={t('Size')}
                     />
                   </Field>
 
@@ -265,9 +267,9 @@ export function AttributePanel({
                     selecting anything.
                   */}
                   <Field
-                    label="Filter key"
+                    label={t('Filter key')}
                     htmlFor="attr-slug"
-                    hint="Used in storefront filter links."
+                    hint={t('Used in storefront filter links.')}
                     error={fieldErrors.slug}
                   >
                     <Input
@@ -278,16 +280,16 @@ export function AttributePanel({
                         set('slug', event.target.value);
                       }}
                       onBlur={(event) => set('slug', slugify(event.target.value))}
-                      placeholder="made-from-the-name"
+                      placeholder={t('made-from-the-name')}
                       maxLength={90}
                       className="font-mono text-xs"
                     />
                   </Field>
 
                   <Field
-                    label="Unit"
+                    label={t('Unit::measure')}
                     htmlFor="attr-unit"
-                    hint="cm, kg, ml — optional."
+                    hint={t('cm, kg, ml — optional.')}
                     error={fieldErrors.unit}
                   >
                     <Input
@@ -299,27 +301,28 @@ export function AttributePanel({
                   </Field>
                 </div>
 
-                <Field label="Shown As" htmlFor="attr-input-type" error={fieldErrors.inputType}>
+                <Field label={t('Shown As')} htmlFor="attr-input-type" error={fieldErrors.inputType}>
                   <select
                     id="attr-input-type"
                     value={draft.inputType}
                     onChange={(event) => set('inputType', event.target.value as Draft['inputType'])}
                     className={SELECT_CLASS}
                   >
-                    <option value="select">A list to choose from</option>
-                    <option value="color">Colour swatches</option>
-                    <option value="text">Free text</option>
-                    <option value="number">A number</option>
+                    <option value="select">{t('A list to choose from')}</option>
+                    <option value="color">{t('Colour swatches')}</option>
+                    <option value="text">{t('Free text')}</option>
+                    <option value="number">{t('A number')}</option>
                   </select>
                 </Field>
 
                 <div className="space-y-3 rounded-lg border border-border p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <Label htmlFor="attr-variant">Buying option</Label>
+                      <Label htmlFor="attr-variant">{t('Buying option')}</Label>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Picking a value selects a different thing to buy, with its own SKU, price and stock. Turn this
-                        off for something that only narrows a listing.
+                        {t(
+                          'Picking a value selects a different thing to buy, with its own SKU, price and stock. Turn this off for something that only narrows a listing.',
+                        )}
                       </p>
                     </div>
                     <Switch
@@ -331,16 +334,18 @@ export function AttributePanel({
 
                   {attribute && attribute.variantCount > 0 && !draft.isVariantAttribute ? (
                     <Alert variant="warning">
-                      {attribute.variantCount} variant{attribute.variantCount === 1 ? '' : 's'} already use this as a
-                      buying option. Turning it off leaves them as they are, but the storefront stops offering the
-                      choice.
+                      {t.plural(
+                        attribute.variantCount,
+                        '{count} variant already use this as a buying option. Turning it off leaves them as they are, but the storefront stops offering the choice.',
+                        '{count} variants already use this as a buying option. Turning it off leaves them as they are, but the storefront stops offering the choice.',
+                      )}
                     </Alert>
                   ) : null}
 
                   <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
                     <div>
-                      <Label htmlFor="attr-filterable">Offer as a filter</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">Shown in the storefront’s filter panel.</p>
+                      <Label htmlFor="attr-filterable">{t('Offer as a filter')}</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">{t('Shown in the storefront’s filter panel.')}</p>
                     </div>
                     <Switch
                       id="attr-filterable"
@@ -351,9 +356,9 @@ export function AttributePanel({
                 </div>
 
                 <Field
-                  label="Sort Order"
+                  label={t('Sort Order')}
                   htmlFor="attr-sort"
-                  hint="Lower numbers come first in the storefront’s filter list."
+                  hint={t('Lower numbers come first in the storefront’s filter list.')}
                   error={fieldErrors.sortOrder}
                 >
                   <Input
@@ -371,14 +376,16 @@ export function AttributePanel({
               {/* ----------------------------------------------------- values */}
               <SheetColumn className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <Label>Values</Label>
-                  <span className="text-xs text-muted-foreground">{draft.values.length} value(s)</span>
+                  <Label>{t('Values')}</Label>
+                  <span className="text-xs text-muted-foreground">
+                    {t('{count} value(s)', { count: draft.values.length })}
+                  </span>
                 </div>
 
                 <div className="space-y-2">
                   {draft.values.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                      No values yet. Add the ones shoppers will choose between.
+                      {t('No values yet. Add the ones shoppers will choose between.')}
                     </p>
                   ) : (
                     draft.values.map((row) => {
@@ -393,9 +400,9 @@ export function AttributePanel({
                           <Input
                             value={row.value}
                             onChange={(event) => setValue(row.key, { value: event.target.value })}
-                            placeholder="Medium"
+                            placeholder={t('Medium')}
                             maxLength={120}
-                            aria-label="Value"
+                            aria-label={t('Value')}
                           />
 
                           {swatches ? (
@@ -403,15 +410,19 @@ export function AttributePanel({
                               type="color"
                               value={row.colorHex || '#000000'}
                               onChange={(event) => setValue(row.key, { colorHex: event.target.value })}
-                              aria-label={`Colour for ${row.value || 'this value'}`}
+                              aria-label={
+                                row.value
+                                  ? t('Colour for {value}', { value: row.value })
+                                  : t('Colour for this value')
+                              }
                               className="size-10 shrink-0 cursor-pointer rounded-lg border border-input bg-background p-1"
                             />
                           ) : null}
 
                           {locked ? (
-                            <Badge variant="neutral" className="shrink-0" title="Used by products">
+                            <Badge variant="neutral" className="shrink-0" title={t('Used by products')}>
                               <Lock className="size-3" aria-hidden />
-                              {row.productCount || row.variantCount}
+                              {t.number(row.productCount || row.variantCount)}
                             </Badge>
                           ) : null}
 
@@ -421,7 +432,9 @@ export function AttributePanel({
                             size="icon-sm"
                             loading={removing === row.key}
                             onClick={() => void dropValue(row)}
-                            aria-label={`Remove ${row.value || 'this value'}`}
+                            aria-label={
+                              row.value ? t('Remove {value}', { value: row.value }) : t('Remove this value')
+                            }
                             className={cn('shrink-0', locked && 'text-muted-foreground')}
                           >
                             {removing === row.key ? null : <X />}
@@ -433,14 +446,15 @@ export function AttributePanel({
                 </div>
 
                 <Button type="button" variant="outline" size="sm" onClick={addValue}>
-                  <Plus /> Add value
+                  <Plus /> {t('Add value')}
                 </Button>
 
                 {fieldErrors.values ? <p className="text-xs text-destructive">{fieldErrors.values}</p> : null}
 
                 <p className="text-xs text-muted-foreground">
-                  A value in use is marked with a lock and the number of products behind it — the API refuses to
-                  delete one until those products stop using it.
+                  {t(
+                    'A value in use is marked with a lock and the number of products behind it — the API refuses to delete one until those products stop using it.',
+                  )}
                 </p>
               </SheetColumn>
             </SheetColumns>
@@ -448,10 +462,10 @@ export function AttributePanel({
 
           <SheetFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t('Cancel')}
             </Button>
             <Button type="submit" loading={busy}>
-              {attribute ? 'Save Attribute' : 'Add Attribute'}
+              {attribute ? t('Save Attribute') : t('Add Attribute')}
             </Button>
           </SheetFooter>
         </form>

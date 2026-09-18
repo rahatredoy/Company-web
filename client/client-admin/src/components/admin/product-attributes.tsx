@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
+import { useT } from '@/lib/i18n';
 
 /**
  * The descriptive values a product *has* — Material: Cotton, Season: Winter.
@@ -35,6 +36,7 @@ export function ProductAttributes({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const t = useT();
 
   const [chosen, setChosen] = React.useState<Set<string>>(() => new Set(selected));
   const [saving, setSaving] = React.useState(false);
@@ -59,7 +61,7 @@ export function ProductAttributes({
       await api.put(`/api/v1/admin/products/${productId}/attributes`, {
         attributeValueIds: [...chosen],
       });
-      toast.success('Attributes saved.');
+      toast.success(t('Attributes saved.'));
       router.refresh();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -71,10 +73,11 @@ export function ProductAttributes({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Attributes</CardTitle>
+        <CardTitle>{t('Attributes')}</CardTitle>
         <CardDescription>
-          Facts about the product that shoppers filter by. Options they choose between when buying belong on a
-          variant instead.
+          {t(
+            'Facts about the product that shoppers filter by. Options they choose between when buying belong on a variant instead.',
+          )}
         </CardDescription>
       </CardHeader>
 
@@ -83,8 +86,13 @@ export function ProductAttributes({
 
         {attributes.length === 0 ? (
           <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-            No attributes exist yet. <Link href="/attributes" className="underline">Create one</Link> to filter your
-            listings by it.
+            {t.rich('No attributes exist yet. {link} to filter your listings by it.', {
+              link: (
+                <Link href="/attributes" className="underline">
+                  {t('Create one')}
+                </Link>
+              ),
+            })}
           </p>
         ) : null}
 
@@ -96,7 +104,7 @@ export function ProductAttributes({
             </p>
 
             {attribute.values.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No values on this attribute yet.</p>
+              <p className="text-xs text-muted-foreground">{t('No values on this attribute yet.')}</p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {attribute.values.map((value) => {
@@ -135,16 +143,19 @@ export function ProductAttributes({
 
         {variantOnly.length > 0 ? (
           <p className="text-xs text-muted-foreground">
-            {variantOnly.map((attribute) => attribute.name).join(', ')}{' '}
-            {variantOnly.length === 1 ? 'is a variant attribute' : 'are variant attributes'} — set{' '}
-            {variantOnly.length === 1 ? 'it' : 'them'} on each variant below.
+            {t.plural(
+              variantOnly.length,
+              '{names} is a variant attribute — set it on each variant below.',
+              '{names} are variant attributes — set them on each variant below.',
+              { names: variantOnly.map((attribute) => attribute.name).join(', ') },
+            )}
           </p>
         ) : null}
 
         {canManage && descriptive.length > 0 ? (
           <div className="flex justify-end">
             <Button type="button" size="sm" onClick={save} loading={saving}>
-              Save attributes
+              {t('Save attributes')}
             </Button>
           </div>
         ) : null}

@@ -88,7 +88,7 @@ export function StoreHelpCard() {
           <p className="text-sm font-semibold">Need help?</p>
         </div>
 
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
+        <p className="text-[12px] leading-relaxed text-muted-foreground">
           Our support team is here to help you at every step.
         </p>
 

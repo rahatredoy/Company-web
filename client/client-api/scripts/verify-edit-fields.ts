@@ -163,16 +163,16 @@ async function main(): Promise<void> {
     check('re-sending the same slug is not a clash', resave.status === 200, `got ${resave.status}`);
   }
 
-  // ---------------------------------------------------------- sale window ----
+  // ----------------------------------------------------------- sale price ----
   //
-  // The one that is not merely stored. `storefront/service.ts#effectiveSale`
-  // ignores a sale price outside its window on the product page and at
-  // checkout, so these assert the *shopper's* price, not just the column.
-  console.log('\nThe sale window');
+  // A sale price has no dates: it applies from the moment it is saved until it
+  // is cleared, so these assert the *shopper's* price, not just the column.
+  console.log('
+The sale price');
   const onSale = await call<{ id: string; slug: string }>('/api/v1/admin/products', {
     method: 'POST',
     body: {
-      name: `zz sale window ${stamp}`,
+      name: `zz sale price ${stamp}`,
       sku: `ZZ-SALE-${stamp.toUpperCase()}`,
       price: '100.00',
       salePrice: '60.00',
@@ -194,79 +194,25 @@ async function main(): Promise<void> {
       return payload?.data ?? null;
     };
 
-    // No window at all: the sale is live, which is how it behaved before.
-    const open = await shopper();
-    check('with no window the sale price is live', open?.salePrice === '60.00', String(open?.salePrice));
+    const live = await shopper();
+    check('a saved sale price is charged', live?.salePrice === '60.00', String(live?.salePrice));
 
-    // A window that has not opened yet.
-    const future = new Date(Date.now() + 7 * 86_400_000).toISOString();
-    const later = new Date(Date.now() + 14 * 86_400_000).toISOString();
-    const scheduled = await call(`/api/v1/admin/products/${onSale.body.id}`, {
-      method: 'PATCH',
-      body: { saleStartsAt: future, saleEndsAt: later },
-    });
-    check('accepts a sale window', scheduled.status === 200, `got ${scheduled.status}`);
-
-    const beforeStart = await shopper();
-    check(
-      'a sale that has not started charges full price',
-      beforeStart?.salePrice === null,
-      `salePrice is ${String(beforeStart?.salePrice)}`,
-    );
-
-    // A window that has already closed.
-    const past = new Date(Date.now() - 14 * 86_400_000).toISOString();
-    const ended = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    // A patch that says nothing about the sale price must leave it alone.
     await call(`/api/v1/admin/products/${onSale.body.id}`, {
       method: 'PATCH',
-      body: { saleStartsAt: past, saleEndsAt: ended },
-    });
-    const afterEnd = await shopper();
-    check(
-      'an expired sale charges full price',
-      afterEnd?.salePrice === null,
-      `salePrice is ${String(afterEnd?.salePrice)}`,
-    );
-
-    // A window that is open right now.
-    const runningFrom = new Date(Date.now() - 3_600_000).toISOString();
-    const runningTo = new Date(Date.now() + 3_600_000).toISOString();
-    await call(`/api/v1/admin/products/${onSale.body.id}`, {
-      method: 'PATCH',
-      body: { saleStartsAt: runningFrom, saleEndsAt: runningTo },
-    });
-    const running = await shopper();
-    check('a running sale is charged', running?.salePrice === '60.00', String(running?.salePrice));
-
-    // Clearing both bounds puts it back to always-on.
-    await call(`/api/v1/admin/products/${onSale.body.id}`, {
-      method: 'PATCH',
-      body: { saleStartsAt: null, saleEndsAt: null },
-    });
-    const cleared = await call<Record<string, unknown>>(`/api/v1/admin/products/${onSale.body.id}`);
-    const defaultVariant = cleared.body.defaultVariant as Record<string, unknown> | null;
-    check('an emptied window clears to no bound', defaultVariant?.saleStartsAt === null && defaultVariant?.saleEndsAt === null);
-
-    // A patch that says nothing about the window must leave it alone.
-    await call(`/api/v1/admin/products/${onSale.body.id}`, {
-      method: 'PATCH',
-      body: { saleStartsAt: runningFrom, saleEndsAt: runningTo },
-    });
-    await call(`/api/v1/admin/products/${onSale.body.id}`, {
-      method: 'PATCH',
-      body: { name: `zz sale window ${stamp} renamed` },
+      body: { name: `zz sale price ${stamp} renamed` },
     });
     const untouched = await call<Record<string, unknown>>(`/api/v1/admin/products/${onSale.body.id}`);
-    const stillRunning = untouched.body.defaultVariant as Record<string, unknown> | null;
+    const defaultVariant = untouched.body.defaultVariant as Record<string, unknown> | null;
+    check('a patch that omits the sale price keeps it', defaultVariant?.salePrice === '60.00', String(defaultVariant?.salePrice));
     check(
-      'a patch that omits the window does not clear a running sale',
-      stillRunning?.saleStartsAt !== null && stillRunning?.saleEndsAt !== null,
-      `starts ${String(stillRunning?.saleStartsAt)}`,
+      'the record carries no sale dates',
+      !!defaultVariant && !('saleStartsAt' in defaultVariant) && !('saleEndsAt' in defaultVariant),
     );
   }
 
   // ------------------------------------------------------------ category ----
-  console.log('\nThe category panel’s banner');
+  console.log('\nThe category panel’s image');
   const category = await call<{ id: string }>('/api/v1/admin/categories', {
     method: 'POST',
     body: { name: `zz edit cat ${stamp}` },
@@ -276,18 +222,25 @@ async function main(): Promise<void> {
     check('a fixture category could be created', false, `got ${category.status}`);
   } else {
     bin.push({ path: `/api/v1/admin/categories/${category.body.id}` });
-    const banner = 'https://example.com/banner.jpg';
+    const image = 'https://example.com/category.jpg';
 
     // PATCH, not PUT — the category route is the one partial writer in the
     // catalogue, which is what lets the tree reorder touch `sortOrder` alone.
     const saved = await call(`/api/v1/admin/categories/${category.body.id}`, {
       method: 'PATCH',
-      body: { bannerUrl: banner },
+      body: { imageUrl: image },
     });
-    check('accepts a page banner', saved.status === 200, `got ${saved.status}`);
+    check('accepts a category image', saved.status === 200, `got ${saved.status}`);
 
+    // The description, menu icon and page banner were dropped (migration 0013);
+    // a record still carrying one means a select somewhere was not updated.
     const after = await call<Record<string, unknown>>(`/api/v1/admin/categories/${category.body.id}`);
-    check('the page banner saved', after.body.bannerUrl === banner, String(after.body.bannerUrl));
+    const retired = ['description', 'iconUrl', 'bannerUrl'].filter((key) => key in after.body);
+    check(
+      'the image saved, and no retired column came back',
+      after.body.imageUrl === image && retired.length === 0,
+      retired.length ? `still returns ${retired.join(', ')}` : String(after.body.imageUrl),
+    );
   }
 
   // -------------------------------------------------------------- banner ----
@@ -343,31 +296,21 @@ async function main(): Promise<void> {
         /*
          * The point of the whole field: the storefront never sees the uuid. A
          * homepage block naming the placement is what pulls the banner through,
-         * so this asserts the pair rather than the column.
+         * so this asserts the pair rather than the column — through the store's
+         * own `home_promo` block, since the panel has no homepage editor to add
+         * a fixture one. Every store is seeded with two.
          */
-        const section = await call<{ id: string }>('/api/v1/admin/website/homepage', {
-          method: 'POST',
-          body: {
-            type: 'banner',
-            title: null,
-            config: { bannerPosition: 'home_promo', columns: 1, ratio: 'strip' },
-            isEnabled: true,
-            sortOrder: 990,
-          },
-        });
+        const home = await call<{ id: string; type: string; config: Record<string, unknown> }[]>(
+          '/api/v1/storefront/home',
+        );
+        const rendered = Array.isArray(home.body)
+          ? home.body.find((entry) => entry.config?.bannerPosition === 'home_promo')
+          : undefined;
 
-        if (section.status !== 201 && section.status !== 200) {
-          check('a fixture homepage block could be created', false, `got ${section.status}`);
+        if (!rendered) {
+          skip('the storefront is given the banner', 'this homepage has no block naming home_promo');
         } else {
-          bin.push({ path: `/api/v1/admin/website/homepage/${section.body.id}` });
-
-          const home = await call<{ id: string; type: string; config: Record<string, unknown> }[]>(
-            '/api/v1/storefront/home',
-          );
-          const rendered = Array.isArray(home.body)
-            ? home.body.find((entry) => entry.id === section.body.id)
-            : undefined;
-          const list = (rendered?.config.banners ?? []) as Record<string, unknown>[];
+          const list = (rendered.config.banners ?? []) as Record<string, unknown>[];
           const mine = list.find((entry) => entry.id === banner.body.id);
 
           check('the storefront is given the banner', Boolean(mine), `${list.length} banner(s) in the block`);

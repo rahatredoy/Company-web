@@ -72,6 +72,17 @@ export const STOREFRONT_CACHE_SCOPE = 'storefront';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /**
+     * A write that changes nothing a shopper can read — a product's private
+     * note. Opts the route out of `invalidateStorefrontOnWrite`, which would
+     * otherwise drop the store's whole catalogue cache on every save.
+     */
+    storefrontUnaffected?: boolean;
+  }
+}
+
 /**
  * Drops this store's storefront cache after any successful admin write.
  *
@@ -87,6 +98,7 @@ export function invalidateStorefrontOnWrite(app: FastifyInstance): void {
   app.addHook('onResponse', async (request, reply) => {
     if (SAFE_METHODS.has(request.method)) return;
     if (reply.statusCode >= 400) return;
+    if (request.routeOptions.config?.storefrontUnaffected) return;
 
     const tenantRef = request.store?.tenantRef;
     if (!tenantRef) return;

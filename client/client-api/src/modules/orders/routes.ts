@@ -3,6 +3,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   customers,
+  discountRedemptions,
+  discounts,
   orderAddresses,
   orderItems,
   orderStatusHistory,
@@ -10,7 +12,6 @@ import {
   payments,
   refunds,
   returns,
-  shipments,
   storeSettings,
 } from '../../db/schema/index';
 import { audit } from '../../lib/audit';
@@ -20,7 +21,10 @@ import { ORDER_STATUSES, ORDER_TRANSITIONS } from '../../lib/constants';
 import { ERROR_CODES, conflict, notFound } from '../../lib/errors';
 import { cursorField, listed, ok, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
 import { keyset } from '../../lib/keyset';
+import { loadStoreCurrency } from '../../lib/store-currency';
 import { releaseOrderStock } from '../storefront/orders.routes';
+import { issueRewardsQuietly } from '../discounts/rewards';
+import { voidOrderDiscounts } from '../discounts/service';
 import { fulfilOrderStock } from './service';
 import { storeOf } from '../../plugins/tenant';
 
@@ -57,13 +61,6 @@ const COUNTED = sql`${orders.status} not in ('cancelled', 'failed')`;
 const statusSchema = z.object({
   status: z.enum(ORDER_STATUSES as unknown as [OrderStatus, ...OrderStatus[]]),
   note: z.string().trim().max(300).optional(),
-});
-
-const shipmentSchema = z.object({
-  carrier: z.string().trim().max(80).nullable().default(null),
-  trackingNumber: z.string().trim().max(120).nullable().default(null),
-  trackingUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().default(null),
-  note: z.string().trim().max(300).nullable().default(null),
 });
 
 const noteSchema = z.object({ adminNote: z.string().trim().max(4000).nullable().default(null) });
@@ -143,7 +140,6 @@ export default async function orderRoutes(app: FastifyInstance) {
             phone: orders.phone,
             status: orders.status,
             paymentStatus: orders.paymentStatus,
-            shippingStatus: orders.shippingStatus,
             paymentProvider: orders.paymentProvider,
             grandTotal: orders.grandTotal,
             currency: orders.currency,
@@ -208,11 +204,15 @@ export default async function orderRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const store = storeOf(request);
 
-      const [settings] = await store.db
-        .select({ timezone: storeSettings.timezone })
-        .from(storeSettings)
-        .limit(1);
+      const [[settings], currency] = await Promise.all([
+        store.db.select({ timezone: storeSettings.timezone }).from(storeSettings).limit(1),
+        loadStoreCurrency(store),
+      ]);
       const zone = settings?.timezone || 'UTC';
+
+      // The money figures add up orders charged in the store's current currency
+      // only; the counts count every order. See `dashboard/routes.ts#inCurrency`.
+      const priced = sql`${orders.currency} = ${currency}`;
 
       const result = await store.db.execute<{
         total: number;
@@ -236,7 +236,7 @@ export default async function orderRoutes(app: FastifyInstance) {
           )::int as today_orders,
           coalesce(sum(${orders.grandTotal}) filter (
             where (${orders.placedAt} at time zone ${zone}::text)::date = (now() at time zone ${zone}::text)::date
-              and ${COUNTED}
+              and ${COUNTED} and ${priced}
           ), 0)::text as today_revenue,
           count(*) filter (where ${orders.status} in ('new', 'pending', 'confirmed', 'processing', 'packed'))::int as open_orders,
           count(*) filter (where ${orders.paymentStatus} in ('pending', 'cod_pending', 'partially_paid') and ${COUNTED})::int as unpaid,
@@ -244,9 +244,9 @@ export default async function orderRoutes(app: FastifyInstance) {
           count(*) filter (where ${orders.status} = 'delivered')::int as delivered,
           count(*) filter (where ${orders.status} in ('cancelled', 'failed'))::int as cancelled,
           coalesce(sum(${orders.grandTotal}) filter (
-            where ${orders.placedAt} >= now() - interval '30 days' and ${COUNTED}
+            where ${orders.placedAt} >= now() - interval '30 days' and ${COUNTED} and ${priced}
           ), 0)::text as revenue_30d,
-          coalesce(avg(${orders.grandTotal}) filter (where ${COUNTED}), 0)::numeric(12,2)::text as average_order,
+          coalesce(avg(${orders.grandTotal}) filter (where ${COUNTED} and ${priced}), 0)::numeric(12,2)::text as average_order,
           coalesce(
             (select jsonb_object_agg(s.status, s.total)
                from (select ${orders.status} as status, count(*)::int as total from ${orders} group by ${orders.status}) s),
@@ -276,6 +276,8 @@ export default async function orderRoutes(app: FastifyInstance) {
         byStatus: row?.by_status ?? {},
         byPaymentStatus: row?.by_payment ?? {},
         timezone: zone,
+        /** What the three money figures are in. */
+        currency,
       });
     },
   );
@@ -290,7 +292,7 @@ export default async function orderRoutes(app: FastifyInstance) {
       const [order] = await store.db.select().from(orders).where(eq(orders.id, id)).limit(1);
       if (!order) throw notFound('That order does not exist.', ERROR_CODES.ORDER_NOT_FOUND);
 
-      const [lines, addresses, history, paymentRows, shipmentRows, customer, refundRows, returnRows] =
+      const [lines, addresses, history, paymentRows, customer, refundRows, returnRows, discountRows] =
         await Promise.all([
         store.db.select().from(orderItems).where(eq(orderItems.orderId, id)).orderBy(asc(orderItems.createdAt)),
         store.db.select().from(orderAddresses).where(eq(orderAddresses.orderId, id)),
@@ -300,7 +302,6 @@ export default async function orderRoutes(app: FastifyInstance) {
           .where(eq(orderStatusHistory.orderId, id))
           .orderBy(desc(orderStatusHistory.createdAt)),
         store.db.select().from(payments).where(eq(payments.orderId, id)).orderBy(desc(payments.createdAt)),
-        store.db.select().from(shipments).where(eq(shipments.orderId, id)).orderBy(desc(shipments.createdAt)),
         order.customerId
           ? store.db
               .select({ id: customers.id, fullName: customers.fullName, email: customers.email })
@@ -341,6 +342,23 @@ export default async function orderRoutes(app: FastifyInstance) {
           .from(returns)
           .where(eq(returns.orderId, id))
           .orderBy(desc(returns.createdAt)),
+
+        // Every discount on the order and what each one gave — an order can
+        // carry a code and an automatic offer at once.
+        store.db
+          .select({
+            id: discountRedemptions.id,
+            discountId: discountRedemptions.discountId,
+            name: discounts.name,
+            kind: discounts.kind,
+            code: discountRedemptions.code,
+            amount: discountRedemptions.discountAmount,
+            voidedAt: discountRedemptions.voidedAt,
+          })
+          .from(discountRedemptions)
+          .innerJoin(discounts, eq(discounts.id, discountRedemptions.discountId))
+          .where(eq(discountRedemptions.orderId, id))
+          .orderBy(asc(discountRedemptions.createdAt)),
       ]);
 
       return ok(reply, {
@@ -352,7 +370,7 @@ export default async function orderRoutes(app: FastifyInstance) {
         // side that needs to see what actually happened.
         history: history.map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() })),
         payments: paymentRows,
-        shipments: shipmentRows,
+        discounts: discountRows.map((entry) => ({ ...entry, voidedAt: entry.voidedAt?.toISOString() ?? null })),
         customer: customer[0] ?? null,
         refunds: refundRows.map((refund) => ({
           ...refund,
@@ -399,14 +417,9 @@ export default async function orderRoutes(app: FastifyInstance) {
         const patch: Record<string, unknown> = { status: body.status, updatedAt: now };
 
         if (body.status === 'confirmed') patch.confirmedAt = now;
-        if (body.status === 'shipped') {
-          patch.shippedAt = now;
-          patch.shippingStatus = 'shipped';
-        }
-        if (body.status === 'out_for_delivery') patch.shippingStatus = 'out_for_delivery';
+        if (body.status === 'shipped') patch.shippedAt = now;
         if (body.status === 'delivered') {
           patch.deliveredAt = now;
-          patch.shippingStatus = 'delivered';
           // Cash on delivery is collected at the door; this is the moment it
           // stops being owed.
           if (order.paymentStatus === 'cod_pending') patch.paymentStatus = 'paid';
@@ -436,6 +449,12 @@ export default async function orderRoutes(app: FastifyInstance) {
           await tx.update(orders).set({ inventoryReleased: true }).where(eq(orders.id, id));
         }
 
+        // An order that did not happen must not count against a code's limit, a
+        // customer's allowance or their cooldown. Idempotent, like the stock.
+        if (body.status === 'cancelled' || body.status === 'failed') {
+          await voidOrderDiscounts(tx, id);
+        }
+
         if (body.status === 'shipped' && !order.inventoryReleased) {
           await fulfilOrderStock(tx, id);
           await tx.update(orders).set({ inventoryReleased: true }).where(eq(orders.id, id));
@@ -444,6 +463,10 @@ export default async function orderRoutes(app: FastifyInstance) {
         const [after] = await tx.select().from(orders).where(eq(orders.id, id)).limit(1);
         return after!;
       });
+
+      // After the commit: a voucher earned by this delivery is a bonus, and an
+      // order must never fail to be marked delivered because one could not be issued.
+      if (updated.status === 'delivered') await issueRewardsQuietly(store.db, updated.customerId, 'order_delivered');
 
       await audit(store.db, request, {
         action: 'order.status',
@@ -455,41 +478,6 @@ export default async function orderRoutes(app: FastifyInstance) {
       });
 
       return ok(reply, updated);
-    },
-  );
-
-  /** Tracking details. Customer-visible, so it is the one place a typo shows. */
-  app.post(
-    '/orders/:id/shipments',
-    { preHandler: [app.requireStoreAdmin, app.requirePermission('orders.update')] },
-    async (request, reply) => {
-      const store = storeOf(request);
-      const { id } = parseParams(uuidParamSchema, request.params);
-      const body = parseBody(shipmentSchema, request.body);
-
-      const [order] = await store.db
-        .select({ id: orders.id, orderNumber: orders.orderNumber })
-        .from(orders)
-        .where(eq(orders.id, id))
-        .limit(1);
-
-      if (!order) throw notFound('That order does not exist.', ERROR_CODES.ORDER_NOT_FOUND);
-
-      const [created] = await store.db
-        .insert(shipments)
-        .values({ orderId: id, ...body, status: 'shipped', shippedAt: new Date() })
-        .returning();
-
-      await audit(store.db, request, {
-        action: 'order.shipment',
-        module: 'orders',
-        entity: 'order',
-        entityId: id,
-        entityLabel: order.orderNumber,
-        newValues: created,
-      });
-
-      return ok(reply, created, 201);
     },
   );
 

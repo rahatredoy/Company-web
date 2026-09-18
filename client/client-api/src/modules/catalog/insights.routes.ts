@@ -26,8 +26,8 @@ import { storeOf } from '../../plugins/tenant';
  * `stock.sold` is `products.sold_count`, which moves **on dispatch and nowhere
  * else** — it is the figure the catalogue list sorts by and the storefront's
  * best-seller badge reads. `money.units` is what has been *ordered* on orders
- * that were neither cancelled nor failed, which is the only basis the revenue
- * beside it can be divided by. A shop with parcels still to pack will see the
+ * that were neither cancelled nor failed and were charged in the store's current
+ * currency, which is the only basis the revenue beside it can be divided by. A shop with parcels still to pack will see the
  * second exceed the first, and that is the truth rather than a discrepancy, so
  * both are returned and each is labelled by what it counts.
  *
@@ -46,11 +46,22 @@ const querySchema = z.object({
 });
 
 /**
- * Orders that represent money — the same filter the dashboard and `/reports`
- * use. A cancelled order was never revenue, and counting it would make a dead
- * week look like a good one.
+ * Orders that represent money — the same filter the dashboard uses. A cancelled
+ * order was never revenue, and counting it would make a dead week look like a
+ * good one.
  */
 const COUNTED = sql`o.status not in ('cancelled', 'failed')`;
+
+/**
+ * An order charged in the currency the store trades in now.
+ *
+ * `orders.currency` is snapshotted at checkout, so a store that has switched
+ * currency holds orders in both, and this screen prints every money figure with
+ * one symbol. Read from `store_settings` in the query itself — the same row the
+ * response's `currency` comes from — so the filter and the label cannot differ.
+ * An uncorrelated subquery, so Postgres evaluates it once, not per row.
+ */
+const IN_STORE_CURRENCY = sql`o.currency = (select min(currency) from store_settings)`;
 
 /**
  * Ledger types that put units **on** the shelf under the shop's own hand.
@@ -201,7 +212,7 @@ async function salesSeries(db: TenantExecutor, productId: string, days: number) 
     select
       to_char(slots.local_start, 'YYYY-MM-DD') as bucket,
       coalesce(sum(oi.quantity), 0)::int as units,
-      ${money(sql`sum(oi.line_total)`)} as revenue
+      ${money(sql`sum(oi.line_total) filter (where ${IN_STORE_CURRENCY})`)} as revenue
     from slots
     left join orders o
       on o.placed_at >= slots.starts_at
@@ -373,7 +384,10 @@ export default async function productInsightsRoutes(app: FastifyInstance) {
             from order_items oi
             join orders o on o.id = oi.order_id
             left join product_variants v on v.id = oi.variant_id
-            where oi.product_id = ${id}::uuid and ${COUNTED}
+            -- Units and orders are filtered with the money, not beside it: they
+            -- are what the revenue is divided by, and an order in another
+            -- currency contributed nothing to that revenue.
+            where oi.product_id = ${id}::uuid and ${COUNTED} and ${IN_STORE_CURRENCY}
           `),
 
           salesSeries(store.db, id, query.days),
@@ -445,10 +459,11 @@ export default async function productInsightsRoutes(app: FastifyInstance) {
               count(distinct r.id) filter (where ${RETURN_OPEN})::int as open,
               coalesce(sum(ri.restocked_quantity), 0)::int       as restocked,
               coalesce(sum(ri.quantity) filter (where ri.inspection_result = 'damaged'), 0)::int as damaged,
-              ${money(sql`sum(ri.line_total) filter (where r.status = 'completed')`)} as value
+              ${money(sql`sum(ri.line_total) filter (where r.status = 'completed' and ${IN_STORE_CURRENCY})`)} as value
             from returns r
             join return_items ri on ri.return_id = r.id
             join order_items oi on oi.id = ri.order_item_id
+            join orders o on o.id = oi.order_id
             where oi.product_id = ${id}::uuid
           `),
 

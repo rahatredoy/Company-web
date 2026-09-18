@@ -2,7 +2,6 @@
 
 import * as React from 'react';
 import type { PromoBanner } from '@/types';
-import { cn } from '@/lib/utils';
 import { usePrefersReducedMotion } from '@/lib/hooks/use-prefers-reduced-motion';
 
 /** How long one set of banners stays on screen before the next takes its place. */
@@ -20,10 +19,9 @@ export const BANNER_ROTATE_MS = 10_000;
  * slots there is nothing hidden to reveal, and shuffling them about would be
  * motion that carries no new information — the worst kind on a homepage.
  *
- * It stops for the same reasons `useAutoAdvance` does: permanently once the
- * visitor picks a set for themselves, while the pointer or focus is inside the
- * block, while the tab is in the background, and entirely under
- * `prefers-reduced-motion`.
+ * It stops for the same reasons `useAutoAdvance` does: while the pointer or
+ * focus is inside the block, while the tab is in the background, and entirely
+ * under `prefers-reduced-motion`.
  */
 export function useBannerRotation(banners: PromoBanner[], slots: number) {
   const count = banners.length;
@@ -34,13 +32,12 @@ export function useBannerRotation(banners: PromoBanner[], slots: number) {
 
   const [page, setPage] = React.useState(0);
   const [paused, setPaused] = React.useState(false);
-  const [interacted, setInteracted] = React.useState(false);
   // The first set is the served HTML and must not fade in on arrival; every set
   // after it is a change the eye needs help following.
   const [moved, setMoved] = React.useState(false);
   const reducedMotion = usePrefersReducedMotion();
 
-  const rotates = pages > 1 && !interacted && !reducedMotion && !paused;
+  const rotates = pages > 1 && !reducedMotion && !paused;
 
   React.useEffect(() => {
     if (!rotates) return;
@@ -64,12 +61,6 @@ export function useBannerRotation(banners: PromoBanner[], slots: number) {
     [banners, active, perPage, count],
   );
 
-  const select = React.useCallback((next: number) => {
-    setInteracted(true);
-    setMoved(true);
-    setPage(next);
-  }, []);
-
   const pauseProps = React.useMemo(
     () => ({
       onMouseEnter: () => setPaused(true),
@@ -85,55 +76,8 @@ export function useBannerRotation(banners: PromoBanner[], slots: number) {
     visible,
     page: active,
     pages,
-    select,
     pauseProps,
     /** Spread onto each slot alongside a key that includes `page`. */
     frameClassName: moved ? 'animate-in fade-in duration-500' : undefined,
   };
-}
-
-/**
- * Which set of banners is showing, and a way to pick one.
- *
- * Rotating content a visitor cannot stop or step through is the carousel
- * complaint in miniature, so the dots are not decoration — choosing one is what
- * ends the rotation.
- */
-export function BannerRotationDots({
-  pages,
-  page,
-  onSelect,
-  className,
-}: {
-  pages: number;
-  page: number;
-  onSelect: (page: number) => void;
-  className?: string;
-}) {
-  if (pages <= 1) return null;
-
-  return (
-    <div className={cn('flex items-center justify-center gap-2', className)}>
-      {Array.from({ length: pages }, (_, index) => {
-        const active = index === page;
-
-        return (
-          <button
-            key={index}
-            type="button"
-            onClick={() => onSelect(index)}
-            aria-label={`Show promotions ${index + 1} of ${pages}`}
-            aria-current={active ? 'true' : undefined}
-            className={cn(
-              // The visible mark is 8px; the button around it is 24px, because
-              // the decoration is not the hit area.
-              'grid size-6 place-items-center',
-              'after:block after:h-2 after:rounded-full after:transition-all',
-              active ? 'after:w-5 after:bg-primary' : 'after:w-2 after:bg-border-strong hover:after:w-3',
-            )}
-          />
-        );
-      })}
-    </div>
-  );
 }

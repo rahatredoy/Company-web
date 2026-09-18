@@ -1,4 +1,5 @@
 import type { MeasureSale } from '@/types';
+import type { Translator } from '@/lib/i18n';
 
 /**
  * Selling by weight or volume, as the shop front needs to talk about it.
@@ -80,8 +81,28 @@ export function defaultOption(measure: MeasureSale): { label: string; measure: n
   );
 }
 
-/** "Min. 350gm", or nothing when the shop set no floor. */
-export function minimumNote(measure: MeasureSale): string | null {
+/**
+ * "Min. 350gm", or nothing when the shop set no floor.
+ *
+ * Pass the translator to have it in the visitor's language; the size itself is
+ * a unit and stays as it is.
+ */
+export function minimumNote(measure: MeasureSale, t?: Translator): string | null {
   if (!measure.minMeasure) return null;
-  return 'Min. ' + formatMeasure(measure.minMeasure, measure.unit);
+  const size = formatMeasure(measure.minMeasure, measure.unit);
+  return t ? t('Min. {size}', { size }) : 'Min. ' + size;
+}
+
+/**
+ * What the price is the price *of* — "Per 1kg".
+ *
+ * The API sends the owner's own wording when there is one and otherwise builds
+ * `'Per ' + formatMeasure(...)` itself. Only that built default is translated:
+ * it is recognisably the platform's text, while an owner who typed "Per Piece"
+ * gets their own words back untouched — the same rule `t.loose` applies to
+ * seeded content.
+ */
+export function pricingLabelOf(measure: MeasureSale, t?: Translator): string {
+  const size = formatMeasure(measure.pricingMeasure, measure.unit);
+  return t && measure.pricingLabel === 'Per ' + size ? t('Per {size}', { size }) : measure.pricingLabel;
 }

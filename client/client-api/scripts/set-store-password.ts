@@ -15,7 +15,8 @@
 import { config } from '../src/config/index';
 import { openTenantPoolForSlug } from '../src/db/tenant-manager';
 import { hashPassword } from '../src/lib/password';
-import { closeRedis } from '../src/lib/redis';
+import { closeRedis, redis } from '../src/lib/redis';
+import { fetchTenantBySlug } from '../src/lib/company-client';
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
@@ -73,11 +74,21 @@ async function main(): Promise<void> {
       [admin.id, hash],
     );
 
-    // Any session minted against the old password must die with it.
-    await pool.query(
-      `update admin_sessions set revoked_at = now() where admin_id = $1 and revoked_at is null`,
-      [admin.id],
-    );
+    /*
+     * Any session minted against the old password must die with it — and with a
+     * JWT that means deleting the record it names, since the token itself cannot
+     * be recalled. Without this the reset would be advisory until the cookie
+     * happened to lapse.
+     */
+    const tenant = await fetchTenantBySlug(slug!);
+    if (tenant) {
+      const index = `t:${tenant.tenantRef}:session-index:admin:${admin.id}`;
+      const ids = await redis.smembers(index);
+      if (ids.length) {
+        await redis.del(...ids.map((jti) => `t:${tenant.tenantRef}:session:admin:${jti}`));
+      }
+      await redis.del(index);
+    }
 
     console.log(`\n  ${slug}`);
     console.log(`    ${admin.email}  (${admin.full_name}, ${admin.role_key})`);

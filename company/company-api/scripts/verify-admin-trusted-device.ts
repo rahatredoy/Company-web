@@ -18,13 +18,14 @@
  * It leaves the admin signed out of every session and forgotten on every
  * browser, so run it when you are not mid-sign-in yourself.
  */
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, closeDatabase } from '../src/db/client';
-import { companyAdmin, companyAdminSessions } from '../src/db/schema/index';
+import { companyAdmin } from '../src/db/schema/index';
 import { config } from '../src/config/index';
 import { sha256 } from '../src/lib/crypto';
 import { redis, closeRedis } from '../src/lib/redis';
 import { SESSION_COOKIE } from '../src/lib/constants';
+import { listAdminSessions, replaceSessionOtp } from '../src/lib/session';
 
 const BASE = config.api.publicUrl;
 const KNOWN_CODE = '424242';
@@ -88,30 +89,11 @@ function flag(name: string): string | undefined {
  * minus the inbox.
  */
 async function plantCode(adminId: string): Promise<boolean> {
-  const [challenge] = await db
-    .select({ id: companyAdminSessions.id })
-    .from(companyAdminSessions)
-    .where(
-      and(
-        eq(companyAdminSessions.adminId, adminId),
-        eq(companyAdminSessions.otpVerified, false),
-        isNull(companyAdminSessions.revokedAt),
-      ),
-    )
-    .orderBy(desc(companyAdminSessions.createdAt))
-    .limit(1);
-
+  // Newest first, so this is the challenge the sign-in under test just opened.
+  const challenge = (await listAdminSessions(adminId)).find((session) => !session.verified);
   if (!challenge) return false;
 
-  await db
-    .update(companyAdminSessions)
-    .set({
-      otpCodeHash: sha256(KNOWN_CODE),
-      otpExpiresAt: new Date(Date.now() + 300_000),
-      otpAttempts: 0,
-    })
-    .where(eq(companyAdminSessions.id, challenge.id));
-
+  await replaceSessionOtp(challenge.id, sha256(KNOWN_CODE), new Date(Date.now() + 300_000));
   return true;
 }
 

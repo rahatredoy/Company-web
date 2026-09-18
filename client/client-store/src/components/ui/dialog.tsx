@@ -4,6 +4,7 @@ import * as React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * Centred modal dialog.
@@ -43,6 +44,8 @@ export const DialogContent = React.forwardRef<
   React.ComponentRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { showClose?: boolean }
 >(function DialogContent({ className, children, showClose = true, ...props }, ref) {
+  const t = useT();
+
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -61,7 +64,7 @@ export const DialogContent = React.forwardRef<
         {showClose ? (
           <DialogPrimitive.Close className="absolute right-4 top-4 grid size-9 place-items-center rounded-(--radius-button) text-muted transition-colors hover:bg-surface-alt hover:text-foreground">
             <X className="size-4" aria-hidden />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t('Close')}</span>
           </DialogPrimitive.Close>
         ) : null}
       </DialogPrimitive.Content>

@@ -1,12 +1,15 @@
 import Link from 'next/link';
 import type { StorefrontTemplate, TemplateChromeProps, TemplateHomepageProps, TemplatePreset } from '../registry';
+import { TEMPLATE_META } from '../meta';
 import { StoreLogo } from '../chrome';
 import { AnnouncementBar } from '@/components/layout/announcement-bar';
 import { HeaderActions } from '@/components/layout/header-actions';
 import { MobileNav } from '@/components/layout/mobile-nav';
+import { BackButton } from '@/components/layout/back-button';
 import { SearchBox } from '@/components/layout/search-box';
 import { SiteFooter } from '@/components/layout/site-footer';
 import { HomepageSections } from '@/sections/section-renderer';
+import { getT } from '@/lib/i18n/server';
 
 /**
  * Lifestyle — warm and editorial, for home, decor and furniture.
@@ -33,16 +36,19 @@ const preset: TemplatePreset = {
   sectionRhythm: 'airy',
 };
 
-function Header({ config }: TemplateChromeProps) {
+async function Header({ config }: TemplateChromeProps) {
+  const t = await getT();
+
   return (
     <header className="sticky top-0 z-40 bg-surface/95 backdrop-blur-sm">
       <AnnouncementBar announcement={config.announcement} />
 
       <div className="container-store flex h-[4.5rem] items-center gap-6 border-b border-border">
         <MobileNav config={config} />
+        <BackButton />
         <StoreLogo config={config} priority />
 
-        <nav aria-label="Main" className="hidden lg:block">
+        <nav aria-label={t('Main')} className="hidden lg:block">
           <ul className="flex items-center gap-8">
             {config.navigation.header.map((item) => (
               <li key={item.id}>
@@ -52,7 +58,7 @@ function Header({ config }: TemplateChromeProps) {
                   rel={item.opensInNewTab ? 'noreferrer noopener' : undefined}
                   className="text-sm text-foreground transition-colors hover:text-primary"
                 >
-                  {item.label}
+                  {t.loose(item.label)}
                 </Link>
               </li>
             ))}
@@ -90,7 +96,7 @@ const GRID = 'product-grid grid grid-cols-2 gap-x-5 gap-y-10 sm:grid-cols-2 lg:g
 const template: StorefrontTemplate = {
   key: 'lifestyle',
   name: 'Lifestyle',
-  description: 'Warm editorial layout for home, decor and lifestyle goods.',
+  description: TEMPLATE_META.lifestyle.description,
   Header,
   Footer,
   Homepage,

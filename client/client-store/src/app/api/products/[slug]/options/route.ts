@@ -41,6 +41,16 @@ export interface QuickAddOptions {
   variants: ProductDetail['variants'];
 }
 
+/**
+ * The visitor's translator, for the error messages below — imported on demand,
+ * like the rest of the data layer this handler reaches, and only on the paths
+ * that have something to say.
+ */
+async function translator() {
+  const { getT } = await import('@/lib/i18n/server');
+  return getT();
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ slug: string }> },
@@ -64,7 +74,8 @@ export async function GET(
     );
 
     if (!product) {
-      return NextResponse.json({ error: 'That product is no longer available.' }, { status: 404 });
+      const t = await translator();
+      return NextResponse.json({ error: t('That product is no longer available.') }, { status: 404 });
     }
 
     const payload: QuickAddOptions = {
@@ -85,6 +96,7 @@ export async function GET(
     // The picker falls back to sending the shopper to the product page, which
     // can answer the same question with the whole screen to do it in.
     console.error('[storefront] quick-add options failed', error);
-    return NextResponse.json({ error: 'We could not load the options.' }, { status: 502 });
+    const t = await translator();
+    return NextResponse.json({ error: t('We could not load the options.') }, { status: 502 });
   }
 }

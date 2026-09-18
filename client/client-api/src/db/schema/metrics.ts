@@ -31,7 +31,6 @@ export const storeDailyMetrics = pgTable(
     grossSales: numeric('gross_sales', { precision: 14, scale: 2 }).notNull().default('0'),
     discounts: numeric('discounts', { precision: 14, scale: 2 }).notNull().default('0'),
     refunds: numeric('refunds', { precision: 14, scale: 2 }).notNull().default('0'),
-    shipping: numeric('shipping', { precision: 14, scale: 2 }).notNull().default('0'),
     tax: numeric('tax', { precision: 14, scale: 2 }).notNull().default('0'),
     netSales: numeric('net_sales', { precision: 14, scale: 2 }).notNull().default('0'),
     newCustomers: integer('new_customers').notNull().default(0),

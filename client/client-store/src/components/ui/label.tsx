@@ -3,11 +3,14 @@
 import * as React from 'react';
 import * as LabelPrimitive from '@radix-ui/react-label';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 export const Label = React.forwardRef<
   React.ComponentRef<typeof LabelPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root> & { required?: boolean }
 >(function Label({ className, children, required = false, ...props }, ref) {
+  const t = useT();
+
   return (
     <LabelPrimitive.Root
       ref={ref}
@@ -25,7 +28,7 @@ export const Label = React.forwardRef<
           <span aria-hidden className="ml-0.5 text-error">
             *
           </span>
-          <span className="sr-only"> (required)</span>
+          <span className="sr-only"> {t('(required)')}</span>
         </>
       ) : null}
     </LabelPrimitive.Root>

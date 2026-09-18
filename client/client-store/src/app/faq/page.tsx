@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getStoreConfig } from '@/lib/api/store';
 import { getFaqs } from '@/lib/api/content';
-import { Breadcrumbs } from '@/components/layout/breadcrumbs';
 import { EmptyState } from '@/components/ui/empty-state';
+import { getT } from '@/lib/i18n/server';
 import {
   Accordion,
   AccordionContent,
@@ -12,10 +12,12 @@ import {
 } from '@/components/ui/accordion';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const config = await getStoreConfig();
+  const [config, t] = await Promise.all([getStoreConfig(), getT()]);
   return {
-    title: 'Frequently asked questions',
-    description: `Answers about ordering, payment, delivery and returns at ${config.store.name}.`,
+    title: t('Frequently asked questions'),
+    description: t('Answers about ordering, payment, delivery and returns at {store}.', {
+      store: config.store.name,
+    }),
     alternates: { canonical: '/faq' },
   };
 }
@@ -28,10 +30,24 @@ export async function generateMetadata(): Promise<Metadata> {
  * use an FAQ.
  */
 export default async function FaqPage() {
-  const faqs = await getFaqs();
+  const [stored, t] = await Promise.all([getFaqs(), getT()]);
+
+  /*
+   * A new store opens with four seeded questions, and the owner's panel may
+   * never be used to reword them — so a question still reading exactly as it was
+   * seeded is shown in the visitor's language, and one the owner wrote is shown
+   * as they wrote it. The structured data below reads the same text the page
+   * shows, which is the text a search result should quote.
+   */
+  const faqs = stored.map((faq) => ({
+    ...faq,
+    question: t.loose(faq.question),
+    answer: t.loose(faq.answer),
+    category: faq.category ? t.loose(faq.category) : null,
+  }));
 
   const groups = faqs.reduce<Record<string, typeof faqs>>((acc, faq) => {
-    const key = faq.category ?? 'General';
+    const key = faq.category ?? t('General');
     (acc[key] ??= []).push(faq);
     return acc;
   }, {});
@@ -40,20 +56,21 @@ export default async function FaqPage() {
 
   return (
     <div className="container-store max-w-3xl py-6">
-      <Breadcrumbs items={[{ label: 'FAQ' }]} className="mb-6" />
-      <h1 className="text-2xl font-semibold sm:text-3xl">Frequently asked questions</h1>
+      <h1 className="text-2xl font-semibold sm:text-3xl">{t('Frequently asked questions')}</h1>
       <p className="mt-2 text-muted">
-        If your question is not here,{' '}
-        <Link href="/contact" className="font-medium text-primary hover:underline">
-          get in touch
-        </Link>{' '}
-        and a person will answer.
+        {t.rich('If your question is not here, {link} and a person will answer.', {
+          link: (
+            <Link href="/contact" className="font-medium text-primary hover:underline">
+              {t('get in touch')}
+            </Link>
+          ),
+        })}
       </p>
 
       {order.length === 0 ? (
         <EmptyState
-          title="No questions published yet"
-          description="Contact us and we will answer directly."
+          title={t('No questions published yet')}
+          description={t('Contact us and we will answer directly.')}
           className="mt-8"
         />
       ) : (

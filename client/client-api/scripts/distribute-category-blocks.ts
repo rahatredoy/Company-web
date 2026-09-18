@@ -56,11 +56,11 @@ if (!SLUG) {
 /**
  * The foot of the page, and the hero at the top of it.
  *
- * A department block dropped after the newsletter band or the Instagram strip is
+ * A department block dropped after the Instagram strip is
  * below the point where a visitor has stopped reading, so those are not offered
  * as places to insert one. The hero stays first for the same reason in reverse.
  */
-const NOT_AN_ANCHOR = new Set(['hero', 'newsletter', 'social_gallery', 'recently_viewed']);
+const NOT_AN_ANCHOR = new Set(['hero', 'social_gallery', 'recently_viewed']);
 
 interface SectionRow {
   id: string;

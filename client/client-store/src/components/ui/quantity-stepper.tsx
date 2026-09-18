@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * Quantity control.
@@ -22,7 +23,7 @@ export function QuantityStepper({
   max,
   disabled = false,
   size = 'md',
-  label = 'Quantity',
+  label: labelProp,
   className,
 }: {
   value: number;
@@ -34,6 +35,8 @@ export function QuantityStepper({
   label?: string;
   className?: string;
 }) {
+  const t = useT();
+  const label = labelProp ?? t('Quantity');
   const id = React.useId();
   const ceiling = max ?? Number.MAX_SAFE_INTEGER;
 
@@ -56,7 +59,7 @@ export function QuantityStepper({
     >
       <StepButton
         icon={Minus}
-        label={`Decrease ${label.toLowerCase()}`}
+        label={t('Decrease {label}', { label: label.toLowerCase() })}
         onClick={() => onChange(clamp(value - 1))}
         disabled={disabled || atMin}
         small={small}
@@ -87,7 +90,7 @@ export function QuantityStepper({
 
       <StepButton
         icon={Plus}
-        label={`Increase ${label.toLowerCase()}`}
+        label={t('Increase {label}', { label: label.toLowerCase() })}
         onClick={() => onChange(clamp(value + 1))}
         disabled={disabled || atMax}
         small={small}

@@ -5,11 +5,14 @@ import { getOrder } from '@/lib/api/orders';
 import { getCustomer } from '@/lib/api/account';
 import { getStoreConfig } from '@/lib/api/store';
 import { readLocalePreference } from '@/lib/locale/preference';
-import { Breadcrumbs } from '@/components/layout/breadcrumbs';
 import { Alert } from '@/components/ui/alert';
 import { ReturnWizard } from '@/components/returns/return-wizard';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = { title: 'Request a return', robots: { index: false, follow: false } };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Request a return'), robots: { index: false, follow: false } };
+}
 
 export default async function ReturnRequestPage({
   params,
@@ -25,27 +28,20 @@ export default async function ReturnRequestPage({
   if (!order) notFound();
 
   const config = await getStoreConfig();
-  const locale = await readLocalePreference(config);
+  const [locale, t] = await Promise.all([readLocalePreference(config), getT()]);
 
   return (
     <div className="container-store max-w-3xl py-6">
-      <Breadcrumbs
-        items={[
-          { label: 'My account', href: '/account' },
-          { label: order.orderNumber, href: `/account/orders/${order.orderNumber}` },
-          { label: 'Request a return' },
-        ]}
-        className="mb-6"
-      />
-
-      <h1 className="text-2xl font-semibold sm:text-3xl">Request a return</h1>
+      <h1 className="text-2xl font-semibold sm:text-3xl">{t('Request a return')}</h1>
       <p className="mt-2 text-muted">
-        Order <span className="font-mono">{order.orderNumber}</span>. Thirty days from delivery,
-        unworn with tags on —{' '}
-        <Link href="/page/return-policy" className="font-medium text-primary hover:underline">
-          the full policy
-        </Link>
-        .
+        {t.rich('Order {orderNumber}. Thirty days from delivery, unworn with tags on — {policyLink}.', {
+          orderNumber: <span className="font-mono">{order.orderNumber}</span>,
+          policyLink: (
+            <Link href="/page/return-policy" className="font-medium text-primary hover:underline">
+              {t('the full policy')}
+            </Link>
+          ),
+        })}
       </p>
 
       {/*
@@ -56,10 +52,10 @@ export default async function ReturnRequestPage({
       {order.canRequestReturn ? (
         <ReturnWizard order={order} locale={locale.language} />
       ) : (
-        <Alert tone="warning" title="This order cannot be returned" className="mt-8">
+        <Alert tone="warning" title={t('This order cannot be returned')} className="mt-8">
           {order.status === 'delivered'
-            ? 'The return window for this order has closed. Contact us if something is wrong and we will still look at it.'
-            : 'Returns can be started once an order has been delivered.'}
+            ? t('The return window for this order has closed. Contact us if something is wrong and we will still look at it.')
+            : t('Returns can be started once an order has been delivered.')}
         </Alert>
       )}
     </div>

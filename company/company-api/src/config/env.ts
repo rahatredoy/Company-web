@@ -29,6 +29,21 @@ const bool = z
 const port = z.coerce.number().int().min(1).max(65535);
 
 /**
+ * Set explicitly, or left to follow `NODE_ENV`. Blank counts as unset.
+ *
+ * Separate from `bool` above because "not set" and "set to false" are different
+ * answers here: unset means "do whatever production means", and false is a
+ * deliberate opt-out that has to be typed.
+ */
+const optionalBool = z
+  .union([z.boolean(), z.string()])
+  .optional()
+  .transform((v) => {
+    if (v === undefined || (typeof v === 'string' && v.trim() === '')) return undefined;
+    return typeof v === 'boolean' ? v : ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
+  });
+
+/**
  * The tenant database cluster is **sharded**: one PostgreSQL server holds many
  * stores' databases, and a new store is placed on whichever shard still has
  * room. Growth is a matter of appending a server here, not of resizing one.
@@ -91,6 +106,43 @@ const secretKey = z
   .min(32, 'must be at least 32 characters')
   .refine((v) => Buffer.from(v, 'base64url').length >= 32, 'must decode to at least 32 bytes (base64url)');
 
+
+/**
+ * Nothing leaves this process over plaintext, in production.
+ *
+ * Every value checked here is an address this API either **calls** or **prints
+ * into something a browser will follow** — an emailed sign-in passcode, a
+ * gateway return URL, a CORS allow-list entry. An `http://` one is not a
+ * cosmetic inconsistency: it is a request whose contents anybody on the path can
+ * read and, worse, rewrite. This is the control plane, so what is on that wire
+ * is billing, provisioning and the platform's single super-admin session.
+ *
+ * `WEBSITE_URL` and `ADMIN_URL` are the CORS allow-list as well as the link
+ * base, so an http entry there is also a browser origin this API would accept
+ * credentialed requests from.
+ *
+ * Caught at boot rather than at the first request, because the alternative is a
+ * platform that runs perfectly well and is quietly insecure — the failure has no
+ * symptom until somebody is already reading the traffic.
+ *
+ * Development is exempt and has to be: the six apps talk to each other over
+ * `http://localhost` on six ports, and there is no network between them.
+ */
+function requireHttps(
+  ctx: z.RefinementCtx,
+  key: string,
+  value: string | undefined,
+  what: string,
+): void {
+  if (!value) return;
+  if (value.startsWith('https://')) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: [key],
+    message: `must be an https:// address in production — ${what} would otherwise travel in the clear (got ${value.split('://')[0] ?? 'a relative value'}://…)`,
+  });
+}
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -101,6 +153,26 @@ export const envSchema = z.object({
   API_PORT: port.default(4000),
   API_HOST: z.string().default('0.0.0.0'),
   API_PUBLIC_URL: z.string().url().default('http://localhost:4000'),
+
+  /**
+   * Refuse any request that did not arrive over TLS. See `plugins/https.ts`.
+   *
+   * Unset follows `NODE_ENV`, which is the answer for every real deployment.
+   * Set it to `false` only where the edge already redirects `:80` and does not
+   * forward `x-forwarded-proto` — the hook reads that header and would
+   * otherwise refuse everything.
+   */
+  FORCE_HTTPS: optionalBool,
+  /**
+   * Permit a plaintext connection to PostgreSQL or Redis in production.
+   *
+   * Deliberately unwieldy to type. `company_control_db` holds every account,
+   * subscription and invoice on the platform, and Redis holds the session
+   * tokens that stand in for a password. Set it only when both genuinely sit on
+   * a private network the traffic cannot leave — never for a host reached by a
+   * public IP.
+   */
+  ALLOW_PLAINTEXT_DATA_STORES: optionalBool,
 
   WEBSITE_URL: z.string().url().default('http://localhost:3000'),
   ADMIN_URL: z.string().url().default('http://localhost:3001'),
@@ -186,6 +258,63 @@ export const envSchema = z.object({
    */
   MAIL_DEV_REDIRECT_TO: optionalEmail,
 }).superRefine((env, ctx) => {
+  if (env.NODE_ENV === 'production') {
+    requireHttps(ctx, 'API_PUBLIC_URL', env.API_PUBLIC_URL, "this API's own advertised address");
+    requireHttps(ctx, 'WEBSITE_URL', env.WEBSITE_URL, 'every emailed link, and a CORS origin this API trusts');
+    requireHttps(ctx, 'ADMIN_URL', env.ADMIN_URL, 'the super-admin panel, and a CORS origin this API trusts');
+    requireHttps(ctx, 'CLIENT_ADMIN_URL_PATTERN', env.CLIENT_ADMIN_URL_PATTERN, 'the store admin panel address given to every new owner');
+    requireHttps(ctx, 'R2_ENDPOINT', env.R2_ENDPOINT, 'the signed upload, which carries the bucket credential');
+    requireHttps(ctx, 'R2_PUBLIC_URL', env.R2_PUBLIC_URL, 'every uploaded file, on an https page');
+
+    /*
+     * The two backing stores.
+     *
+     * HTTPS at the edge secures the half of the journey the customer can see.
+     * A session token read straight off the wire between this API and Redis is
+     * the same account taken, and `company_control_db` reached over plaintext is
+     * every account, subscription and invoice on the platform. `rediss://` is
+     * Redis over TLS; PostgreSQL wants `sslmode` on the connection string.
+     */
+    if (!env.ALLOW_PLAINTEXT_DATA_STORES) {
+      if (!env.REDIS_URL.startsWith('rediss://')) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['REDIS_URL'],
+          message:
+            'must use rediss:// (Redis over TLS) in production — it holds the session tokens that stand in for a password. Set ALLOW_PLAINTEXT_DATA_STORES=true only if Redis is on a private network.',
+        });
+      }
+
+      /*
+       * Read as a value rather than matched as a boundary: `sslmode` also
+       * takes `disable`, `allow` and `prefer`, and the last two are the
+       * dangerous ones — they *try* TLS and fall back to plaintext without
+       * saying so, which is the failure this check exists to catch.
+       */
+      const sslmode = /[?&]sslmode=([a-z-]+)/i.exec(env.COMPANY_DATABASE_URL)?.[1]?.toLowerCase();
+      if (!sslmode || !['require', 'verify-ca', 'verify-full'].includes(sslmode)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['COMPANY_DATABASE_URL'],
+          message:
+            'must carry ?sslmode=require (or verify-full) in production — it holds every account, subscription and invoice on the platform. Set ALLOW_PLAINTEXT_DATA_STORES=true only if the database is on a private network.',
+        });
+      }
+
+      const plaintextShards = [
+        ...(env.TENANT_DB_SSL ? [] : ['TENANT_DB_SSL']),
+        ...env.TENANT_SHARDS.filter((shard) => !shard.ssl).map((shard) => shard.id),
+      ];
+      if (plaintextShards.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['TENANT_SHARDS'],
+          message: `every shard must set "ssl": true in production — these do not: ${plaintextShards.join(', ')}. Provisioning writes each new store's admin credential over this connection. Set ALLOW_PLAINTEXT_DATA_STORES=true only if the cluster is on a private network.`,
+        });
+      }
+    }
+  }
+
   // A missing key would otherwise surface as a failed passcode at sign-in time.
   if (env.MAIL_DRIVER === 'resend' && !env.RESEND_API_KEY) {
     ctx.addIssue({

@@ -7,7 +7,6 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
-  ArrowUpRight,
   Banknote,
   ChevronDown,
   CircleSlash,
@@ -21,7 +20,6 @@ import {
   Search,
   ShoppingCart,
   SlidersHorizontal,
-  Truck,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -31,7 +29,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
@@ -41,7 +38,8 @@ import { toast } from '@/components/ui/toaster';
 import { api, apiFetchListed, errorMessage, type ListMeta } from '@/lib/api';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useViewTarget } from '@/hooks/use-detail';
-import { formatDateTime, formatMoney, formatNumber, formatRelative, titleCase } from '@/lib/format';
+import { titleCase } from '@/lib/format';
+import { useT, type MessageKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { OrderRow, OrderStats, OrderStatus } from '@/lib/types';
 import { InfiniteTable, type Column } from './infinite-table';
@@ -80,6 +78,22 @@ const STATUS_OPTIONS: OrderStatus[] = [
   'failed',
 ];
 
+/** How each status reads as a word — an option in the filter, the toast after a move. */
+const STATUS_LABEL: Record<OrderStatus, MessageKey> = {
+  new: 'New',
+  pending: 'Pending',
+  confirmed: 'Confirmed',
+  processing: 'Processing',
+  packed: 'Packed',
+  shipped: 'Shipped',
+  out_for_delivery: 'Out For Delivery',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+  returned: 'Returned',
+  refunded: 'Refunded',
+  failed: 'Failed',
+};
+
 const PAYMENT_OPTIONS = [
   'pending',
   'cod_pending',
@@ -88,22 +102,36 @@ const PAYMENT_OPTIONS = [
   'partially_refunded',
   'refunded',
   'failed',
-];
+] as const;
+
+const PAYMENT_LABEL: Record<(typeof PAYMENT_OPTIONS)[number], MessageKey> = {
+  pending: 'Pending',
+  cod_pending: 'Cod Pending',
+  paid: 'Paid',
+  partially_paid: 'Partially Paid',
+  partially_refunded: 'Partially Refunded',
+  refunded: 'Refunded',
+  failed: 'Failed',
+};
 
 /**
  * How a payment provider is written for a person. `titleCase` turns `cod` into
  * "Cod", which reads as a fish — these are proper names, not slugs, and the
  * fallback keeps an adapter added later legible until it is named here.
  */
-const PROVIDER_LABEL: Record<string, string> = {
+const PROVIDER_LABEL: Record<string, MessageKey> = {
   cod: 'Cash on Delivery',
   mock: 'Test gateway',
+};
+
+/** Brand names, written the same in every language. */
+const PROVIDER_NAME: Record<string, string> = {
   stripe: 'Stripe',
   sslcommerz: 'SSLCommerz',
 };
 
 /** What each move is called in a menu, where "delivered" alone reads as a state. */
-const MOVE_LABEL: Record<OrderStatus, string> = {
+const MOVE_LABEL: Record<OrderStatus, MessageKey> = {
   new: 'Move back to new',
   pending: 'Mark as pending',
   confirmed: 'Confirm order',
@@ -175,13 +203,14 @@ function SortButton({
   order: 'asc' | 'desc';
   onSort: (sort: OrderFilterState['sort']) => void;
 }) {
+  const t = useT();
   const on = active === sort;
 
   return (
     <button
       type="button"
       onClick={() => onSort(sort)}
-      aria-label={`Sort by ${String(children)}`}
+      aria-label={t('Sort by {column}', { column: String(children) })}
       className={cn(
         'inline-flex items-center gap-1 uppercase transition-colors hover:text-foreground',
         on && 'text-foreground',
@@ -206,6 +235,7 @@ export function OrderManager({
   canUpdate,
   canCancel,
   filters,
+  initialView,
 }: {
   /** The first batch, rendered on the server. The rest arrive by cursor. */
   initial: { rows: OrderRow[]; meta: ListMeta };
@@ -214,8 +244,11 @@ export function OrderManager({
   canUpdate: boolean;
   canCancel: boolean;
   filters: OrderFilterState;
+  /** An order named by `?view=<id>` — how every other screen links to an order. */
+  initialView: OrderRow | null;
 }) {
   const router = useRouter();
+  const t = useT();
   const [pending, startTransition] = React.useTransition();
 
   const query = React.useMemo(() => queryFor(filters), [filters]);
@@ -228,15 +261,40 @@ export function OrderManager({
   const [exporting, setExporting] = React.useState(false);
 
   /*
-   * The read-only panel, beside the list rather than instead of it.
-   *
-   * `ArrowUpRight` still opens the order's own screen, which is where the
-   * status is moved and tracking is added. This is for reading: the whole
-   * order, its lines, both addresses, the payments, the shipments, the
-   * history, and the returns and refunds raised against it — without losing
-   * a place in a virtualised list the browser cannot scroll back to.
+   * The order panel, beside the list rather than instead of it. It is the only
+   * place an order is read: the whole order, its lines, both addresses, the
+   * payments, the history, and the returns and refunds raised against it —
+   * without losing a place in a virtualised list the browser cannot scroll back
+   * to. Moving the status and writing the staff note happen here too.
    */
   const viewing = useViewTarget<OrderRow>();
+  const { view, onOpenChange } = viewing;
+
+  /*
+   * Another screen links to an order as `/orders?view=<id>`, so the panel opens
+   * on arrival. Closing it drops `view` from the address without a navigation —
+   * a refresh or a filter change must not reopen an order the reader shut.
+   */
+  const openedFor = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (initialView && initialView.id !== openedFor.current) {
+      openedFor.current = initialView.id;
+      view(initialView);
+    }
+  }, [initialView, view]);
+
+  const changeOpen = React.useCallback(
+    (open: boolean) => {
+      onOpenChange(open);
+      if (!open && new URLSearchParams(window.location.search).has('view')) {
+        const params = new URLSearchParams(window.location.search);
+        params.delete('view');
+        const query = params.toString();
+        window.history.replaceState(null, '', query ? `/orders?${query}` : '/orders');
+      }
+    },
+    [onOpenChange],
+  );
 
   /*
    * A selection cannot outlive the rows it was made on: acting on an id that is
@@ -309,29 +367,34 @@ export function OrderManager({
   const move = (id: string, status: OrderStatus, note?: string) =>
     api.patch(`/api/v1/admin/orders/${id}/status`, { status, ...(note ? { note } : {}) });
 
-  async function moveOne(row: OrderRow, status: OrderStatus) {
+  /** Resolves true when the move was made, so the View panel knows to re-read the order. */
+  async function moveOne(row: OrderRow, status: OrderStatus): Promise<boolean> {
     let note: string | undefined;
 
     // Cancelling is the one move a customer sees a reason for, and the API stores
     // whatever it is given as `cancel_reason`.
     if (status === 'cancelled' || status === 'failed') {
       const reason = globalThis.prompt(
-        `Why is ${row.orderNumber} being ${status === 'cancelled' ? 'cancelled' : 'marked failed'}? The customer sees this.`,
+        status === 'cancelled'
+          ? t('Why is {order} being cancelled? The customer sees this.', { order: row.orderNumber })
+          : t('Why is {order} being marked failed? The customer sees this.', { order: row.orderNumber }),
         '',
       );
-      if (reason === null) return;
+      if (reason === null) return false;
       note = reason.trim() || undefined;
     }
 
     setBusy(true);
     try {
       await move(row.id, status, note);
-      toast.success(`${row.orderNumber} is now ${titleCase(status)}.`);
+      toast.success(t('{number} is now {status}.', { number: row.orderNumber, status: t(STATUS_LABEL[status]) }));
       refresh();
+      return true;
     } catch (caught) {
       // A 409 here means the page was stale — the API's sentence says which move
       // it refused and from what, which is more use than "failed".
       toast.error(errorMessage(caught));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -360,7 +423,11 @@ export function OrderManager({
 
     if (
       (status === 'cancelled' || status === 'failed') &&
-      !globalThis.confirm(`${titleCase(MOVE_LABEL[status])} for ${ids.length} order${ids.length === 1 ? '' : 's'}?`)
+      !globalThis.confirm(
+        status === 'cancelled'
+          ? t.plural(ids.length, 'Cancel Order for {count} order?', 'Cancel Order for {count} orders?')
+          : t.plural(ids.length, 'Mark As Failed for {count} order?', 'Mark As Failed for {count} orders?'),
+      )
     ) {
       return;
     }
@@ -371,11 +438,20 @@ export function OrderManager({
     setBusy(false);
 
     if (failed.length === 0) {
-      toast.success(`${ids.length} order${ids.length === 1 ? '' : 's'} now ${titleCase(status)}.`);
+      toast.success(
+        t.plural(ids.length, '{count} order now {status}.', '{count} orders now {status}.', {
+          status: t(STATUS_LABEL[status]),
+        }),
+      );
     } else if (failed.length === ids.length) {
       toast.error(errorMessage((failed[0] as PromiseRejectedResult).reason));
     } else {
-      toast.error(`${ids.length - failed.length} moved, ${failed.length} refused — see each row.`);
+      toast.error(
+        t('{moved} moved, {refused} refused — see each row.', {
+          moved: ids.length - failed.length,
+          refused: failed.length,
+        }),
+      );
     }
 
     refresh();
@@ -417,7 +493,6 @@ export function OrderManager({
         'currency',
         'status',
         'payment_status',
-        'shipping_status',
         'payment_method',
       ];
       const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
@@ -434,7 +509,6 @@ export function OrderManager({
           row.currency,
           row.status,
           row.paymentStatus,
-          row.shippingStatus,
           row.paymentProvider ?? '',
         ]
           .map(cell)
@@ -450,9 +524,9 @@ export function OrderManager({
       URL.revokeObjectURL(url);
 
       if (list.total !== null && list.total > collected.length) {
-        toast.error(`Exported the first ${formatNumber(collected.length)} of ${formatNumber(list.total)}.`);
+        toast.error(t('Exported the first {shown} of {total}.', { shown: collected.length, total: list.total }));
       } else {
-        toast.success(`Exported ${formatNumber(collected.length)} order${collected.length === 1 ? '' : 's'}.`);
+        toast.success(t.plural(collected.length, 'Exported {count} order.', 'Exported {count} orders.'));
       }
     } catch (caught) {
       toast.error(errorMessage(caught));
@@ -467,7 +541,7 @@ export function OrderManager({
   const someSelected = rows.some((row) => selected.has(row.id));
 
   const countOf = (map: Record<string, number> | undefined, key: string) =>
-    map && map[key] !== undefined ? ` (${formatNumber(map[key]!)})` : '';
+    map && map[key] !== undefined ? ` (${t.number(map[key]!)})` : '';
 
   /*
    * Columns as data. A virtualised table only ever holds the rows on screen, so
@@ -486,7 +560,7 @@ export function OrderManager({
           onCheckedChange={(checked) =>
             setSelected(() => (checked === true ? new Set(rows.map((row) => row.id)) : new Set()))
           }
-          aria-label="Select every order loaded"
+          aria-label={t('Select every order loaded')}
         />
       ),
       cell: (row) => (
@@ -500,7 +574,7 @@ export function OrderManager({
               return next;
             })
           }
-          aria-label={`Select ${row.orderNumber}`}
+          aria-label={t('Select {order}', { order: row.orderNumber })}
         />
       ),
     },
@@ -509,17 +583,23 @@ export function OrderManager({
       width: '12rem',
       header: (
         <SortButton sort="orderNumber" active={filters.sort} order={filters.order} onSort={sortBy}>
-          Order
+          {t('Order')}
         </SortButton>
       ),
       cell: (row) => (
         <>
-          <Link href={`/orders/${row.id}`} className="font-mono text-sm font-semibold hover:underline">
+          <button
+            type="button"
+            onClick={() => viewing.view(row)}
+            className="font-mono text-sm font-semibold hover:underline"
+          >
             {row.orderNumber}
-          </Link>
+          </button>
           {row.paymentProvider ? (
             <p className="truncate text-xs text-muted-foreground">
-              {PROVIDER_LABEL[row.paymentProvider] ?? titleCase(row.paymentProvider)}
+              {PROVIDER_LABEL[row.paymentProvider]
+                ? t(PROVIDER_LABEL[row.paymentProvider]!)
+                : (PROVIDER_NAME[row.paymentProvider] ?? t.loose(titleCase(row.paymentProvider)))}
             </p>
           ) : null}
         </>
@@ -527,18 +607,18 @@ export function OrderManager({
     },
     {
       key: 'customer',
-      header: 'Customer',
+      header: t('Customer'),
       className: 'min-w-0',
       cell: (row) => (
         <>
           {row.customerId ? (
-            <Link href={`/customers/${row.customerId}`} className="block truncate font-medium hover:underline">
+            <Link href={`/customers?view=${row.customerId}`} className="block truncate font-medium hover:underline">
               {row.customerName}
             </Link>
           ) : (
             <span className="flex items-center gap-1.5 truncate font-medium">
               {row.customerName}
-              <Badge variant="outline">Guest</Badge>
+              <Badge variant="outline">{t('Guest')}</Badge>
             </span>
           )}
           <p className="truncate text-xs text-muted-foreground">{row.phone ?? row.email}</p>
@@ -551,15 +631,15 @@ export function OrderManager({
       className: 'text-sm text-muted-foreground',
       header: (
         <SortButton sort="placedAt" active={filters.sort} order={filters.order} onSort={sortBy}>
-          Placed
+          {t('Placed')}
         </SortButton>
       ),
       cell: (row) => (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="cursor-default">{formatRelative(row.placedAt)}</span>
+            <span className="cursor-default">{t.relative(row.placedAt)}</span>
           </TooltipTrigger>
-          <TooltipContent>{formatDateTime(row.placedAt)}</TooltipContent>
+          <TooltipContent>{t.dateTime(row.placedAt)}</TooltipContent>
         </Tooltip>
       ),
     },
@@ -568,16 +648,17 @@ export function OrderManager({
       width: '11rem',
       header: (
         <span className="inline-flex items-center gap-1.5">
-          Status
+          {t('Status')}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" aria-label="What these statuses mean">
+              <button type="button" aria-label={t('What these statuses mean')}>
                 <Info className="size-3.5" aria-hidden />
               </button>
             </TooltipTrigger>
             <TooltipContent className="max-w-72">
-              An order travels new → confirmed → processing → packed → shipped → delivered. Only the moves the
-              API allows are offered, and it re-checks every one.
+              {t(
+                'An order travels new → confirmed → processing → packed → shipped → delivered. Only the moves the API allows are offered, and it re-checks every one.',
+              )}
             </TooltipContent>
           </Tooltip>
         </span>
@@ -587,16 +668,16 @@ export function OrderManager({
     {
       key: 'payment',
       width: '10rem',
-      header: 'Payment',
+      header: t('Payment'),
       cell: (row) => <StatusBadge status={row.paymentStatus} />,
     },
     {
       key: 'items',
       width: '5.5rem',
-      header: 'Items',
+      header: t('Items'),
       headClassName: 'text-right',
       className: 'text-right tabular-nums text-muted-foreground',
-      cell: (row) => formatNumber(row.itemCount),
+      cell: (row) => t.number(row.itemCount),
     },
     {
       key: 'total',
@@ -605,16 +686,16 @@ export function OrderManager({
       className: 'text-right font-medium tabular-nums whitespace-nowrap',
       header: (
         <SortButton sort="grandTotal" active={filters.sort} order={filters.order} onSort={sortBy}>
-          Total
+          {t('Total')}
         </SortButton>
       ),
-      cell: (row) => formatMoney(row.grandTotal, row.currency || currency),
+      cell: (row) => t.money(row.grandTotal, row.currency || currency),
     },
     {
       key: 'actions',
       width: '10rem',
       headClassName: 'text-right',
-      header: 'Actions',
+      header: t('Actions'),
       cell: (row) => {
         const moves = row.allowedTransitions.filter(
           (status) => (status !== 'cancelled' && status !== 'failed') || canCancel,
@@ -627,30 +708,24 @@ export function OrderManager({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={`View ${row.orderNumber}`}
+                  aria-label={t('View {order}', { order: row.orderNumber })}
                   onClick={() => viewing.view(row)}
                 >
                   <Eye />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>View every detail</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon-sm" asChild>
-                  <Link href={`/orders/${row.id}`} aria-label={`Open ${row.orderNumber}`}>
-                    <ArrowUpRight />
-                  </Link>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Open the order</TooltipContent>
+              <TooltipContent>{t('View every detail')}</TooltipContent>
             </Tooltip>
 
             {canUpdate ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" disabled={busy} aria-label={`Move ${row.orderNumber} on`}>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={busy}
+                    aria-label={t('Move {order} on', { order: row.orderNumber })}
+                  >
                     <MoreVertical />
                   </Button>
                 </DropdownMenuTrigger>
@@ -658,7 +733,7 @@ export function OrderManager({
                   <DropdownMenuLabel>{row.orderNumber}</DropdownMenuLabel>
                   {moves.length === 0 ? (
                     <DropdownMenuItem disabled>
-                      <CircleSlash /> Nothing left to do
+                      <CircleSlash /> {t('Nothing left to do')}
                     </DropdownMenuItem>
                   ) : (
                     moves.map((status) => (
@@ -667,16 +742,10 @@ export function OrderManager({
                         destructive={status === 'cancelled' || status === 'failed'}
                         onSelect={() => void moveOne(row, status)}
                       >
-                        <ArrowRight /> {MOVE_LABEL[status]}
+                        <ArrowRight /> {t(MOVE_LABEL[status])}
                       </DropdownMenuItem>
                     ))
                   )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link href={`/orders/${row.id}`}>
-                      <Truck /> Add tracking
-                    </Link>
-                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -690,28 +759,28 @@ export function OrderManager({
     <TooltipProvider delayDuration={200}>
       <div className="space-y-6">
         <PageHeader
-          title="Orders"
-          breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Orders' }]}
+          title={t('Orders')}
+          breadcrumb={[{ label: t('Dashboard'), href: '/dashboard' }, { label: t('Orders') }]}
           actions={
             <>
               <Button variant="outline" onClick={exportCsv} loading={exporting} disabled={rows.length === 0}>
-                {exporting ? null : <Download />} Export
+                {exporting ? null : <Download />} {t('Export')}
               </Button>
 
               {canUpdate ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" disabled={selected.size === 0 || busy}>
-                      Bulk Actions
-                      {selected.size ? <Badge variant="primary">{selected.size}</Badge> : null}
+                      {t('Bulk Actions')}
+                      {selected.size ? <Badge variant="primary">{t.number(selected.size)}</Badge> : null}
                       <ChevronDown />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-56">
-                    <DropdownMenuLabel>{selected.size} selected</DropdownMenuLabel>
+                    <DropdownMenuLabel>{t('{count} selected', { count: selected.size })}</DropdownMenuLabel>
                     {sharedMoves.length === 0 ? (
                       <DropdownMenuItem disabled>
-                        <CircleSlash /> No move they all allow
+                        <CircleSlash /> {t('No move they all allow')}
                       </DropdownMenuItem>
                     ) : (
                       sharedMoves.map((status) => (
@@ -720,7 +789,7 @@ export function OrderManager({
                           destructive={status === 'cancelled' || status === 'failed'}
                           onSelect={() => void bulkMove(status)}
                         >
-                          <ArrowRight /> {MOVE_LABEL[status]}
+                          <ArrowRight /> {t(MOVE_LABEL[status])}
                         </DropdownMenuItem>
                       ))
                     )}
@@ -736,37 +805,42 @@ export function OrderManager({
           <StatCard
             icon={ShoppingCart}
             tint="primary"
-            label="Orders Today"
-            value={formatNumber(stats?.todayOrders ?? 0)}
+            label={t('Orders Today')}
+            value={t.number(stats?.todayOrders ?? 0)}
             note={
               stats
-                ? `${formatMoney(stats.todayRevenue, currency)} taken today · ${stats.timezone}`
-                : 'Counted in the store’s own timezone'
+                ? t('{amount} taken today · {timezone}', {
+                    amount: t.money(stats.todayRevenue, currency),
+                    timezone: stats.timezone,
+                  })
+                : t('Counted in the store’s own timezone')
             }
             good={(stats?.todayOrders ?? 0) > 0}
           />
           <StatCard
             icon={Clock}
             tint="warning"
-            label="Awaiting Action"
-            value={formatNumber(stats?.openOrders ?? 0)}
-            note="New, confirmed, processing or packed"
+            label={t('Awaiting Action')}
+            value={t.number(stats?.openOrders ?? 0)}
+            note={t('New, confirmed, processing or packed')}
             href={stats && stats.openOrders > 0 ? '/orders?open=yes' : undefined}
           />
           <StatCard
             icon={Banknote}
             tint="danger"
-            label="Unpaid"
-            value={formatNumber(stats?.unpaid ?? 0)}
-            note="Payment still outstanding"
+            label={t('Unpaid')}
+            value={t.number(stats?.unpaid ?? 0)}
+            note={t('Payment still outstanding')}
           />
           <StatCard
             icon={Receipt}
             tint="success"
-            label="Revenue (30 days)"
-            value={formatMoney(stats?.revenue30d ?? 0, currency)}
+            label={t('Revenue (30 days)')}
+            value={t.money(stats?.revenue30d ?? 0, currency)}
             note={
-              stats ? `${formatMoney(stats.averageOrderValue, currency)} average order` : 'Cancelled orders excluded'
+              stats
+                ? t('{amount} average order', { amount: t.money(stats.averageOrderValue, currency) })
+                : t('Cancelled orders excluded')
             }
           />
         </div>
@@ -788,8 +862,8 @@ export function OrderManager({
               <Input
                 value={term}
                 onChange={(event) => setTerm(event.target.value)}
-                placeholder="Order number, name, email or phone…"
-                aria-label="Search orders"
+                placeholder={t('Order number, name, email or phone…')}
+                aria-label={t('Search orders')}
                 className="pl-9"
               />
             </div>
@@ -797,13 +871,16 @@ export function OrderManager({
             <select
               value={filters.status}
               onChange={(event) => apply({ status: event.target.value })}
-              aria-label="Order status"
+              aria-label={t('Order status')}
               className={cn(SELECT_CLASS, 'lg:w-52')}
             >
-              <option value="all">All Status{countOf({ all: stats?.total ?? 0 }, 'all')}</option>
+              <option value="all">
+                {t('All Status')}
+                {countOf({ all: stats?.total ?? 0 }, 'all')}
+              </option>
               {STATUS_OPTIONS.map((status) => (
                 <option key={status} value={status}>
-                  {titleCase(status)}
+                  {t(STATUS_LABEL[status])}
                   {countOf(stats?.byStatus, status)}
                 </option>
               ))}
@@ -812,13 +889,13 @@ export function OrderManager({
             <select
               value={filters.paymentStatus}
               onChange={(event) => apply({ paymentStatus: event.target.value })}
-              aria-label="Payment status"
+              aria-label={t('Payment status')}
               className={cn(SELECT_CLASS, 'lg:w-52')}
             >
-              <option value="all">All Payments</option>
+              <option value="all">{t('All Payments')}</option>
               {PAYMENT_OPTIONS.map((status) => (
                 <option key={status} value={status}>
-                  {titleCase(status)}
+                  {t(PAYMENT_LABEL[status])}
                   {countOf(stats?.byPaymentStatus, status)}
                 </option>
               ))}
@@ -830,19 +907,19 @@ export function OrderManager({
                 const preset = event.target.value as DatePreset;
                 apply(preset === 'custom' ? { preset } : { preset, from: '', to: '' });
               }}
-              aria-label="Date range"
+              aria-label={t('Date range')}
               className={cn(SELECT_CLASS, 'lg:w-44')}
             >
-              <option value="all">Any date</option>
-              <option value="today">Today</option>
-              <option value="week">Last 7 days</option>
-              <option value="month">Last 30 days</option>
-              <option value="custom">Custom range…</option>
+              <option value="all">{t('Any date')}</option>
+              <option value="today">{t('Today')}</option>
+              <option value="week">{t('Last 7 days')}</option>
+              <option value="month">{t('Last 30 days')}</option>
+              <option value="custom">{t('Custom range…')}</option>
             </select>
 
             <div className="flex items-center gap-2 lg:ml-auto">
               <Button type="submit" variant="outline">
-                <SlidersHorizontal /> Filter
+                <SlidersHorizontal /> {t('Filter')}
               </Button>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -854,12 +931,12 @@ export function OrderManager({
                       setTerm('');
                       startTransition(() => router.push('/orders'));
                     }}
-                    aria-label="Reset filters"
+                    aria-label={t('Reset filters')}
                   >
                     <RotateCcw />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Reset filters</TooltipContent>
+                <TooltipContent>{t('Reset filters')}</TooltipContent>
               </Tooltip>
             </div>
           </div>
@@ -867,7 +944,7 @@ export function OrderManager({
           {filters.preset === 'custom' ? (
             <div className="flex flex-wrap items-end gap-3 border-t border-border pt-3">
               <label className="text-xs text-muted-foreground">
-                From
+                {t('From')}
                 <Input
                   type="date"
                   value={filters.from}
@@ -877,7 +954,7 @@ export function OrderManager({
                 />
               </label>
               <label className="text-xs text-muted-foreground">
-                To
+                {t('To')}
                 <Input
                   type="date"
                   value={filters.to}
@@ -886,7 +963,7 @@ export function OrderManager({
                   className="mt-1 w-44"
                 />
               </label>
-              <p className="pb-2 text-xs text-muted-foreground">Both ends included.</p>
+              <p className="pb-2 text-xs text-muted-foreground">{t('Both ends included.')}</p>
             </div>
           ) : null}
         </form>
@@ -908,12 +985,27 @@ export function OrderManager({
           estimateRowHeight={65}
           empty={
             filtering
-              ? 'No order matches these filters.'
-              : 'No orders yet. When someone buys something from your store, it will appear here.'
+              ? t('No order matches these filters.')
+              : t('No orders yet. When someone buys something from your store, it will appear here.')
           }
         />
 
-        <OrderDetail row={viewing.row} open={viewing.open} onOpenChange={viewing.onOpenChange} />
+        <OrderDetail
+          row={viewing.row}
+          open={viewing.open}
+          onOpenChange={changeOpen}
+          canUpdate={canUpdate}
+          moves={
+            canUpdate
+              ? {
+                  allowed: (status) => (status !== 'cancelled' && status !== 'failed') || canCancel,
+                  label: (status) => t(MOVE_LABEL[status]),
+                  busy,
+                  run: (status) => (viewing.row ? moveOne(viewing.row, status) : Promise.resolve(false)),
+                }
+              : undefined
+          }
+        />
       </div>
     </TooltipProvider>
   );

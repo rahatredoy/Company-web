@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { useDetail } from '@/hooks/use-detail';
-import { formatDateTime, formatMoney, titleCase } from '@/lib/format';
+import { titleCase } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import type { RefundRow, RefundView } from '@/lib/types';
 import {
   DetailEmpty,
@@ -41,6 +42,7 @@ export function RefundDetail({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useT();
   const detail = useDetail<RefundView>({
     path: '/api/v1/admin/refunds',
     id: row?.id ?? null,
@@ -54,9 +56,9 @@ export function RefundDetail({
     <DetailSheet
       open={open}
       onOpenChange={onOpenChange}
-      title={<span className="font-mono">{refund?.refundNumber ?? row?.refundNumber ?? 'Refund'}</span>}
+      title={<span className="font-mono">{refund?.refundNumber ?? row?.refundNumber ?? t('Refund')}</span>}
       subtitle={
-        refund ? `${formatMoney(refund.amount, currency)} · ${refund.order.customerName}` : row?.customerName
+        refund ? `${t.money(refund.amount, currency)} · ${refund.order.customerName}` : row?.customerName
       }
       badge={<StatusBadge status={refund?.status ?? row?.status ?? 'requested'} />}
       loading={detail.loading}
@@ -65,33 +67,33 @@ export function RefundDetail({
       footer={
         refund ? (
           <Button asChild variant="outline" size="sm">
-            <Link href={`/orders/${refund.orderId}`}>Open the order</Link>
+            <Link href={`/orders?view=${refund.orderId}`}>{t('Open the order')}</Link>
           </Button>
         ) : null
       }
     >
       {refund ? (
         <div className="space-y-6">
-          <DetailSection title="Refund">
+          <DetailSection title={t('Refund')}>
             <DetailGrid>
-              <DetailField label="Number" value={refund.refundNumber} mono />
-              <DetailField label="Status" value={<StatusBadge status={refund.status} />} />
-              <DetailField label="Amount" value={formatMoney(refund.amount, currency)} />
+              <DetailField label={t('Number')} value={refund.refundNumber} mono />
+              <DetailField label={t('Status')} value={<StatusBadge status={refund.status} />} />
+              <DetailField label={t('Amount')} value={t.money(refund.amount, currency)} />
               <DetailField
-                label="How it went back"
-                value={refund.method ? titleCase(refund.method) : null}
-                hint={refund.method ? undefined : 'Not recorded yet.'}
+                label={t('How it went back')}
+                value={refund.method ? t.loose(titleCase(refund.method)) : null}
+                hint={refund.method ? undefined : t('Not recorded yet.')}
               />
-              <DetailField label="Raised" value={formatDateTime(refund.createdAt)} />
-              <DetailField label="Approved" value={formatDateTime(refund.approvedAt)} />
-              <DetailField label="Settled" value={formatDateTime(refund.completedAt)} />
-              <DetailField label="Record updated" value={formatDateTime(refund.updatedAt)} />
-              <DetailField label="Approved by" value={<DetailId value={refund.approvedBy} />} />
-              <DetailField label="Gateway reference" value={refund.providerReference} mono />
-              <DetailField label="Refund ID" value={<DetailId value={refund.id} />} />
-              <DetailField label="Payment ID" value={<DetailId value={refund.paymentId} />} />
+              <DetailField label={t('Raised')} value={t.dateTime(refund.createdAt)} />
+              <DetailField label={t('Approved')} value={t.dateTime(refund.approvedAt)} />
+              <DetailField label={t('Settled')} value={t.dateTime(refund.completedAt)} />
+              <DetailField label={t('Record updated')} value={t.dateTime(refund.updatedAt)} />
+              <DetailField label={t('Approved by')} value={<DetailId value={refund.approvedBy} />} />
+              <DetailField label={t('Gateway reference')} value={refund.providerReference} mono />
+              <DetailField label={t('Refund ID')} value={<DetailId value={refund.id} />} />
+              <DetailField label={t('Payment ID')} value={<DetailId value={refund.paymentId} />} />
               <DetailField
-                label="Can become"
+                label={t('Can become')}
                 value={
                   refund.allowedTransitions.length ? (
                     <span className="flex flex-wrap gap-1">
@@ -100,7 +102,7 @@ export function RefundDetail({
                       ))}
                     </span>
                   ) : (
-                    'Nothing — this is final.'
+                    t('Nothing — this is final.')
                   )
                 }
                 full
@@ -108,47 +110,50 @@ export function RefundDetail({
             </DetailGrid>
           </DetailSection>
 
-          <DetailSection title="Why">
+          <DetailSection title={t('Why')}>
             <div className="space-y-3">
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Reason</p>
-                {refund.reason ? <DetailProse>{refund.reason}</DetailProse> : <DetailEmpty>None given.</DetailEmpty>}
+                <p className="text-xs text-muted-foreground">{t('Reason')}</p>
+                {refund.reason ? <DetailProse>{refund.reason}</DetailProse> : <DetailEmpty>{t('None given.')}</DetailEmpty>}
               </div>
               {refund.failureReason ? (
                 <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Why it failed or was rejected</p>
+                  <p className="text-xs text-muted-foreground">{t('Why it failed or was rejected')}</p>
                   <DetailProse>{refund.failureReason}</DetailProse>
                 </div>
               ) : null}
             </div>
           </DetailSection>
 
-          <DetailSection title="Against the order">
+          <DetailSection title={t('Against the order')}>
             <DetailGrid className="mb-3">
               <DetailField
-                label="Order"
+                label={t('Order')}
                 value={
-                  <Link href={`/orders/${refund.orderId}`} className="font-mono text-[13px] hover:underline">
+                  <Link href={`/orders?view=${refund.orderId}`} className="font-mono text-[12px] hover:underline">
                     {refund.order.orderNumber}
                   </Link>
                 }
               />
-              <DetailField label="Order status" value={<StatusBadge status={refund.order.status} />} />
-              <DetailField label="Payment status" value={<StatusBadge status={refund.order.paymentStatus} />} />
-              <DetailField label="Placed" value={formatDateTime(refund.order.placedAt)} />
+              <DetailField label={t('Order status')} value={<StatusBadge status={refund.order.status} />} />
+              <DetailField label={t('Payment status')} value={<StatusBadge status={refund.order.paymentStatus} />} />
+              <DetailField label={t('Placed')} value={t.dateTime(refund.order.placedAt)} />
               <DetailField
-                label="Paid by"
+                label={t('Paid by')}
                 value={
-                  [refund.order.paymentProvider && titleCase(refund.order.paymentProvider), refund.order.paymentMethodLabel]
+                  [
+                    refund.order.paymentProvider && t.loose(titleCase(refund.order.paymentProvider)),
+                    refund.order.paymentMethodLabel,
+                  ]
                     .filter(Boolean)
                     .join(' · ') || null
                 }
               />
               <DetailField
-                label="Customer"
+                label={t('Customer')}
                 value={
                   refund.customerId ? (
-                    <Link href={`/customers/${refund.customerId}`} className="hover:underline">
+                    <Link href={`/customers?view=${refund.customerId}`} className="hover:underline">
                       {refund.order.customerName}
                     </Link>
                   ) : (
@@ -156,21 +161,21 @@ export function RefundDetail({
                   )
                 }
               />
-              <DetailField label="Email" value={refund.customerEmail ?? refund.order.customerEmail} />
-              <DetailField label="Phone" value={refund.order.customerPhone} />
+              <DetailField label={t('Email')} value={refund.customerEmail ?? refund.order.customerEmail} />
+              <DetailField label={t('Phone')} value={refund.order.customerPhone} />
             </DetailGrid>
 
             <DetailTotals
               rows={[
-                { label: 'Order total', value: formatMoney(refund.order.grandTotal, currency) },
+                { label: t('Order total'), value: t.money(refund.order.grandTotal, currency) },
                 {
-                  label: 'Already refunded',
-                  value: `−${formatMoney(refund.order.refundedTotal, currency)}`,
+                  label: t('Already refunded'),
+                  value: `−${t.money(refund.order.refundedTotal, currency)}`,
                   muted: true,
                 },
                 {
-                  label: 'Still refundable',
-                  value: formatMoney(refund.remainingOnOrder, currency),
+                  label: t('Still refundable'),
+                  value: t.money(refund.remainingOnOrder, currency),
                   strong: true,
                 },
               ]}
@@ -178,21 +183,21 @@ export function RefundDetail({
           </DetailSection>
 
           {refund.returnId ? (
-            <DetailSection title="Raised by a return">
+            <DetailSection title={t('Raised by a return')}>
               <DetailGrid>
                 <DetailField
-                  label="Return"
+                  label={t('Return')}
                   value={
                     <Link
-                      href={`/returns/${refund.returnId}`}
-                      className="font-mono text-[13px] hover:underline"
+                      href={`/returns?view=${refund.returnId}`}
+                      className="font-mono text-[12px] hover:underline"
                     >
-                      {refund.returnNumber ?? 'Open return'}
+                      {refund.returnNumber ?? t('Open return')}
                     </Link>
                   }
                 />
                 <DetailField
-                  label="Return status"
+                  label={t('Return status')}
                   value={refund.returnStatus ? <StatusBadge status={refund.returnStatus} /> : null}
                 />
               </DetailGrid>
@@ -200,41 +205,41 @@ export function RefundDetail({
           ) : null}
 
           <DetailSection
-            title="Payments on the order"
-            description="What was taken, and how much of each has already been sent back."
+            title={t('Payments on the order')}
+            description={t('What was taken, and how much of each has already been sent back.')}
           >
             <DetailTable
               rows={refund.payments}
               rowKey={(payment) => payment.id}
-              empty="No payment recorded — cash on delivery leaves none until it is collected."
+              empty={t('No payment recorded — cash on delivery leaves none until it is collected.')}
               columns={[
-                { key: 'provider', header: 'Provider', cell: (payment) => titleCase(payment.provider) },
-                { key: 'status', header: 'Status', cell: (payment) => <StatusBadge status={payment.status} /> },
+                { key: 'provider', header: t('Provider'), cell: (payment) => t.loose(titleCase(payment.provider)) },
+                { key: 'status', header: t('Status'), cell: (payment) => <StatusBadge status={payment.status} /> },
                 {
                   key: 'amount',
-                  header: 'Taken',
+                  header: t('Taken'),
                   align: 'right',
-                  cell: (payment) => formatMoney(payment.amount, payment.currency),
+                  cell: (payment) => t.money(payment.amount, payment.currency),
                 },
                 {
                   key: 'refunded',
-                  header: 'Sent back',
+                  header: t('Sent back'),
                   align: 'right',
-                  cell: (payment) => formatMoney(payment.refundedAmount, payment.currency),
+                  cell: (payment) => t.money(payment.refundedAmount, payment.currency),
                 },
                 {
                   key: 'reference',
-                  header: 'Reference',
+                  header: t('Reference'),
                   cell: (payment) => (
                     <span className="font-mono text-xs break-all">{payment.providerReference ?? '—'}</span>
                   ),
                 },
-                { key: 'paid', header: 'Paid', cell: (payment) => formatDateTime(payment.paidAt) },
+                { key: 'paid', header: t('Paid'), cell: (payment) => t.dateTime(payment.paidAt) },
               ]}
             />
           </DetailSection>
 
-          <DetailSection title="Metadata">
+          <DetailSection title={t('Metadata')}>
             <DetailJson value={refund.metadata} />
           </DetailSection>
         </div>

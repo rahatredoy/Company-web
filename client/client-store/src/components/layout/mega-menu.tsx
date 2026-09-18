@@ -8,6 +8,7 @@ import { ChevronDown } from 'lucide-react';
 import type { CategoryMenuEntry, NavigationNode, StoreConfig } from '@/types';
 import type { TemplatePreset } from '@/templates/meta';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * Desktop navigation, with dropdowns where a menu item has children.
@@ -73,6 +74,7 @@ export function MegaMenu({
   className?: string;
   linkClassName?: string;
 }) {
+  const t = useT();
   const items = config.navigation.header;
   if (items.length === 0) return null;
 
@@ -81,10 +83,17 @@ export function MegaMenu({
   const catalogue = config.categoryMenu;
 
   return (
-    <nav aria-label="Main" className={cn('hidden lg:block', className)}>
+    <nav aria-label={t('Main')} className={cn('hidden lg:block', className)}>
       <ul className="flex items-center gap-6 xl:gap-7">
         {items.map((item) => {
           const children = resolveChildren(item, catalogue);
+          /*
+           * Menu labels are the store's, and a label still exactly as seeded is
+           * translated. Children borrowed from the category tree are category
+           * names, which are never translated — a department called "Home" is
+           * the owner's word, not the menu's.
+           */
+          const childLabel = (label: string) => (item.children.length > 0 ? t.loose(label) : label);
 
           const flag = flags?.[item.href];
           const withPromo = style === 'columns-promo' && !!promo;
@@ -113,7 +122,7 @@ export function MegaMenu({
                     linkClassName,
                   )}
                 >
-                  {item.label}
+                  {t.loose(item.label)}
                   {flag ? <FlagPip flag={flag} /> : null}
                   <ChevronDown
                     className="size-3.5 opacity-70 transition-transform data-[state=open]:rotate-180"
@@ -159,9 +168,9 @@ export function MegaMenu({
                             <DropdownMenu.Item asChild>
                               <Link
                                 href={group.href}
-                                className="block cursor-pointer text-[13px] font-semibold outline-none hover:text-primary data-[highlighted]:text-primary"
+                                className="block cursor-pointer text-[12px] font-semibold outline-none hover:text-primary data-[highlighted]:text-primary"
                               >
-                                {group.label}
+                                {childLabel(group.label)}
                               </Link>
                             </DropdownMenu.Item>
 
@@ -172,9 +181,9 @@ export function MegaMenu({
                                     <DropdownMenu.Item asChild>
                                       <Link
                                         href={child.href}
-                                        className="block cursor-pointer text-[13px] text-muted outline-none hover:text-primary data-[highlighted]:text-primary"
+                                        className="block cursor-pointer text-[12px] text-muted outline-none hover:text-primary data-[highlighted]:text-primary"
                                       >
-                                        {child.label}
+                                        {childLabel(child.label)}
                                       </Link>
                                     </DropdownMenu.Item>
                                   </li>
@@ -233,6 +242,8 @@ function NavLink({
   flag?: NavFlag;
   className?: string;
 }) {
+  const t = useT();
+
   return (
     <Link
       href={item.href}
@@ -243,7 +254,7 @@ function NavLink({
         className,
       )}
     >
-      {item.label}
+      {t.loose(item.label)}
       {flag ? <FlagPip flag={flag} /> : null}
     </Link>
   );

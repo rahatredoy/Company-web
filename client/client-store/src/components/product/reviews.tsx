@@ -3,8 +3,10 @@ import type { Review, ReviewSummary } from '@/types';
 import { RatingStars } from '@/components/commerce/rating-stars';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
-import { formatDate, initials, pluralise } from '@/lib/utils';
+import { formatDate, initials } from '@/lib/utils';
 import { cn } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
+import type { Translator } from '@/lib/i18n';
 import { WriteReviewDialog } from './write-review-dialog';
 
 /**
@@ -22,7 +24,7 @@ import { WriteReviewDialog } from './write-review-dialog';
 /** How many reviews stand above the fold before the rest are folded away. */
 const PREVIEW_COUNT = 2;
 
-export function ReviewSummaryPanel({
+export async function ReviewSummaryPanel({
   summary,
   productSlug,
   className,
@@ -31,6 +33,8 @@ export function ReviewSummaryPanel({
   productSlug: string;
   className?: string;
 }) {
+  const t = await getT();
+
   return (
     <div
       className={cn(
@@ -39,11 +43,13 @@ export function ReviewSummaryPanel({
       )}
     >
       <div className="flex items-center gap-3">
-        <p className="text-3xl font-bold tabular-nums">{summary.average.toFixed(1)}</p>
+        <p className="text-3xl font-bold tabular-nums">
+          {t.number(summary.average, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+        </p>
         <div>
           <RatingStars rating={summary.average} size="sm" />
           <p className="mt-0.5 text-xs text-subtle">
-            {summary.count} {pluralise(summary.count, 'review')}
+            {t.plural(summary.count, '{count} review', '{count} reviews')}
           </p>
         </div>
       </div>
@@ -53,7 +59,7 @@ export function ReviewSummaryPanel({
   );
 }
 
-export function ReviewList({
+export async function ReviewList({
   reviews,
   locale,
   className,
@@ -62,11 +68,13 @@ export function ReviewList({
   locale: string;
   className?: string;
 }) {
+  const t = await getT();
+
   if (reviews.length === 0) {
     return (
       <EmptyState
-        title="No reviews yet"
-        description="Be the first to tell other shoppers what you thought of this."
+        title={t('No reviews yet')}
+        description={t('Be the first to tell other shoppers what you thought of this.')}
         className="rounded-(--radius-card) border border-dashed border-border py-12"
       />
     );
@@ -79,21 +87,21 @@ export function ReviewList({
     <div className={className}>
       <ul className="divide-y divide-border">
         {preview.map((review) => (
-          <ReviewItem key={review.id} review={review} locale={locale} />
+          <ReviewItem key={review.id} review={review} locale={locale} t={t} />
         ))}
       </ul>
 
       {rest.length > 0 ? (
         <details className="group border-t border-border">
           <summary className="flex cursor-pointer list-none items-center justify-center gap-2 py-3 text-sm font-medium text-primary hover:underline [&::-webkit-details-marker]:hidden">
-            <span className="group-open:hidden">Show all {reviews.length} reviews</span>
-            <span className="hidden group-open:inline">Show fewer reviews</span>
+            <span className="group-open:hidden">{t('Show all {count} reviews', { count: reviews.length })}</span>
+            <span className="hidden group-open:inline">{t('Show fewer reviews')}</span>
             <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden />
           </summary>
 
           <ul className="divide-y divide-border border-t border-border">
             {rest.map((review) => (
-              <ReviewItem key={review.id} review={review} locale={locale} />
+              <ReviewItem key={review.id} review={review} locale={locale} t={t} />
             ))}
           </ul>
         </details>
@@ -102,7 +110,7 @@ export function ReviewList({
   );
 }
 
-function ReviewItem({ review, locale }: { review: Review; locale: string }) {
+function ReviewItem({ review, locale, t }: { review: Review; locale: string; t: Translator }) {
   return (
     <li className="py-5">
       <div className="flex items-start gap-3">
@@ -119,7 +127,7 @@ function ReviewItem({ review, locale }: { review: Review; locale: string }) {
             {review.verifiedPurchase ? (
               <Badge tone="success" size="sm">
                 <BadgeCheck className="size-3" aria-hidden />
-                Verified purchase
+                {t('Verified purchase')}
               </Badge>
             ) : null}
             <time dateTime={review.createdAt} className="text-xs text-subtle">
@@ -135,7 +143,7 @@ function ReviewItem({ review, locale }: { review: Review; locale: string }) {
 
           {review.adminReply ? (
             <div className="mt-3 rounded-(--radius-button) border-l-2 border-primary bg-surface-alt p-3">
-              <p className="text-xs font-semibold">Store response</p>
+              <p className="text-xs font-semibold">{t('Store response')}</p>
               <p className="mt-1 text-sm text-muted">{review.adminReply}</p>
             </div>
           ) : null}

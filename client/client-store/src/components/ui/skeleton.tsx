@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { TranslatedText } from './translated-text';
 
 /**
  * A loading placeholder.
@@ -37,7 +38,9 @@ export function ProductGridSkeleton({
 }) {
   return (
     <div role="status" aria-busy="true">
-      <span className="sr-only">Loading products…</span>
+      <span className="sr-only">
+        <TranslatedText text="Loading products…" />
+      </span>
       <div className={className}>
         {Array.from({ length: count }, (_, index) => (
           <ProductCardSkeleton key={index} portrait={portrait} />

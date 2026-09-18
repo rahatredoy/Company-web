@@ -25,8 +25,8 @@ import { CartLineItem } from './cart-line-item';
  * opens mid-task — to check what is in it before adding the next thing — and
  * navigating away to answer that question loses their place on the page.
  *
- * It stays deliberately thin: lines, a subtotal, and two ways out. Coupons,
- * shipping estimates and tax all belong on the cart page, where there is room
+ * It stays deliberately thin: lines, a subtotal, and two ways out. Coupons
+ * and tax belong on the cart page, where there is room
  * to explain them and where the totals are recomputed server-side anyway.
  */
 export function CartDrawer({
@@ -85,9 +85,8 @@ export function CartDrawer({
 
             <div className="border-t border-border px-5 py-4">
               {/*
-                Subtotal only, and it says so. Shipping and tax are decided by
-                an address the panel has not asked for, and a "total" here that
-                checkout then revised would be the number the shopper remembers.
+                Subtotal only, and it says so. A "total" here that checkout then
+                revised would be the number the shopper remembers.
               */}
               <div className="flex items-baseline justify-between">
                 <span className="text-sm text-muted">Subtotal</span>
@@ -95,7 +94,7 @@ export function CartDrawer({
                   {formatMoney(cart.totals.subtotal, cart.totals.currency, locale)}
                 </span>
               </div>
-              <p className="mt-1 text-xs text-subtle">Shipping and tax calculated at checkout.</p>
+              <p className="mt-1 text-xs text-subtle">Final total confirmed at checkout.</p>
 
               <div className="mt-4 grid gap-2">
                 <Link

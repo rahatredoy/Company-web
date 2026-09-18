@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { Check, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -16,6 +17,7 @@ import { cn } from '@/lib/utils';
  * and `navigator.share` rejects if called any other way.
  */
 export function ShareButton({ title, className }: { title: string; className?: string }) {
+  const t = useT();
   const [copied, setCopied] = React.useState(false);
 
   const onClick = async () => {
@@ -35,10 +37,10 @@ export function ShareButton({ title, className }: { title: string; className?: s
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      toast.success('Link copied to your clipboard');
+      toast.success(t('Link copied to your clipboard'));
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error('Could not copy the link. Please copy it from the address bar.');
+      toast.error(t('Could not copy the link. Please copy it from the address bar.'));
     }
   };
 
@@ -46,7 +48,7 @@ export function ShareButton({ title, className }: { title: string; className?: s
     <button
       type="button"
       onClick={onClick}
-      aria-label={`Share ${title}`}
+      aria-label={t('Share {name}', { name: title })}
       className={cn(
         'grid size-11 place-items-center rounded-(--radius-button) border border-border-strong text-foreground transition-colors hover:bg-surface-alt',
         className,

@@ -159,7 +159,7 @@ function HeroCopy({
         className={cn(
           'font-bold leading-[1.08]',
           editorial
-            ? 'text-4xl sm:text-5xl lg:text-[3.5rem]'
+            ? 'text-4xl sm:text-5xl lg:text-[3.25rem]'
             : 'text-3xl sm:text-4xl lg:text-5xl',
         )}
       >

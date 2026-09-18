@@ -76,7 +76,7 @@ export default async function NotificationsPage({
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="text-xs text-muted-foreground">{formatRelative(item.createdAt)}</p>
-                      <p className="text-[11px] text-muted-foreground/70">{formatDateTime(item.createdAt)}</p>
+                      <p className="text-[10.5px] text-muted-foreground/70">{formatDateTime(item.createdAt)}</p>
                     </div>
                   </div>
                 );

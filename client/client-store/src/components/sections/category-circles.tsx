@@ -77,7 +77,7 @@ export function CategoryCircles({
               )}
             </span>
 
-            <span className="text-xs font-medium leading-snug text-foreground group-hover:text-primary sm:text-[13px]">
+            <span className="text-xs font-medium leading-snug text-foreground group-hover:text-primary sm:text-[12px]">
               {category.name}
             </span>
           </Link>

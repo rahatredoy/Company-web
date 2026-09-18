@@ -7,9 +7,14 @@ import {
 } from '@/components/admin/order-manager';
 import { serverGet, serverGetListed, serverGetOptional } from '@/lib/server-api';
 import { BATCH_SIZE } from '@/lib/list';
-import { can, type OrderRow, type OrderStats, type SessionResponse } from '@/lib/types';
+import { can, type OrderDetailRow, type OrderRow, type OrderStats, type SessionResponse } from '@/lib/types';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = { title: 'Orders' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Orders') };
+}
+
 export const dynamic = 'force-dynamic';
 
 /**
@@ -117,6 +122,14 @@ export default async function OrdersPage({
     order: filters.order,
   });
 
+  // `?view=<id>` is how every other screen links to one order: the list opens
+  // with that order's panel. An id that names nothing just opens the list.
+  const viewId = single('view');
+  const initialView =
+    viewId && /^[0-9a-f-]{36}$/i.test(viewId)
+      ? await serverGetOptional<OrderDetailRow>(`/api/v1/admin/orders/${viewId}`)
+      : null;
+
   return (
     <OrderManager
       initial={{ rows: first.data, meta: first.meta }}
@@ -125,6 +138,7 @@ export default async function OrdersPage({
       canUpdate={can(admin, 'orders.update')}
       canCancel={can(admin, 'orders.cancel')}
       filters={filters}
+      initialView={initialView}
     />
   );
 }

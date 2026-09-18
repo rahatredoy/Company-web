@@ -4,8 +4,12 @@ import { KeyRound, Mail, ShieldCheck } from 'lucide-react';
 import { getCustomer } from '@/lib/api/account';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = { title: 'Security', robots: { index: false, follow: false } };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Security'), robots: { index: false, follow: false } };
+}
 
 /**
  * Account security.
@@ -16,44 +20,63 @@ export const metadata: Metadata = { title: 'Security', robots: { index: false, f
  * got hold of.
  */
 export default async function SecurityPage() {
-  const customer = await getCustomer();
+  const [customer, t] = await Promise.all([getCustomer(), getT()]);
   if (!customer) return null;
 
   return (
     <>
-      <h1 className="text-2xl font-semibold sm:text-3xl">Security</h1>
-      <p className="mt-2 text-muted">How you sign in, and where you are signed in.</p>
+      <h1 className="sr-only">{t('Security')}</h1>
 
-      <div className="mt-8 space-y-4">
+      <div className="space-y-4">
         <Card
           icon={KeyRound}
-          title="Password"
-          description="We will email you a link to set a new one. The link is valid for an hour and can be used once."
+          title={t('Password')}
+          description={t(
+            'We will email you a link to set a new one. The link is valid for an hour and can be used once.',
+          )}
           action={
             <Button asChild variant="outline">
-              <Link href="/forgot-password">Change password</Link>
+              <Link href="/forgot-password">{t('Change password')}</Link>
             </Button>
           }
         />
 
         <Card
           icon={Mail}
-          title="Email address"
+          title={t('Email address')}
           description={
-            <>
-              Signing in with{' '}
-              <span className="font-medium text-foreground">{customer.email}</span>.{' '}
-              {customer.emailVerified ? 'Verified.' : 'Not verified yet.'}
-            </>
+            customer.email ? (
+              <>
+                {t.rich('Signing in with {email}.', {
+                  email: <span className="font-medium text-foreground">{customer.email}</span>,
+                })}{' '}
+                {customer.emailVerified ? t('Verified.') : t('Not verified yet.')}
+              </>
+            ) : (
+              t.rich(
+                'You signed up with {phone}. Adding an email means order confirmations have somewhere to go.',
+                {
+                  phone: (
+                    <span className="font-medium text-foreground">
+                      {customer.phone ?? t('a phone number')}
+                    </span>
+                  ),
+                },
+              )
+            )
           }
           action={
-            customer.emailVerified ? (
+            !customer.email ? (
               <Button asChild variant="outline" disabled>
-                <span>Verified</span>
+                <span>{t('Not set')}</span>
+              </Button>
+            ) : customer.emailVerified ? (
+              <Button asChild variant="outline" disabled>
+                <span>{t('Verified')}</span>
               </Button>
             ) : (
               <Button asChild variant="outline">
-                <Link href="/verify-email">Verify</Link>
+                <Link href="/verify-email">{t('Verify')}</Link>
               </Button>
             )
           }
@@ -61,22 +84,24 @@ export default async function SecurityPage() {
 
         <Card
           icon={ShieldCheck}
-          title="Signed-in devices"
-          description="Signing out here ends this session. Changing your password signs you out everywhere."
+          title={t('Signed-in devices')}
+          description={t(
+            'Signing out here ends this session. Changing your password signs you out everywhere.',
+          )}
           action={
             <form action="/api/auth/logout" method="post">
               <Button type="submit" variant="outline">
-                Sign out
+                {t('Sign out')}
               </Button>
             </form>
           }
         />
       </div>
 
-      <Alert tone="info" className="mt-8" title="A note on how we store things">
-        We never see your full card number — payments go straight to our provider and we keep only a
-        token and the last four digits. Your password is stored hashed and cannot be read back by
-        anyone here, including us.
+      <Alert tone="info" className="mt-8" title={t('A note on how we store things')}>
+        {t(
+          'We never see your full card number — payments go straight to our provider and we keep only a token and the last four digits. Your password is stored hashed and cannot be read back by anyone here, including us.',
+        )}
       </Alert>
     </>
   );

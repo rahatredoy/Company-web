@@ -76,6 +76,12 @@ export const config = {
   devStoreSlug: isProduction ? undefined : env.DEV_STORE_SLUG,
 
   security: {
+    /**
+     * Refuse plaintext HTTP. Unset follows NODE_ENV, which is what every real
+     * deployment wants; `plugins/https.ts` explains the one case for turning it
+     * off, and it is about the proxy in front rather than about the traffic.
+     */
+    forceHttps: env.FORCE_HTTPS ?? isProduction,
     storeAuthSecret: env.STORE_AUTH_SECRET,
     encryptionKey: env.ENCRYPTION_KEY,
     cookieDomain: env.COOKIE_DOMAIN,
@@ -107,6 +113,20 @@ export const config = {
     fromEmail: env.MAIL_FROM_EMAIL,
     devRedirectTo: env.MAIL_DEV_REDIRECT_TO,
     configured: env.MAIL_DRIVER === 'log' || Boolean(env.RESEND_API_KEY),
+  },
+  sms: {
+    driver: env.SMS_DRIVER,
+    defaultCountryCode: env.SMS_DEFAULT_COUNTRY_CODE,
+  },
+  oauth: {
+    /**
+     * Null unless **both** halves are present, so every caller has one thing to
+     * check and cannot half-enable the flow.
+     */
+    google:
+      env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+        ? { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }
+        : null,
   },
 } as const;
 

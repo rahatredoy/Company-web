@@ -1,10 +1,43 @@
 /**
+ * Every configured address, upgraded to `https://` unless it is loopback.
+ *
+ * A misconfigured `NEXT_PUBLIC_*` is the one way plaintext gets back into a
+ * platform that is otherwise HTTPS end to end, and it is a quiet one: an
+ * `http://` API address does not fail, it just means every request this app
+ * makes — session cookie included — is readable and rewritable by anyone on the
+ * path. The browser would block most of them as mixed content on an https page,
+ * which turns a security mistake into a baffling outage instead of a warning.
+ *
+ * So the scheme is not taken on trust from the environment. Loopback is the one
+ * exception and has to be: the six apps talk to each other over
+ * `http://localhost` on six ports in development, and there is no network
+ * between them.
+ *
+ * Applied to **patterns** as well as fixed addresses — `http://{slug}.localhost`
+ * is loopback and left alone, `http://api.{slug}.company.com` is not and is
+ * upgraded.
+ */
+function secure(value: string): string {
+  if (!value.startsWith('http://')) return value;
+
+  const rest = value.slice('http://'.length);
+  const hostname = rest.split('/')[0]!.split(':')[0]!.toLowerCase();
+  const loopback =
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0';
+
+  return loopback ? value : `https://${rest}`;
+}
+
+/**
  * Public runtime configuration. Everything here reaches the browser bundle, so
  * nothing secret may ever be added — no database URL, no API key, no payment or
  * storage credential.
  */
 export const publicConfig = {
-  apiUrl: process.env.NEXT_PUBLIC_COMMERCE_API_URL ?? 'http://localhost:4100',
+  apiUrl: secure(process.env.NEXT_PUBLIC_COMMERCE_API_URL ?? 'http://localhost:4100'),
   platformRootDomain: process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? 'company.com',
 
   /**
@@ -90,13 +123,24 @@ export const DESKTOP_LAYOUT_WIDTH = 1280;
  */
 export const PHONE_SCREEN_MAX_WIDTH = 600;
 
-/** Product grids and listings. Kept here so every caller agrees. */
+/**
+ * Product grids and listings. Kept here so every caller agrees.
+ *
+ * The listing pages take **20**, and it is a batch rather than a page now: every
+ * listing scrolls, so the number is how much arrives at a time rather than how
+ * much a visitor is made to look at before clicking. Smaller than the old 24
+ * because the first batch is the one that decides how quickly the page paints,
+ * and every batch after it is fetched over the visitor's own connection while
+ * they read — twenty cards is roughly a screen and a half at the widths these
+ * grids use, which is enough to keep the next batch ahead of the scroll without
+ * paying for products nobody reaches.
+ */
 export const PAGE_SIZE = {
-  shop: 24,
+  shop: 20,
   /** One batch of the homepage's whole-catalogue feed — see `catalog-feed.tsx`. */
   home: 24,
-  category: 24,
-  search: 24,
+  category: 20,
+  search: 20,
   reviews: 10,
   orders: 10,
 } as const;

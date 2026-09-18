@@ -24,6 +24,7 @@ import { Field } from '@/components/ui/field';
 import { Input, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
+import { useT } from '@/lib/i18n';
 
 /**
  * The questions the storefront's help page answers.
@@ -38,6 +39,7 @@ import { toast } from '@/components/ui/toaster';
  */
 export function FaqManager({ rows, canManage }: { rows: FaqRow[]; canManage: boolean }) {
   const router = useRouter();
+  const t = useT();
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<FaqRow | null>(null);
   const [expanded, setExpanded] = React.useState<string | null>(null);
@@ -76,7 +78,7 @@ export function FaqManager({ rows, canManage }: { rows: FaqRow[]; canManage: boo
       else await api.post('/api/v1/admin/website/faqs', payload);
 
       setOpen(false);
-      toast.success('Question saved.');
+      toast.success(t('Question saved.'));
       router.refresh();
     } catch (caught) {
       if (caught instanceof ApiError && caught.details) {
@@ -91,11 +93,11 @@ export function FaqManager({ rows, canManage }: { rows: FaqRow[]; canManage: boo
   };
 
   const remove = async (row: FaqRow) => {
-    if (!window.confirm(`Delete “${row.question}”?`)) return;
+    if (!window.confirm(t('Delete “{question}”?', { question: row.question }))) return;
 
     try {
       await api.delete(`/api/v1/admin/website/faqs/${row.id}`);
-      toast.success('Question removed.');
+      toast.success(t('Question removed.'));
       router.refresh();
     } catch (caught) {
       toast.error(errorMessage(caught));
@@ -107,26 +109,26 @@ export function FaqManager({ rows, canManage }: { rows: FaqRow[]; canManage: boo
   const groups = React.useMemo(() => {
     const map = new Map<string, FaqRow[]>();
     for (const row of rows) {
-      const key = row.category?.trim() || 'General';
+      const key = row.category?.trim() || t('General');
       const list = map.get(key);
       if (list) list.push(row);
       else map.set(key, [row]);
     }
     return [...map.entries()];
-  }, [rows]);
+  }, [rows, t]);
 
   return (
     <div className="space-y-6">
       {canManage ? (
         <Button size="sm" onClick={() => openFor(null)}>
-          <Plus aria-hidden /> Add a question
+          <Plus aria-hidden /> {t('Add a question')}
         </Button>
       ) : null}
 
       {rows.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No questions yet. The help page on your storefront stays empty until there are some.
+            {t('No questions yet. The help page on your storefront stays empty until there are some.')}
           </CardContent>
         </Card>
       ) : (
@@ -162,13 +164,13 @@ export function FaqManager({ rows, canManage }: { rows: FaqRow[]; canManage: boo
                       </button>
 
                       <div className="flex shrink-0 items-center gap-1">
-                        {!row.isActive ? <Badge variant="neutral">Hidden</Badge> : null}
+                        {!row.isActive ? <Badge variant="neutral">{t('Hidden')}</Badge> : null}
                         {canManage ? (
                           <>
-                            <Button variant="ghost" size="icon-sm" onClick={() => openFor(row)} aria-label="Edit">
+                            <Button variant="ghost" size="icon-sm" onClick={() => openFor(row)} aria-label={t('Edit')}>
                               <Pencil aria-hidden />
                             </Button>
-                            <Button variant="ghost" size="icon-sm" onClick={() => remove(row)} aria-label="Delete">
+                            <Button variant="ghost" size="icon-sm" onClick={() => remove(row)} aria-label={t('Delete')}>
                               <Trash2 aria-hidden />
                             </Button>
                           </>
@@ -191,8 +193,8 @@ export function FaqManager({ rows, canManage }: { rows: FaqRow[]; canManage: boo
         <DialogContent size="md">
           <form onSubmit={onSubmit}>
             <DialogHeader>
-              <DialogTitle>{editing ? 'Edit question' : 'New question'}</DialogTitle>
-              <DialogDescription>Shown on your storefront’s help page, grouped by category.</DialogDescription>
+              <DialogTitle>{editing ? t('Edit question') : t('New question')}</DialogTitle>
+              <DialogDescription>{t('Shown on your storefront’s help page, grouped by category.')}</DialogDescription>
             </DialogHeader>
 
             <DialogBody>
@@ -202,26 +204,26 @@ export function FaqManager({ rows, canManage }: { rows: FaqRow[]; canManage: boo
                   right, so the answer box keeps a readable width. */}
               <DialogColumns>
                 <DialogColumn>
-                  <Field label="Question" htmlFor="question" required error={fieldErrors.question}>
+                  <Field label={t('Question')} htmlFor="question" required error={fieldErrors.question}>
                     <Input
                       id="question"
                       name="question"
                       defaultValue={editing?.question ?? ''}
                       maxLength={300}
-                      placeholder="How long does delivery take?"
+                      placeholder={t('How long does delivery take?')}
                     />
                   </Field>
 
-                  <Field label="Answer" htmlFor="answer" required error={fieldErrors.answer}>
+                  <Field label={t('Answer')} htmlFor="answer" required error={fieldErrors.answer}>
                     <Textarea id="answer" name="answer" rows={6} defaultValue={editing?.answer ?? ''} maxLength={4000} />
                   </Field>
                 </DialogColumn>
 
                 <DialogColumn>
                   <Field
-                    label="Category"
+                    label={t('Category')}
                     htmlFor="category"
-                    hint="A heading on the help page. Left empty means General."
+                    hint={t('A heading on the help page. Left empty means General.')}
                     error={fieldErrors.category}
                   >
                     <Input
@@ -229,17 +231,17 @@ export function FaqManager({ rows, canManage }: { rows: FaqRow[]; canManage: boo
                       name="category"
                       defaultValue={editing?.category ?? ''}
                       maxLength={60}
-                      placeholder="Delivery"
+                      placeholder={t('Delivery')}
                     />
                   </Field>
 
-                  <Field label="Order" htmlFor="sortOrder" hint="Lower shows first.">
+                  <Field label={t('Order::sort')} htmlFor="sortOrder" hint={t('Lower shows first.')}>
                     <Input id="sortOrder" name="sortOrder" type="number" min={0} defaultValue={editing?.sortOrder ?? 0} />
                   </Field>
 
                   <label className="flex items-center gap-3 text-sm">
                     <Switch name="isActive" defaultChecked={editing?.isActive ?? true} />
-                    Show it on the storefront
+                    {t('Show it on the storefront')}
                   </label>
                 </DialogColumn>
               </DialogColumns>
@@ -247,10 +249,10 @@ export function FaqManager({ rows, canManage }: { rows: FaqRow[]; canManage: boo
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button type="submit" loading={saving}>
-                Save question
+                {t('Save question')}
               </Button>
             </DialogFooter>
           </form>

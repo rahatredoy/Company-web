@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation';
 import { getCustomer } from '@/lib/api/account';
-import { Breadcrumbs } from '@/components/layout/breadcrumbs';
 import { AccountNav } from '@/components/account/account-nav';
 
 /**
@@ -18,8 +17,6 @@ export default async function AccountLayout({ children }: { children: React.Reac
 
   return (
     <div className="container-store py-6">
-      <Breadcrumbs items={[{ label: 'My account' }]} className="mb-6" />
-
       <div className="grid gap-8 lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-12">
         <AccountNav />
         <div className="min-w-0">{children}</div>

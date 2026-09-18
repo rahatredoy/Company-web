@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Eye, Pencil, Plus, Trash2 } from 'lucide-react';
 import type { BannerRow, CategoryRow } from '@/lib/types';
 import { api, ApiError, errorMessage } from '@/lib/api';
-import { formatDate } from '@/lib/format';
+import { useT, type MessageKey } from '@/lib/i18n';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -34,13 +34,13 @@ const SELECT_CLASS = 'h-10 w-full rounded-md border border-input bg-background p
 /** A banner has one destination, so the form asks which kind it is first. */
 type Destination = 'none' | 'category' | 'path';
 
-const DESTINATIONS: { value: Destination; label: string }[] = [
+const DESTINATIONS: { value: Destination; label: MessageKey }[] = [
   { value: 'none', label: 'Nowhere — it is just artwork' },
   { value: 'category', label: 'A category or subcategory' },
   { value: 'path', label: 'A page on your shop' },
 ];
 
-const POSITIONS: { value: BannerRow['position']; label: string; hint: string }[] = [
+const POSITIONS: { value: BannerRow['position']; label: MessageKey; hint: MessageKey }[] = [
   { value: 'home_hero', label: 'Homepage hero', hint: 'The big one at the top.' },
   { value: 'home_promo', label: 'Homepage promo', hint: 'A strip further down.' },
   { value: 'category_top', label: 'Category page', hint: 'Above a category listing.' },
@@ -67,12 +67,19 @@ const POSITIONS: { value: BannerRow['position']; label: string; hint: string }[]
  * full-width banner is never served wider than that however large the file is.
  *
  * Which shape a banner runs at is the **homepage block's** setting and not this
- * screen's (`Website → Homepage`, the block's *Shape*), which is why all three
- * are listed rather than one being derived from the placement above. A new
- * banner block is a wide strip until it is changed, and both of the blocks a new
- * store is seeded with are strips — so that is the one marked as usual.
+ * screen's (`homepage_sections.config.ratio`/`columns`), which is why all three
+ * are listed rather than one being derived from the placement above. Both of the
+ * blocks a new store is seeded with are strips — so that is the one marked as
+ * usual.
  */
-const SHAPES = [
+const SHAPES: {
+  label: MessageKey;
+  note: MessageKey;
+  image: string;
+  imageRatio: string;
+  phone: string;
+  phoneRatio: string;
+}[] = [
   {
     label: 'One wide strip',
     note: 'The usual one: the advertising break between two rows of products.',
@@ -111,28 +118,31 @@ const SHAPES = [
  * them.
  */
 function BannerSizeGuide() {
+  const t = useT();
+
   return (
     <div className="rounded-md border bg-muted/40 p-3 text-xs">
-      <p className="font-medium text-foreground">What size should the image be?</p>
+      <p className="font-medium text-foreground">{t('What size should the image be?')}</p>
       <p className="mt-1 text-muted-foreground">
-        The shape is set by the homepage block this banner appears in — <em>Website → Homepage</em>, the
-        block’s <em>Shape</em>. A new block is a wide strip.
+        {t(
+          'The shape is set by the homepage block this banner appears in. Your homepage’s banner blocks are wide strips.',
+        )}
       </p>
 
       <table className="mt-3 w-full text-left">
         <thead className="text-muted-foreground">
           <tr>
-            <th className="pb-1 pr-3 font-medium">Shape</th>
-            <th className="pb-1 pr-3 font-medium">Image</th>
-            <th className="pb-1 font-medium">Phone image</th>
+            <th className="pb-1 pr-3 font-medium">{t('Shape')}</th>
+            <th className="pb-1 pr-3 font-medium">{t('Image')}</th>
+            <th className="pb-1 font-medium">{t('Phone image')}</th>
           </tr>
         </thead>
         <tbody className="align-top">
           {SHAPES.map((shape) => (
             <tr key={shape.label} className="border-t border-border/60">
               <td className="py-1.5 pr-3">
-                <span className="font-medium text-foreground">{shape.label}</span>
-                <span className="block text-muted-foreground">{shape.note}</span>
+                <span className="font-medium text-foreground">{t(shape.label)}</span>
+                <span className="block text-muted-foreground">{t(shape.note)}</span>
               </td>
               <td className="py-1.5 pr-3 tabular-nums">
                 <span className="whitespace-nowrap font-medium text-foreground">{shape.image} px</span>
@@ -149,14 +159,16 @@ function BannerSizeGuide() {
 
       <ul className="mt-3 space-y-1 text-muted-foreground">
         <li>
-          The proportion matters more than the exact pixels — any other shape is cropped from the centre to
-          fill, so keep wording, faces and prices away from the edges.
+          {t(
+            'The proportion matters more than the exact pixels — any other shape is cropped from the centre to fill, so keep wording, faces and prices away from the edges.',
+          )}
         </li>
         <li>
-          A strip is shallower on a wide screen than on a phone, so the same artwork loses its left and right
-          edges on a phone. Keep the message in the middle.
+          {t(
+            'A strip is shallower on a wide screen than on a phone, so the same artwork loses its left and right edges on a phone. Keep the message in the middle.',
+          )}
         </li>
-        <li>JPG or WebP for photographs, PNG for flat colour. 10 MB is the limit; aim under 500 KB.</li>
+        <li>{t('JPG or WebP for photographs, PNG for flat colour. 10 MB is the limit; aim under 500 KB.')}</li>
       </ul>
     </div>
   );
@@ -188,6 +200,7 @@ function DestinationPicker({
   categories: Pick<CategoryRow, 'id' | 'name' | 'parentId'>[];
   fieldError?: string;
 }) {
+  const t = useT();
   const stored = categories.find((row) => row.id === banner?.categoryId);
 
   const [mode, setMode] = React.useState<Destination>(
@@ -208,7 +221,7 @@ function DestinationPicker({
 
   return (
     <>
-      <Field label="Where it goes" htmlFor="destination" error={fieldError}>
+      <Field label={t('Where it goes')} htmlFor="destination" error={fieldError}>
         <select
           id="destination"
           name="destination"
@@ -218,7 +231,7 @@ function DestinationPicker({
         >
           {DESTINATIONS.map((option) => (
             <option key={option.value} value={option.value}>
-              {option.label}
+              {t(option.label)}
             </option>
           ))}
         </select>
@@ -227,9 +240,9 @@ function DestinationPicker({
       {mode === 'category' ? (
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
-            label="Category"
+            label={t('Category')}
             htmlFor="categoryId"
-            hint={parents.length === 0 ? 'You have no categories yet.' : undefined}
+            hint={parents.length === 0 ? t('You have no categories yet.') : undefined}
           >
             <select
               id="categoryId"
@@ -243,7 +256,7 @@ function DestinationPicker({
               }}
               className={SELECT_CLASS}
             >
-              <option value="">Choose a category</option>
+              <option value="">{t('Choose a category')}</option>
               {parents.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -253,9 +266,9 @@ function DestinationPicker({
           </Field>
 
           <Field
-            label="Subcategory"
+            label={t('Subcategory')}
             htmlFor="subcategoryId"
-            hint={parentId && children.length === 0 ? 'This category has no subcategories.' : undefined}
+            hint={parentId && children.length === 0 ? t('This category has no subcategories.') : undefined}
           >
             <select
               id="subcategoryId"
@@ -265,7 +278,7 @@ function DestinationPicker({
               disabled={children.length === 0}
               className={SELECT_CLASS}
             >
-              <option value="">{parentId ? 'The whole category' : 'Choose a category first'}</option>
+              <option value="">{parentId ? t('The whole category') : t('Choose a category first')}</option>
               {children.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
@@ -278,10 +291,11 @@ function DestinationPicker({
 
       {mode === 'path' ? (
         <Field
-          label="Address"
+          label={t('Address')}
           htmlFor="linkUrl"
-          hint="A path on your own shop, like /sale. Must start with a slash."
+          hint={t('A path on your own shop, like /sale. Must start with a slash.')}
         >
+          {/* i18n-ignore */}
           <Input id="linkUrl" name="linkUrl" defaultValue={banner?.linkUrl ?? ''} placeholder="/sale" />
         </Field>
       ) : null}
@@ -316,6 +330,7 @@ export function BannerManager({
   storefrontBase: string | null;
 }) {
   const router = useRouter();
+  const t = useT();
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<BannerRow | null>(null);
   const [saving, setSaving] = React.useState(false);
@@ -377,7 +392,7 @@ export function BannerManager({
       else await api.post('/api/v1/admin/banners', payload);
 
       setOpen(false);
-      toast.success('Banner saved.');
+      toast.success(t('Banner saved.'));
       router.refresh();
     } catch (caught) {
       if (caught instanceof ApiError && caught.details) {
@@ -392,11 +407,13 @@ export function BannerManager({
   };
 
   const remove = async (row: BannerRow) => {
-    if (!window.confirm(`Remove ${row.title ?? 'this banner'}?`)) return;
+    const question =
+      row.title === null ? t('Remove this banner?') : t('Remove {title}?', { title: row.title });
+    if (!window.confirm(question)) return;
 
     try {
       await api.delete(`/api/v1/admin/banners/${row.id}`);
-      toast.success('Banner removed.');
+      toast.success(t('Banner removed.'));
       router.refresh();
     } catch (caught) {
       toast.error(errorMessage(caught));
@@ -407,9 +424,9 @@ export function BannerManager({
   const destinationOf = (row: BannerRow) => {
     if (row.categoryId) {
       const category = categories.find((entry) => entry.id === row.categoryId);
-      return category ? `Opens ${category.name}` : 'Opens a category';
+      return category ? t('Opens {destination}', { destination: category.name }) : t('Opens a category');
     }
-    return row.linkUrl ? `Opens ${row.linkUrl}` : 'Not clickable';
+    return row.linkUrl ? t('Opens {destination}', { destination: row.linkUrl }) : t('Not clickable');
   };
 
   const grouped = POSITIONS.map((position) => ({
@@ -421,22 +438,22 @@ export function BannerManager({
     <>
       {canManage ? (
         <Button size="sm" onClick={() => openFor(null)}>
-          <Plus aria-hidden /> Add a banner
+          <Plus aria-hidden /> {t('Add a banner')}
         </Button>
       ) : null}
 
       {rows.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No banners yet. Your homepage renders without them.
+            {t('No banners yet. Your homepage renders without them.')}
           </CardContent>
         </Card>
       ) : (
         grouped.map((group) => (
           <section key={group.value} className="space-y-3">
             <h2 className="text-sm font-semibold">
-              {group.label}
-              <span className="ml-2 font-normal text-muted-foreground">{group.hint}</span>
+              {t(group.label)}
+              <span className="ml-2 font-normal text-muted-foreground">{t(group.hint)}</span>
             </h2>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -445,33 +462,33 @@ export function BannerManager({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={row.imageUrl}
-                    alt={row.title ?? 'Banner'}
+                    alt={row.title ?? t('Banner')}
                     className="h-32 w-full bg-muted object-cover"
                   />
                   <CardContent className="space-y-2 pt-4">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate font-medium">{row.title ?? 'Untitled'}</p>
+                        <p className="truncate font-medium">{row.title ?? t('Untitled')}</p>
                         {row.subtitle ? (
                           <p className="truncate text-xs text-muted-foreground">{row.subtitle}</p>
                         ) : null}
                       </div>
-                      {row.isActive ? null : <Badge variant="neutral">Off</Badge>}
+                      {row.isActive ? null : <Badge variant="neutral">{t('Off')}</Badge>}
                     </div>
 
                     <p className="text-xs text-muted-foreground">
                       {destinationOf(row)}
-                      {row.endsAt ? ` · until ${formatDate(row.endsAt)}` : ''}
+                      {row.endsAt ? ` · ${t('until {date}', { date: t.date(row.endsAt) })}` : ''}
                     </p>
 
                     <div className="flex gap-1 pt-1">
                       <Button variant="ghost" size="sm" onClick={() => viewing.view(row)}>
-                        <Eye aria-hidden /> View
+                        <Eye aria-hidden /> {t('View')}
                       </Button>
                       {canManage ? (
                         <>
                           <Button variant="ghost" size="sm" onClick={() => openFor(row)}>
-                            <Pencil aria-hidden /> Edit
+                            <Pencil aria-hidden /> {t('Edit')}
                           </Button>
                           <Button variant="ghost" size="sm" onClick={() => remove(row)}>
                             <Trash2 aria-hidden />
@@ -491,9 +508,9 @@ export function BannerManager({
         <DialogContent size="lg">
           <form onSubmit={onSubmit}>
             <DialogHeader>
-              <DialogTitle>{editing ? 'Edit banner' : 'Add a banner'}</DialogTitle>
+              <DialogTitle>{editing ? t('Edit banner') : t('Add a banner')}</DialogTitle>
               <DialogDescription>
-                Upload the artwork or paste its address, say where it goes, and set the dates it runs.
+                {t('Upload the artwork or paste its address, say where it goes, and set the dates it runs.')}
               </DialogDescription>
             </DialogHeader>
 
@@ -506,41 +523,41 @@ export function BannerManager({
               <DialogColumns>
                 <DialogColumn>
                   <Field
-                    label="Image"
+                    label={t('Image')}
                     htmlFor="imageUrl"
                     required
-                    hint="1920 × 384 px for a wide strip. Every shape is listed below."
+                    hint={t('1920 × 384 px for a wide strip. Every shape is listed below.')}
                     error={fieldErrors.imageUrl}
                   >
                     <ImageUpload name="imageUrl" purpose="banners" defaultValue={editing?.imageUrl ?? ''} />
                   </Field>
 
                   <Field
-                    label="Phone image"
+                    label={t('Phone image')}
                     htmlFor="mobileImageUrl"
-                    hint="Optional, and stored for later — today’s templates use the image above at every width."
+                    hint={t('Optional, and stored for later — today’s templates use the image above at every width.')}
                   >
                     <ImageUpload
                       name="mobileImageUrl"
                       purpose="banners"
                       defaultValue={editing?.mobileImageUrl ?? ''}
-                      label="Upload a phone image"
+                      label={t('Upload a phone image')}
                     />
                   </Field>
 
                   <BannerSizeGuide />
 
-                  <Field label="Heading" htmlFor="title">
+                  <Field label={t('Heading')} htmlFor="title">
                     <Input id="title" name="title" defaultValue={editing?.title ?? ''} maxLength={160} />
                   </Field>
 
-                  <Field label="Subheading" htmlFor="subtitle">
+                  <Field label={t('Subheading')} htmlFor="subtitle">
                     <Input id="subtitle" name="subtitle" defaultValue={editing?.subtitle ?? ''} maxLength={240} />
                   </Field>
                 </DialogColumn>
 
                 <DialogColumn>
-                  <Field label="Where it appears" htmlFor="position">
+                  <Field label={t('Where it appears')} htmlFor="position">
                     <select
                       id="position"
                       name="position"
@@ -549,7 +566,7 @@ export function BannerManager({
                     >
                       {POSITIONS.map((position) => (
                         <option key={position.value} value={position.value}>
-                          {position.label} — {position.hint}
+                          {t(position.label)} — {t(position.hint)}
                         </option>
                       ))}
                     </select>
@@ -563,9 +580,9 @@ export function BannerManager({
                   />
 
                   <Field
-                    label="Button text"
+                    label={t('Button text')}
                     htmlFor="buttonLabel"
-                    hint="Only shown when the banner goes somewhere."
+                    hint={t('Only shown when the banner goes somewhere.')}
                   >
                     <Input
                       id="buttonLabel"
@@ -576,7 +593,7 @@ export function BannerManager({
                   </Field>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Starts" htmlFor="startsAt">
+                    <Field label={t('Starts')} htmlFor="startsAt">
                       <Input
                         id="startsAt"
                         name="startsAt"
@@ -584,18 +601,18 @@ export function BannerManager({
                         defaultValue={editing?.startsAt?.slice(0, 10) ?? ''}
                       />
                     </Field>
-                    <Field label="Ends" htmlFor="endsAt">
+                    <Field label={t('Ends')} htmlFor="endsAt">
                       <Input id="endsAt" name="endsAt" type="date" defaultValue={editing?.endsAt?.slice(0, 10) ?? ''} />
                     </Field>
                   </div>
 
-                  <Field label="Order" htmlFor="sortOrder" hint="Lower shows first.">
+                  <Field label={t('Order::sort')} htmlFor="sortOrder" hint={t('Lower shows first.')}>
                     <Input id="sortOrder" name="sortOrder" type="number" defaultValue={editing?.sortOrder ?? 0} />
                   </Field>
 
                   <label className="flex items-center gap-3 text-sm">
                     <Switch name="isActive" defaultChecked={editing?.isActive ?? true} />
-                    Show this banner
+                    {t('Show this banner')}
                   </label>
                 </DialogColumn>
               </DialogColumns>
@@ -603,10 +620,10 @@ export function BannerManager({
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button type="submit" loading={saving}>
-                Save banner
+                {t('Save banner')}
               </Button>
             </DialogFooter>
           </form>

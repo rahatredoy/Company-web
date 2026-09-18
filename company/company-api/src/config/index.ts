@@ -68,6 +68,12 @@ export const config = {
   allowedOrigins: [env.WEBSITE_URL, env.ADMIN_URL],
 
   security: {
+    /**
+     * Refuse plaintext HTTP. Unset follows NODE_ENV, which is what every real
+     * deployment wants; `plugins/https.ts` explains the one case for turning it
+     * off, and it is about the proxy in front rather than about the traffic.
+     */
+    forceHttps: env.FORCE_HTTPS ?? isProduction,
     adminAuthSecret: env.ADMIN_AUTH_SECRET,
     clientAuthSecret: env.CLIENT_AUTH_SECRET,
     encryptionKey: env.ENCRYPTION_KEY,

@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/toaster';
+import { useT } from '@/lib/i18n';
 
 /** Four is a bundle a shopper reads; more is a category listing. */
 const LIMIT = 4;
@@ -43,6 +44,7 @@ export function ProductBundle({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const t = useT();
 
   const [chosen, setChosen] = React.useState<string[]>(selected);
   const [term, setTerm] = React.useState('');
@@ -68,7 +70,7 @@ export function ProductBundle({
 
     try {
       await api.put(`/api/v1/admin/products/${productId}/bundle`, { relatedProductIds: chosen });
-      toast.success(chosen.length === 0 ? 'Bundle cleared.' : 'Bundle saved.');
+      toast.success(chosen.length === 0 ? t('Bundle cleared.') : t('Bundle saved.'));
       router.refresh();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -80,10 +82,12 @@ export function ProductBundle({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Bought together</CardTitle>
+        <CardTitle>{t('Bought together')}</CardTitle>
         <CardDescription>
-          Up to {LIMIT} products offered alongside this one. The storefront prices the bundle from what you choose
-          here.
+          {t(
+            'Up to {limit} products offered alongside this one. The storefront prices the bundle from what you choose here.',
+            { limit: LIMIT },
+          )}
         </CardDescription>
       </CardHeader>
 
@@ -92,19 +96,21 @@ export function ProductBundle({
 
         {chosen.length === 0 ? (
           <p className="rounded-lg border border-dashed py-6 text-center text-sm text-muted-foreground">
-            Nothing paired with this product yet.
+            {t('Nothing paired with this product yet.')}
           </p>
         ) : (
           <ul className="flex flex-wrap gap-2">
             {chosen.map((id) => (
               <li key={id}>
                 <Badge variant="neutral" className="gap-1.5 py-1 pr-1 pl-3">
-                  {nameOf.get(id) ?? 'A product not in this list'}
+                  {nameOf.get(id) ?? t('A product not in this list')}
                   {canManage ? (
                     <button
                       type="button"
                       onClick={() => setChosen((current) => current.filter((item) => item !== id))}
-                      aria-label={`Remove ${nameOf.get(id) ?? 'product'}`}
+                      aria-label={
+                        nameOf.has(id) ? t('Remove {name}', { name: nameOf.get(id)! }) : t('Remove product')
+                      }
                       className="rounded-full p-0.5 hover:bg-background/60"
                     >
                       <X className="size-3.5" aria-hidden />
@@ -123,19 +129,19 @@ export function ProductBundle({
               <Input
                 value={term}
                 onChange={(event) => setTerm(event.target.value)}
-                placeholder="Search your products"
+                placeholder={t('Search your products')}
                 className="pl-9"
                 disabled={chosen.length >= LIMIT}
-                aria-label="Search products to pair"
+                aria-label={t('Search products to pair')}
               />
             </div>
 
             {chosen.length >= LIMIT ? (
               <p className="text-xs text-muted-foreground">
-                That is the maximum. Remove one to pair something else.
+                {t('That is the maximum. Remove one to pair something else.')}
               </p>
             ) : matches.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No other products match.</p>
+              <p className="text-xs text-muted-foreground">{t('No other products match.')}</p>
             ) : (
               <ul className="divide-y rounded-lg border">
                 {matches.map((candidate) => (
@@ -157,7 +163,7 @@ export function ProductBundle({
 
             <div className="flex justify-end">
               <Button type="button" size="sm" onClick={save} loading={saving}>
-                Save bundle
+                {t('Save bundle')}
               </Button>
             </div>
           </>

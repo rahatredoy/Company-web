@@ -5,12 +5,14 @@ import Link from 'next/link';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { StoreConfig } from '@/types';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 import { usePrefersReducedMotion } from '@/lib/hooks/use-prefers-reduced-motion';
 
 const ROTATE_MS = 6000;
 
 /**
- * The strip above the header.
+ * The strip above the header. Modern Shop does not render it at all — there the
+ * header itself is the top of the page.
  *
  * A store runs several notices at once — a shipping threshold, a live campaign,
  * a holiday cutoff — so this rotates rather than forcing the owner to pick one.
@@ -31,6 +33,7 @@ export function AnnouncementBar({
   /** Slot at the far right — the language and currency selects in two of the templates. */
   trailing?: React.ReactNode;
 }) {
+  const t = useT();
   const messages = announcement.enabled
     ? announcement.messages.filter((message) => message.text.trim().length > 0)
     : [];
@@ -61,7 +64,7 @@ export function AnnouncementBar({
   return (
     <div className={cn('bg-secondary text-secondary-foreground', className)}>
       <div
-        className="container-store flex min-h-9 items-center gap-2 py-1.5 text-xs sm:text-[13px]"
+        className="container-store flex min-h-9 items-center gap-2 py-1.5 text-xs sm:text-[12px]"
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
         onFocusCapture={() => setPaused(true)}
@@ -89,7 +92,7 @@ export function AnnouncementBar({
               href={current.linkUrl}
               className="shrink-0 font-semibold underline underline-offset-2 hover:no-underline"
             >
-              {current.linkLabel ?? 'Shop now'}
+              {current.linkLabel ?? t('Shop now')}
             </Link>
           ) : null}
         </p>
@@ -113,13 +116,14 @@ function TickerArrow({
   direction: 'previous' | 'next';
   onClick: () => void;
 }) {
+  const t = useT();
   const Icon = direction === 'previous' ? ChevronLeft : ChevronRight;
 
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={`${direction === 'previous' ? 'Previous' : 'Next'} announcement`}
+      aria-label={direction === 'previous' ? t('Previous announcement') : t('Next announcement')}
       className="grid size-7 shrink-0 place-items-center rounded-(--radius-button) opacity-80 transition-opacity hover:opacity-100"
     >
       <Icon className="size-4" aria-hidden />

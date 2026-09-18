@@ -7,17 +7,17 @@ import type { ProductImage } from '@/types';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import {
   Carousel,
-  CarouselDots,
   CarouselItem,
   CarouselViewport,
 } from '@/components/carousel/carousel';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
  * Product gallery: thumbnails, a main image, hover zoom and a fullscreen view.
  *
- * Two layouts in one component. On a phone it is a swipeable rail with dots,
- * because a thumbnail strip on a 390px screen leaves no room for the picture.
+ * Two layouts in one component. On a phone it is a swipeable rail, because a
+ * thumbnail strip on a 390px screen leaves no room for the picture.
  * From `sm` up it is a thumbnail column beside a large frame.
  *
  * Zoom is `transform: scale` driven by pointer position, not a second larger
@@ -34,6 +34,7 @@ export function ProductGallery({
   productName: string;
   activeImageUrl?: string | null;
 }) {
+  const t = useT();
   const [index, setIndex] = React.useState(0);
   const [zoomed, setZoomed] = React.useState(false);
   const [origin, setOrigin] = React.useState('50% 50%');
@@ -48,7 +49,7 @@ export function ProductGallery({
 
   if (images.length === 0) {
     return (
-      <div className="product-media grid place-items-center text-sm text-subtle">No image</div>
+      <div className="product-media grid place-items-center text-sm text-subtle">{t('No image')}</div>
     );
   }
 
@@ -72,7 +73,7 @@ export function ProductGallery({
                 <button
                   type="button"
                   onClick={() => setIndex(position)}
-                  aria-label={`View image ${position + 1} of ${images.length}`}
+                  aria-label={t('View image {position} of {total}', { position: position + 1, total: images.length })}
                   aria-current={active ? 'true' : undefined}
                   className={cn(
                     'relative block size-16 overflow-hidden rounded-(--radius-button) border-2 transition-colors lg:size-20',
@@ -117,7 +118,7 @@ export function ProductGallery({
           <button
             type="button"
             onClick={() => setFullscreen(true)}
-            aria-label="View image full screen"
+            aria-label={t('View image full screen')}
             className="absolute bottom-3 right-3 grid size-10 place-items-center rounded-full bg-surface/90 text-foreground shadow-[var(--shadow-card)] transition-colors hover:text-primary"
           >
             <Expand className="size-4" aria-hidden />
@@ -126,14 +127,14 @@ export function ProductGallery({
 
         {/* Mobile: a real swipe rail, so the gesture is the browser's own. */}
         <div className="sm:hidden">
-          <Carousel label={`${productName} images`} loop={false}>
+          <Carousel label={t('{name} images', { name: productName })} loop={false}>
             <CarouselViewport gap="gap-2" snap="center">
               {images.map((image, position) => (
                 <CarouselItem key={image.url} snap="center" className="w-full">
                   <div className="product-media">
                     <Image
                       src={image.url}
-                      alt={image.altText ?? `${productName}, view ${position + 1}`}
+                      alt={image.altText ?? t('{name}, view {position}', { name: productName, position: position + 1 })}
                       fill
                       priority={position === 0}
                       sizes="100vw"
@@ -143,7 +144,6 @@ export function ProductGallery({
                 </CarouselItem>
               ))}
             </CarouselViewport>
-            <CarouselDots className="mt-3" />
           </Carousel>
         </div>
       </div>
@@ -168,7 +168,7 @@ export function ProductGallery({
           <button
             type="button"
             onClick={() => setFullscreen(false)}
-            aria-label="Close"
+            aria-label={t('Close')}
             className="absolute -top-12 right-0 grid size-10 place-items-center rounded-full bg-surface text-foreground"
           >
             <X className="size-5" aria-hidden />

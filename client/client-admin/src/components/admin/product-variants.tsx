@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Copy, Plus, Trash2 } from 'lucide-react';
 import { api, ApiError, errorMessage } from '@/lib/api';
@@ -14,7 +13,7 @@ import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
-import { isoFromLocalInput, localInputValue } from '@/lib/local-datetime';
+import { useT } from '@/lib/i18n';
 
 const SELECT_CLASS = 'h-10 w-full rounded-lg border border-input bg-background px-3 text-sm';
 
@@ -27,9 +26,6 @@ interface Draft {
   title: string;
   price: string;
   salePrice: string;
-  /** Local-clock strings for the two `datetime-local` boxes; '' means no bound. */
-  saleStartsAt: string;
-  saleEndsAt: string;
   costPrice: string;
   barcode: string;
   weightGrams: string;
@@ -44,7 +40,7 @@ interface Draft {
    * It decides which of the two stock controls the row gets, and that split is
    * the API's rule rather than a UI preference: a new variant is given an
    * opening balance with the ledger row that says so, while an existing one's
-   * count only ever moves by a signed adjustment on the Inventory screen. A box
+   * count only ever moves by a signed adjustment (Adjust stock). A box
    * that wrote an absolute number over a counted variant would be a stock
    * movement with no movement behind it.
    */
@@ -71,8 +67,6 @@ function draftFrom(variant: ProductVariant, valueToAttribute: Map<string, string
     title: variant.title ?? '',
     price: variant.price,
     salePrice: variant.salePrice ?? '',
-    saleStartsAt: localInputValue(variant.saleStartsAt),
-    saleEndsAt: localInputValue(variant.saleEndsAt),
     costPrice: variant.costPrice ?? '',
     barcode: variant.barcode ?? '',
     weightGrams: variant.weightGrams === null ? '' : String(variant.weightGrams),
@@ -115,6 +109,7 @@ export function ProductVariants({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const t = useT();
 
   const options = React.useMemo(
     () => attributes.filter((attribute) => attribute.isVariantAttribute).slice(0, MAX_OPTIONS),
@@ -176,8 +171,6 @@ export function ProductVariants({
             title: '',
             price: '',
             salePrice: '',
-            saleStartsAt: '',
-            saleEndsAt: '',
             costPrice: '',
             barcode: '',
             weightGrams: '',
@@ -194,7 +187,7 @@ export function ProductVariants({
 
   const remove = (key: string) => {
     const row = rows.find((item) => item.key === key);
-    if (row?.sku && !window.confirm(`Delete ${row.sku}? Its stock levels go with it.`)) return;
+    if (row?.sku && !window.confirm(t('Delete {sku}? Its stock levels go with it.', { sku: row.sku }))) return;
 
     setRows((current) => {
       const next = current.filter((item) => item.key !== key);
@@ -213,8 +206,6 @@ export function ProductVariants({
       title: row.title.trim() || null,
       price: row.price.trim(),
       salePrice: row.salePrice.trim() || null,
-      saleStartsAt: isoFromLocalInput(row.saleStartsAt),
-      saleEndsAt: isoFromLocalInput(row.saleEndsAt),
       costPrice: row.costPrice.trim() || null,
       barcode: row.barcode.trim() || null,
       weightGrams: row.weightGrams.trim() === '' ? null : Number(row.weightGrams),
@@ -234,7 +225,7 @@ export function ProductVariants({
 
     try {
       await api.put(`/api/v1/admin/products/${productId}/variants`, { variants: payload });
-      toast.success('Variants saved.');
+      toast.success(t('Variants saved.'));
       router.refresh();
     } catch (caught) {
       // The API reports a duplicate SKU under `variants`; anything per-field is
@@ -252,10 +243,11 @@ export function ProductVariants({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Variants</CardTitle>
+        <CardTitle>{t('Variants')}</CardTitle>
         <CardDescription>
-          Each row is a separate thing to buy, with its own SKU, price and stock. A product with one variant is a
-          simple product.
+          {t(
+            'Each row is a separate thing to buy, with its own SKU, price and stock. A product with one variant is a simple product.',
+          )}
         </CardDescription>
       </CardHeader>
 
@@ -264,8 +256,9 @@ export function ProductVariants({
 
         {options.length === 0 ? (
           <Alert variant="info">
-            No variant attributes exist yet, so variants can only differ by SKU and price. Create one on the
-            Attributes page to offer sizes or colours.
+            {t(
+              'No variant attributes exist yet, so variants can only differ by SKU and price. Create one on the Attributes page to offer sizes or colours.',
+            )}
           </Alert>
         ) : null}
 
@@ -283,10 +276,10 @@ export function ProductVariants({
                       onChange={() => makeDefault(row.key)}
                       disabled={!canManage}
                     />
-                    Default
+                    {t('Default')}
                   </label>
-                  {row.isDefault ? <Badge variant="info">Opens first</Badge> : null}
-                  {!row.isActive ? <Badge variant="neutral">Hidden</Badge> : null}
+                  {row.isDefault ? <Badge variant="info">{t('Opens first')}</Badge> : null}
+                  {!row.isActive ? <Badge variant="neutral">{t('Hidden')}</Badge> : null}
                 </div>
 
                 {canManage ? (
@@ -296,14 +289,14 @@ export function ProductVariants({
                         checked={row.isActive}
                         onCheckedChange={(checked) => patch(row.key, { isActive: checked })}
                       />
-                      On sale
+                      {t('On sale::variant')}
                     </label>
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon-sm"
                       onClick={() => add(row)}
-                      aria-label={`Duplicate variant ${index + 1}`}
+                      aria-label={t('Duplicate variant {number}', { number: index + 1 })}
                     >
                       <Copy aria-hidden />
                     </Button>
@@ -313,7 +306,7 @@ export function ProductVariants({
                       size="icon-sm"
                       onClick={() => remove(row.key)}
                       disabled={rows.length === 1}
-                      aria-label={`Remove variant ${index + 1}`}
+                      aria-label={t('Remove variant {number}', { number: index + 1 })}
                     >
                       <Trash2 aria-hidden />
                     </Button>
@@ -332,7 +325,7 @@ export function ProductVariants({
                         onChange={(event) => choose(row.key, attribute.id, event.target.value)}
                         disabled={!canManage}
                       >
-                        <option value="">Not set</option>
+                        <option value="">{t('Not set')}</option>
                         {attribute.values.map((value) => (
                           <option key={value.id} value={value.id}>
                             {value.value}
@@ -345,7 +338,7 @@ export function ProductVariants({
               ) : null}
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="SKU" htmlFor={`${row.key}-sku`} required hint="Unique across the whole store.">
+                <Field label={t('SKU')} htmlFor={`${row.key}-sku`} required hint={t('Unique across the whole store.')}>
                   <Input
                     id={`${row.key}-sku`}
                     value={row.sku}
@@ -359,15 +352,15 @@ export function ProductVariants({
                   yet — see `Draft.isNew`. A new option (a 500 g line beside the
                   kilo) is given an opening balance here, with the `initial`
                   ledger row that records where its count started. An existing
-                  one shows what is on the shelf and sends the owner to
-                  Inventory, because every later movement is a signed adjustment
+                  one shows what is on the shelf and sends the owner to Adjust
+                  stock, because every later movement is a signed adjustment
                   with a reason attached.
                 */}
                 {row.isNew ? (
                   <Field
-                    label="Opening stock"
+                    label={t('Opening stock')}
                     htmlFor={`${row.key}-stock`}
-                    hint="How many of this one you have now."
+                    hint={t('How many of this one you have now.')}
                   >
                     <Input
                       id={`${row.key}-stock`}
@@ -379,24 +372,18 @@ export function ProductVariants({
                     />
                   </Field>
                 ) : (
-                  <Field label="In stock" hint="Change it on the Inventory screen.">
+                  <Field label={t('In stock')} hint={t('Change it with Adjust stock at the top of this page.')}>
                     <p className="flex h-10 items-center gap-2 text-sm">
                       {row.onShelf === null ? (
-                        <span className="text-muted-foreground">Not counted</span>
+                        <span className="text-muted-foreground">{t('Not counted')}</span>
                       ) : (
-                        <span className="font-medium tabular-nums">{row.onShelf}</span>
+                        <span className="font-medium tabular-nums">{t.number(row.onShelf, { useGrouping: false })}</span>
                       )}
-                      <Link
-                        href={`/inventory?search=${encodeURIComponent(row.sku)}`}
-                        className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                      >
-                        Adjust
-                      </Link>
                     </p>
                   </Field>
                 )}
 
-                <Field label="Label" htmlFor={`${row.key}-title`} hint='Shown in the basket — "Black / M".'>
+                <Field label={t('Label')} htmlFor={`${row.key}-title`} hint={t('Shown in the basket — "Black / M".')}>
                   <Input
                     id={`${row.key}-title`}
                     value={row.title}
@@ -405,7 +392,7 @@ export function ProductVariants({
                     disabled={!canManage}
                   />
                 </Field>
-                <Field label={`Price (${currency})`} htmlFor={`${row.key}-price`} required>
+                <Field label={t('Price ({currency})', { currency })} htmlFor={`${row.key}-price`} required>
                   <Input
                     id={`${row.key}-price`}
                     inputMode="decimal"
@@ -415,7 +402,7 @@ export function ProductVariants({
                     disabled={!canManage}
                   />
                 </Field>
-                <Field label={`Sale price (${currency})`} htmlFor={`${row.key}-salePrice`}>
+                <Field label={t('Sale price ({currency})', { currency })} htmlFor={`${row.key}-salePrice`}>
                   <Input
                     id={`${row.key}-salePrice`}
                     inputMode="decimal"
@@ -425,32 +412,7 @@ export function ProductVariants({
                   />
                 </Field>
 
-                {/*
-                  Per variant, because the window is a column on the variant and
-                  not on the product: one size can be on offer while the rest of
-                  the range is not. Both bounds are read by `effectiveSale`, so a
-                  sale outside its window charges full price on its own.
-                */}
-                <Field label="Sale starts" htmlFor={`${row.key}-saleStartsAt`} hint="Empty starts at once.">
-                  <Input
-                    id={`${row.key}-saleStartsAt`}
-                    type="datetime-local"
-                    value={row.saleStartsAt}
-                    onChange={(event) => patch(row.key, { saleStartsAt: event.target.value })}
-                    disabled={!canManage}
-                  />
-                </Field>
-
-                <Field label="Sale ends" htmlFor={`${row.key}-saleEndsAt`} hint="Empty runs until cleared.">
-                  <Input
-                    id={`${row.key}-saleEndsAt`}
-                    type="datetime-local"
-                    value={row.saleEndsAt}
-                    onChange={(event) => patch(row.key, { saleEndsAt: event.target.value })}
-                    disabled={!canManage}
-                  />
-                </Field>
-                <Field label={`Cost (${currency})`} htmlFor={`${row.key}-costPrice`} hint="Never shown to shoppers.">
+                <Field label={t('Cost ({currency})', { currency })} htmlFor={`${row.key}-costPrice`} hint={t('Never shown to shoppers.')}>
                   <Input
                     id={`${row.key}-costPrice`}
                     inputMode="decimal"
@@ -459,7 +421,7 @@ export function ProductVariants({
                     disabled={!canManage}
                   />
                 </Field>
-                <Field label="Barcode" htmlFor={`${row.key}-barcode`}>
+                <Field label={t('Barcode')} htmlFor={`${row.key}-barcode`}>
                   <Input
                     id={`${row.key}-barcode`}
                     value={row.barcode}
@@ -468,7 +430,7 @@ export function ProductVariants({
                     disabled={!canManage}
                   />
                 </Field>
-                <Field label="Weight (g)" htmlFor={`${row.key}-weight`} hint="Used by weight-based shipping.">
+                <Field label={t('Weight (g)')} htmlFor={`${row.key}-weight`}>
                   <Input
                     id={`${row.key}-weight`}
                     inputMode="numeric"
@@ -477,11 +439,12 @@ export function ProductVariants({
                     disabled={!canManage}
                   />
                 </Field>
-                <Field label="Image address" htmlFor={`${row.key}-image`} hint="Shown on the basket line.">
+                <Field label={t('Image address')} htmlFor={`${row.key}-image`} hint={t('Shown on the basket line.')}>
                   <Input
                     id={`${row.key}-image`}
                     value={row.imageUrl}
                     onChange={(event) => patch(row.key, { imageUrl: event.target.value })}
+                    // i18n-ignore — an address format, not language
                     placeholder="https://…"
                     disabled={!canManage}
                   />
@@ -494,12 +457,13 @@ export function ProductVariants({
         {canManage ? (
           <>
             <p className="text-xs text-muted-foreground">
-              Changing a SKU replaces the variant rather than renaming it, and its stock does not follow. Removing
-              a row deletes that variant and its stock levels; past orders keep their own record.
+              {t(
+                'Changing a SKU replaces the variant rather than renaming it, and its stock does not follow. Removing a row deletes that variant and its stock levels; past orders keep their own record.',
+              )}
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <Button type="button" variant="secondary" size="sm" onClick={() => add()}>
-                <Plus aria-hidden /> Add a variant
+                <Plus aria-hidden /> {t('Add a variant')}
               </Button>
               <Button
                 type="button"
@@ -509,7 +473,7 @@ export function ProductVariants({
                 loading={saving}
                 disabled={rows.length === 0}
               >
-                Save variants
+                {t('Save variants')}
               </Button>
             </div>
           </>

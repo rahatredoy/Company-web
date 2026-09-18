@@ -4,6 +4,8 @@ import * as React from 'react';
 import { ChevronDown } from 'lucide-react';
 import { setLocalePreference } from '@/app/actions/locale';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
+import { LANGUAGES } from '@/lib/i18n/languages';
 
 /**
  * Language and currency pickers.
@@ -17,17 +19,9 @@ import { cn } from '@/lib/utils';
  * design brief says not to show one.
  */
 
-const LANGUAGE_NAMES: Record<string, string> = {
-  en: 'English',
-  bn: 'বাংলা',
-  hi: 'हिन्दी',
-  ar: 'العربية',
-  es: 'Español',
-  fr: 'Français',
-};
-
+/** Each language in its own script, so a shopper who cannot read the current one can still find theirs. */
 function languageName(code: string): string {
-  return LANGUAGE_NAMES[code] ?? code.toUpperCase();
+  return LANGUAGES.find((entry) => entry.code === code)?.nativeName ?? code.toUpperCase();
 }
 
 export function LocaleSelects({
@@ -45,6 +39,7 @@ export function LocaleSelects({
   tone?: 'inherit' | 'muted';
   className?: string;
 }) {
+  const t = useT();
   const showLanguage = languages.length > 1;
   const showCurrency = currencies.length > 1;
 
@@ -55,7 +50,7 @@ export function LocaleSelects({
       {showLanguage ? (
         <PreferenceSelect
           name="language"
-          label="Language"
+          label={t('Language')}
           value={language}
           tone={tone}
           options={languages.map((code) => ({ value: code, label: languageName(code) }))}
@@ -65,7 +60,7 @@ export function LocaleSelects({
       {showCurrency ? (
         <PreferenceSelect
           name="currency"
-          label="Currency"
+          label={t('Currency')}
           value={currency}
           tone={tone}
           options={currencies.map((code) => ({ value: code, label: code }))}
@@ -75,7 +70,7 @@ export function LocaleSelects({
       {/* Reached only if the browser has not run the submit-on-change handler. */}
       <noscript>
         <button type="submit" className="ml-1 text-xs underline underline-offset-2">
-          Apply
+          {t('Apply')}
         </button>
       </noscript>
     </form>

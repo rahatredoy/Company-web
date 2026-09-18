@@ -5,10 +5,12 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 export interface FilterOption {
   value: string;
+  /** Shown as given — the caller translates it. */
   label: string;
 }
 
@@ -17,16 +19,20 @@ export interface FilterOption {
  * shareable and survives a refresh.
  */
 export function TableFilters({
-  searchPlaceholder = 'Search…',
+  searchPlaceholder,
   statusOptions,
   statusParam = 'status',
   extra,
+  preserveParams = [],
 }: {
   searchPlaceholder?: string;
   statusOptions?: FilterOption[];
   statusParam?: string;
   extra?: React.ReactNode;
+  /** Params that are not filters (a tab, say), kept when Reset clears the rest. */
+  preserveParams?: string[];
 }) {
+  const t = useT();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -71,14 +77,14 @@ export function TableFilters({
           <Input
             value={term}
             onChange={(event) => setTerm(event.target.value)}
-            placeholder={searchPlaceholder}
-            aria-label="Search"
+            placeholder={searchPlaceholder ?? t('Search…')}
+            aria-label={t('Search')}
             className="pr-9 pl-9"
           />
           {term ? (
             <button
               type="button"
-              aria-label="Clear search"
+              aria-label={t('Clear search')}
               onClick={() => {
                 setTerm('');
                 push((params) => params.delete('search'));
@@ -119,8 +125,20 @@ export function TableFilters({
         ) : null}
         {extra}
         {currentSearch || currentStatus !== 'all' ? (
-          <Button variant="ghost" size="sm" onClick={() => router.push(pathname)}>
-            Reset
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              const kept = new URLSearchParams();
+              for (const key of preserveParams) {
+                const value = searchParams.get(key);
+                if (value !== null) kept.set(key, value);
+              }
+              const query = kept.toString();
+              router.push(query ? `${pathname}?${query}` : pathname);
+            }}
+          >
+            {t('Reset')}
           </Button>
         ) : null}
       </div>

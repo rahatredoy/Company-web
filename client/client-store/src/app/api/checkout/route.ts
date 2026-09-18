@@ -25,6 +25,15 @@ const schema = z.object({
         productId: z.string().min(1).max(64),
         variantId: z.string().min(1).max(64),
         quantity: z.number().int().min(1).max(99),
+        /*
+         * Which size was picked, in base units, for a product sold by weight or
+         * volume. Listed here because an object schema *strips* what it does not
+         * name: without it a basket of 4 x 100gm reached the API as four
+         * unqualified lines and was priced and picked at the product's own
+         * per-kilo measure. It is a quantity, not a price — the API checks it
+         * against the product's own list of sizes before pricing anything.
+         */
+        measure: z.number().int().min(1).max(10_000_000).nullable().optional(),
       }),
     )
     .min(1)
@@ -39,7 +48,9 @@ const schema = z.object({
     postalCode: z.string().trim().max(20).nullable().optional(),
     country: z.string().trim().min(2).max(60),
   }),
-  shippingMethodId: z.string().min(1).max(40),
+  // Which saved address the form was prefilled from, so the API updates that
+  // one rather than saving the shopper's correction beside the mistake.
+  shippingAddressId: z.string().uuid().nullable().optional(),
   paymentProvider: z.string().min(1).max(40),
   couponCode: z.string().trim().max(40).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),

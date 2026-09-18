@@ -5,6 +5,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 import { DialogOverlay, DialogPortal } from './dialog';
 
 /**
@@ -43,6 +44,8 @@ export const SheetContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> &
     VariantProps<typeof sheetVariants> & { showClose?: boolean }
 >(function SheetContent({ className, children, side = 'right', showClose = true, ...props }, ref) {
+  const t = useT();
+
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -51,7 +54,7 @@ export const SheetContent = React.forwardRef<
         {showClose ? (
           <DialogPrimitive.Close className="absolute right-3 top-3 grid size-9 place-items-center rounded-(--radius-button) text-muted transition-colors hover:bg-surface-alt hover:text-foreground">
             <X className="size-4" aria-hidden />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t('Close')}</span>
           </DialogPrimitive.Close>
         ) : null}
       </DialogPrimitive.Content>

@@ -40,7 +40,7 @@ export default async function HowItWorksPage() {
                   {item.step}
                 </span>
                 <div className="rounded-xl border border-border bg-card p-5">
-                  <h3 className="text-[15px] font-semibold">{item.title}</h3>
+                  <h3 className="text-[14px] font-semibold">{item.title}</h3>
                   <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
                 </div>
               </li>

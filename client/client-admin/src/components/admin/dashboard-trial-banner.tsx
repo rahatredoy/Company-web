@@ -5,6 +5,7 @@ import { Crown, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { platformUrl } from '@/lib/env';
+import { useT } from '@/lib/i18n';
 
 const KEY = 'dashboard.trial-banner.dismissed-at-days';
 
@@ -56,6 +57,7 @@ function dismiss(days: number): void {
  * this panel holds no session for, so the button is a link out.
  */
 export function TrialBanner({ daysRemaining }: { daysRemaining: number }) {
+  const t = useT();
   const dismissedAt = React.useSyncExternalStore(subscribe, snapshot, () => null);
 
   if (dismissedAt !== null && Number.isFinite(dismissedAt) && daysRemaining >= dismissedAt) return null;
@@ -84,24 +86,24 @@ export function TrialBanner({ daysRemaining }: { daysRemaining: number }) {
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold">
           {days === 0
-            ? 'Your trial ends today'
-            : `Your trial ends in ${days} day${days === 1 ? '' : 's'}`}
+            ? t('Your trial ends today')
+            : t.plural(days, 'Your trial ends in {count} day', 'Your trial ends in {count} days')}
         </p>
         <p className="text-sm text-muted-foreground">
-          Choose a plan on your platform account to keep the store trading once the trial is over.
+          {t('Choose a plan on your platform account to keep the store trading once the trial is over.')}
         </p>
       </div>
 
       <div className="flex items-center gap-1">
         <Button asChild size="sm">
           <a href={platformUrl('/dashboard/plans')} target="_blank" rel="noreferrer">
-            Manage plan
+            {t('Manage plan')}
           </a>
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Dismiss until tomorrow"
+          aria-label={t('Dismiss until tomorrow')}
           onClick={() => dismiss(daysRemaining)}
         >
           <X className="size-4" aria-hidden />

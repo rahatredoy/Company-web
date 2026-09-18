@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useTheme } from 'next-themes';
 import { Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -22,6 +23,7 @@ const useHydrated = () => React.useSyncExternalStore(subscribeToNothing, () => t
 export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
   const mounted = useHydrated();
+  const t = useT();
 
   if (!mounted) {
     return (
@@ -29,7 +31,7 @@ export function ThemeToggle({ className }: { className?: string }) {
         variant="ghost"
         size="icon-sm"
         className={cn('relative', className)}
-        aria-label="Toggle theme"
+        aria-label={t('Toggle theme')}
         disabled
       >
         <Sun />
@@ -44,7 +46,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       variant="ghost"
       size="icon-sm"
       className={cn('relative', className)}
-      aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+      aria-label={isDark ? t('Switch to light theme') : t('Switch to dark theme')}
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
     >
       <Sun className="scale-100 rotate-0 transition-transform dark:scale-0 dark:-rotate-90" />

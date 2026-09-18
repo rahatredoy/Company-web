@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from 'drizzle-orm';
+import { eq, notInArray, sql } from 'drizzle-orm';
 import type { TenantDb } from '../db/tenant-manager';
 import {
   adminPermissions,
@@ -43,8 +43,6 @@ const SUBJECT_LABELS: Record<string, string> = {
   reviews: 'reviews',
   marketing: 'marketing',
   website: 'website content',
-  reports: 'reports',
-  staff: 'staff',
   settings: 'settings',
 };
 
@@ -67,9 +65,14 @@ function groupFor(key: Permission): string {
  *
  * Runs once per tenant per process boot (see `ensureStoreSeed`), and is fully
  * idempotent: adding a permission key to `lib/constants.ts` and redeploying is
- * all that is needed to roll it out to every store.
+ * all that is needed to roll it out to every store, and removing one retires it
+ * the same way.
  */
 export async function seedRolesAndPermissions(db: TenantDb): Promise<void> {
+  // A key no longer in `PERMISSIONS` guards nothing. Its grants go with it —
+  // both grant tables cascade from `admin_permissions.key`.
+  await db.delete(adminPermissions).where(notInArray(adminPermissions.key, [...PERMISSIONS]));
+
   await db
     .insert(adminPermissions)
     .values(
@@ -95,7 +98,7 @@ export async function seedRolesAndPermissions(db: TenantDb): Promise<void> {
       {
         key: STORE_ROLES.superAdmin,
         name: 'Store Super Admin',
-        description: 'Full access to everything in this store, including staff and settings.',
+        description: 'Full access to everything in this store, including settings.',
         isSystem: true,
       },
       {
@@ -107,8 +110,7 @@ export async function seedRolesAndPermissions(db: TenantDb): Promise<void> {
     ])
     .onConflictDoNothing({ target: adminRoles.key });
 
-  // Baseline grants for the STORE_ADMIN role — what a newly created staff
-  // member starts with before anything is tailored.
+  // Baseline grants for the STORE_ADMIN role.
   const [role] = await db
     .select({ id: adminRoles.id })
     .from(adminRoles)
@@ -151,88 +153,4 @@ export function assertPermission(granted: Set<Permission>, key: Permission): voi
       ERROR_CODES.PERMISSION_DENIED,
     );
   }
-}
-
-/**
- * Replaces an admin's grants wholesale.
- *
- * Super admins are rejected outright: writing rows for them would imply their
- * access is editable, which it is not. Unknown keys are dropped rather than
- * stored, so a stale UI can never persist a permission that no longer exists.
- */
-export async function setAdminPermissions(
-  db: TenantDb,
-  input: { adminId: string; roleKey: StoreRole; keys: string[]; grantedBy: string },
-): Promise<Permission[]> {
-  if (input.roleKey === STORE_ROLES.superAdmin) {
-    throw forbidden('Store super admins already have full access.', ERROR_CODES.PERMISSION_DENIED);
-  }
-
-  const valid = input.keys.filter((key): key is Permission =>
-    (PERMISSIONS as readonly string[]).includes(key),
-  );
-
-  await db.transaction(async (tx) => {
-    await tx.delete(adminUserPermissions).where(eq(adminUserPermissions.adminId, input.adminId));
-    if (valid.length > 0) {
-      await tx.insert(adminUserPermissions).values(
-        valid.map((key) => ({
-          adminId: input.adminId,
-          permissionKey: key,
-          grantedBy: input.grantedBy,
-        })),
-      );
-    }
-  });
-
-  return valid;
-}
-
-/** Grants the role baseline to a freshly created staff member. */
-export async function applyRoleDefaults(
-  db: TenantDb,
-  adminId: string,
-  roleKey: StoreRole,
-  grantedBy: string,
-): Promise<void> {
-  if (roleKey === STORE_ROLES.superAdmin) return;
-
-  const [role] = await db
-    .select({ id: adminRoles.id })
-    .from(adminRoles)
-    .where(eq(adminRoles.key, roleKey))
-    .limit(1);
-  if (!role) return;
-
-  const defaults = await db
-    .select({ key: adminRolePermissions.permissionKey })
-    .from(adminRolePermissions)
-    .where(eq(adminRolePermissions.roleId, role.id));
-
-  if (defaults.length === 0) return;
-
-  await db
-    .insert(adminUserPermissions)
-    .values(defaults.map((row) => ({ adminId, permissionKey: row.key, grantedBy })))
-    .onConflictDoNothing();
-}
-
-/** The catalogue as the roles & permissions screen wants it. */
-export async function permissionCatalogue(db: TenantDb) {
-  const rows = await db
-    .select()
-    .from(adminPermissions)
-    .where(inArray(adminPermissions.key, [...PERMISSIONS]));
-
-  const byGroup = new Map<string, { key: string; label: string; sortOrder: number }[]>();
-  for (const row of rows.sort((a, b) => a.sortOrder - b.sortOrder)) {
-    const list = byGroup.get(row.groupName) ?? [];
-    list.push({ key: row.key, label: row.label, sortOrder: row.sortOrder });
-    byGroup.set(row.groupName, list);
-  }
-
-  return PERMISSION_GROUPS.map((group) => ({
-    group: group.group,
-    permissions: byGroup.get(group.group) ?? [],
-  })).filter((group) => group.permissions.length > 0);
 }

@@ -15,6 +15,8 @@ const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().trim().max(120).optional(),
+  /** One product's reviews — the product screen's Reviews tab reads the list this way. */
+  productId: z.string().uuid().optional(),
   status: z.enum(['all', 'pending', 'approved', 'rejected']).default('all'),
   sort: z.enum(['createdAt', 'rating']).default('createdAt'),
   order: z.enum(['asc', 'desc']).default('desc'),
@@ -60,6 +62,7 @@ export default async function adminReviewRoutes(app: FastifyInstance) {
             )
           : undefined,
         query.status === 'all' ? undefined : eq(reviews.status, query.status),
+        query.productId ? eq(reviews.productId, query.productId) : undefined,
       ].filter(Boolean);
 
       const where = filters.length ? and(...filters) : undefined;

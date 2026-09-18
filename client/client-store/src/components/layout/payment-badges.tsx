@@ -1,6 +1,7 @@
 import { Banknote, CreditCard, Smartphone, Wallet, type LucideIcon } from 'lucide-react';
 import type { StoreConfig } from '@/types';
 import { cn } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
 
 /**
  * "We Accept" — the payment methods this store actually takes.
@@ -32,7 +33,7 @@ const PROVIDER_ICONS: Record<string, LucideIcon> = {
 const isCashOnDelivery = (provider: string) =>
   provider === 'cod' || provider === 'cash_on_delivery';
 
-export function PaymentBadges({
+export async function PaymentBadges({
   payment,
   className,
 }: {
@@ -41,12 +42,14 @@ export function PaymentBadges({
 }) {
   if (payment.providers.length === 0) return null;
 
+  const t = await getT();
+
   const cash = payment.providers.filter((provider) => isCashOnDelivery(provider.provider));
   const rest = payment.providers.filter((provider) => !isCashOnDelivery(provider.provider));
 
   return (
     <div className={className}>
-      <p className="mb-3 text-sm font-semibold">We Accept</p>
+      <p className="mb-3 text-sm font-semibold">{t('We Accept')}</p>
 
       <ul className="flex flex-wrap items-center gap-2">
         {rest.map((provider) => {
@@ -55,21 +58,21 @@ export function PaymentBadges({
           return (
             <li
               key={provider.provider}
-              title={provider.label}
+              title={t.loose(provider.label)}
               className={cn(
                 'flex h-8 items-center gap-1.5 rounded-[4px] border border-border bg-surface px-2',
-                'text-[11px] font-semibold text-muted',
+                'text-[10.5px] font-semibold text-muted',
               )}
             >
               <Icon className="size-3.5" aria-hidden />
-              <span className="max-w-24 truncate">{provider.label}</span>
+              <span className="max-w-24 truncate">{t.loose(provider.label)}</span>
             </li>
           );
         })}
       </ul>
 
       {cash.length > 0 ? (
-        <p className="mt-3 text-sm text-muted">{cash[0]!.label}</p>
+        <p className="mt-3 text-sm text-muted">{t.loose(cash[0]!.label)}</p>
       ) : null}
     </div>
   );

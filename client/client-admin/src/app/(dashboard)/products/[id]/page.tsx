@@ -9,17 +9,19 @@ import { ProductGallery } from '@/components/admin/product-gallery';
 import { ProductOverview } from '@/components/admin/product-overview';
 import { ProductSpecifications } from '@/components/admin/product-specifications';
 import { ProductVariants } from '@/components/admin/product-variants';
+import { ReviewModeration } from '@/components/admin/review-moderation';
+import { TableFilters } from '@/components/admin/table-filters';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  currentStoreSlug,
   serverGet,
   serverGetOptional,
   serverGetListed,
 } from '@/lib/server-api';
-import { storefrontUrl } from '@/lib/env';
-import { formatDate, formatNumber } from '@/lib/format';
+import { BATCH_SIZE } from '@/lib/list';
+import type { MessageKey } from '@/lib/i18n';
+import { getT } from '@/lib/i18n/server';
 import { can } from '@/lib/types';
 import type {
   AttributeRow,
@@ -28,18 +30,33 @@ import type {
   ProductDetail,
   ProductInsights,
   ProductRow,
+  ReviewRow,
   SessionResponse,
   StoreSettingsRow,
   WarehouseRow,
 } from '@/lib/types';
 
-export const metadata: Metadata = { title: 'Product' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Product') };
+}
+
 export const dynamic = 'force-dynamic';
 
 /** The enum in the owner's words — `active` is published, `inactive` is archived. */
-const STATUS_LABEL = { active: 'Published', draft: 'Draft', inactive: 'Archived' } as const;
+const STATUS_LABEL = { active: 'Published', draft: 'Draft', inactive: 'Archived' } as const satisfies Record<
+  string,
+  MessageKey
+>;
 
-const TABS = ['overview', 'details', 'variants', 'gallery', 'specifications', 'related'] as const;
+const TABS = ['overview', 'details', 'variants', 'gallery', 'specifications', 'related', 'reviews'] as const;
+
+const REVIEW_STATUS_OPTIONS: { value: string; label: MessageKey }[] = [
+  { value: 'all', label: 'All reviews' },
+  { value: 'pending', label: 'Awaiting review' },
+  { value: 'approved', label: 'Published' },
+  { value: 'rejected', label: 'Rejected' },
+];
 type Tab = (typeof TABS)[number];
 
 /**
@@ -68,18 +85,29 @@ export default async function ProductPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const [{ id }, query, t] = await Promise.all([params, searchParams, getT()]);
 
   const product = await serverGetOptional<ProductDetail>(`/api/v1/admin/products/${id}`);
   if (!product) notFound();
 
   const requested = Array.isArray(query.tab) ? query.tab[0] : query.tab;
   const tab: Tab = TABS.includes(requested as Tab) ? (requested as Tab) : 'overview';
+  const stockParam = Array.isArray(query.stock) ? query.stock[0] : query.stock;
+  const openStock = stockParam === 'add' || stockParam === 'adjust' ? stockParam : null;
 
-  const [session, slug, insights, warehouses, categories, brands, attributes, catalogue, settings] =
+  /*
+   * The Reviews tab is where a product's reviews are moderated — there is no
+   * store-wide queue screen. Its filters live in the URL beside `tab`, and the
+   * list is read by product so the first batch and every later one agree.
+   */
+  const reviewStatusParam = Array.isArray(query.status) ? query.status[0] : query.status;
+  const reviewSearch = Array.isArray(query.search) ? query.search[0] : query.search;
+  const reviewQuery = { productId: id, status: reviewStatusParam, search: reviewSearch };
+  const reviewsFiltered = Boolean(reviewSearch || (reviewStatusParam && reviewStatusParam !== 'all'));
+
+  const [session, insights, warehouses, categories, brands, attributes, catalogue, settings, reviews] =
     await Promise.all([
     serverGet<SessionResponse>('/api/v1/admin/auth/session'),
-    currentStoreSlug(),
     /*
      * Optional on purpose. The figures are eight aggregates over six tables and
      * the editor beneath them needs none of it — a screen that refused to open
@@ -99,6 +127,11 @@ export default async function ProductPage({
      * the API would have applied anyway.
      */
     serverGetOptional<StoreSettingsRow>('/api/v1/admin/settings'),
+    /*
+     * Every review of this product, first batch only. Optional: an admin
+     * without `reviews.view` is refused, and that costs the tab, not the page.
+     */
+    serverGetListed<ReviewRow>('/api/v1/admin/reviews', { ...reviewQuery, pageSize: BATCH_SIZE }).catch(() => null),
   ]);
 
   const currency = session.authenticated ? session.store.currency : 'USD';
@@ -107,20 +140,21 @@ export default async function ProductPage({
   const admin = session.authenticated ? session.admin : null;
   const canManage = can(admin, 'products.update');
   const canAdjust = can(admin, 'inventory.adjust');
-  const storeUrl = slug ? storefrontUrl(slug) : null;
+  const canViewReviews = can(admin, 'reviews.view') && reviews !== null;
+  const canManageReviews = can(admin, 'reviews.manage');
 
   return (
     <div className="space-y-5">
       <PageHeader
         title={product.name}
-        breadcrumb={[{ label: 'Products', href: '/products' }, { label: product.name }]}
+        breadcrumb={[{ label: t('Products'), href: '/products' }, { label: product.name }]}
         description={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="font-mono text-xs">/{product.slug}</span>
-            <span>Added {formatDate(product.createdAt)}</span>
-            {product.soldCount > 0 ? <span>{formatNumber(product.soldCount)} sold</span> : null}
+            <span>{t('Added {date}', { date: t.date(product.createdAt) })}</span>
+            {product.soldCount > 0 ? <span>{t('{count} sold', { count: product.soldCount })}</span> : null}
             <Badge variant={product.status === 'active' ? 'success' : product.status === 'draft' ? 'warning' : 'neutral'}>
-              {STATUS_LABEL[product.status]}
+              {t(STATUS_LABEL[product.status])}
             </Badge>
           </span>
         }
@@ -129,30 +163,38 @@ export default async function ProductPage({
             product={{ id: product.id, slug: product.slug, status: product.status }}
             variants={insights?.variants ?? []}
             warehouses={warehouses ?? []}
-            storefrontUrl={storeUrl}
             canManage={canManage}
             canAdjust={canAdjust && (insights?.variants.length ?? 0) > 0}
+            openWith={openStock}
           />
         }
       />
 
       <Tabs defaultValue={tab}>
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="details">Details</TabsTrigger>
-          <TabsTrigger value="variants">Variants ({product.variants.length})</TabsTrigger>
-          <TabsTrigger value="gallery">Gallery ({product.media.length})</TabsTrigger>
-          <TabsTrigger value="specifications">Specifications ({product.specifications.length})</TabsTrigger>
-          <TabsTrigger value="related">Related</TabsTrigger>
+          <TabsTrigger value="overview">{t('Overview')}</TabsTrigger>
+          <TabsTrigger value="details">{t('Details')}</TabsTrigger>
+          <TabsTrigger value="variants">{t('Variants ({count})', { count: product.variants.length })}</TabsTrigger>
+          <TabsTrigger value="gallery">{t('Gallery ({count})', { count: product.media.length })}</TabsTrigger>
+          <TabsTrigger value="specifications">
+            {t('Specifications ({count})', { count: product.specifications.length })}
+          </TabsTrigger>
+          <TabsTrigger value="related">{t('Related')}</TabsTrigger>
+          {canViewReviews ? (
+            <TabsTrigger value="reviews">
+              {t('Reviews')}
+            </TabsTrigger>
+          ) : null}
         </TabsList>
 
         <TabsContent value="overview">
           {insights ? (
-            <ProductOverview insights={insights} storefrontUrl={storeUrl} />
+            <ProductOverview insights={insights} />
           ) : (
             <Alert variant="warning">
-              The figures for this product could not be read just now. Everything under the other tabs still
-              works, and reloading usually clears it.
+              {t(
+                'The figures for this product could not be read just now. Everything under the other tabs still works, and reloading usually clears it.',
+              )}
             </Alert>
           )}
         </TabsContent>
@@ -203,6 +245,22 @@ export default async function ProductPage({
             canManage={canManage}
           />
         </TabsContent>
+
+        {canViewReviews && reviews ? (
+          <TabsContent value="reviews" className="space-y-4">
+            <TableFilters
+              searchPlaceholder={t('Customer or wording')}
+              statusOptions={REVIEW_STATUS_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
+              preserveParams={['tab']}
+            />
+            <ReviewModeration
+              initial={{ rows: reviews.data, meta: reviews.meta }}
+              query={reviewQuery}
+              canManage={canManageReviews}
+              filtered={reviewsFiltered}
+            />
+          </TabsContent>
+        ) : null}
       </Tabs>
     </div>
   );

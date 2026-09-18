@@ -32,9 +32,19 @@ export const SESSION_COOKIE = {
   csrf: 'company_csrf',
 } as const;
 
+/**
+ * The `aud` claim on every session JWT this API issues.
+ *
+ * A challenge token gets an audience of its own rather than a flag inside a
+ * shared one: `verifyJwt` is given the single audience it will accept, so a
+ * half-finished sign-in presented to a protected route does not merely fail a
+ * check further in — it fails to verify at all.
+ */
 export const AUTH_AUDIENCE = {
   admin: 'company-admin',
+  adminOtp: 'company-admin-otp',
   client: 'company-client',
+  clientOtp: 'company-client-otp',
 } as const;
 
 export const PROVISIONING_STEPS = [

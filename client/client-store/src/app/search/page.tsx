@@ -2,13 +2,17 @@ import type { Metadata } from 'next';
 import { getStoreConfig } from '@/lib/api/store';
 import { getProductList, parseProductQuery } from '@/lib/api/products';
 import { getTemplate } from '@/templates/registry';
-import { Breadcrumb, ProductListing } from '@/components/catalog/product-listing';
+import { ProductListing } from '@/components/catalog/product-listing';
+import { getT } from '@/lib/i18n/server';
 
-export const metadata: Metadata = {
-  title: 'Search',
-  // Search result pages are thin, duplicative content — keep them out of the index.
-  robots: { index: false, follow: true },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return {
+    title: t('Search'),
+    // Search result pages are thin, duplicative content — keep them out of the index.
+    robots: { index: false, follow: true },
+  };
+}
 
 export default async function SearchPage({
   searchParams,
@@ -18,28 +22,32 @@ export default async function SearchPage({
   const params = await searchParams;
   const query = parseProductQuery(params);
 
-  const [config, result] = await Promise.all([getStoreConfig(), getProductList(query)]);
+  const [config, result, t] = await Promise.all([getStoreConfig(), getProductList(query), getT()]);
   const template = await getTemplate(config.design.templateKey);
 
   return (
     <div className="container-store py-6">
-      <Breadcrumb trail={[{ name: 'Search' }]} />
-
-      <h1 className="mb-1 text-2xl font-semibold sm:text-3xl">
-        {query.q ? <>Results for “{query.q}”</> : 'Search'}
-      </h1>
-      <p className="mb-6 text-sm text-muted">
-        {query.q ? `${result.meta.total} matching products` : 'Enter a product, brand or category above.'}
-      </p>
+      {/*
+        Both lines said something the page says better on its own: the search
+        box in the header still holds the term, and the listing counts its own
+        results a few pixels below. Only the prompt for an empty search says
+        anything new, so only that is still drawn.
+      */}
+      <h1 className="sr-only">{query.q ? t('Results for “{term}”', { term: query.q }) : t('Search')}</h1>
+      {query.q ? null : (
+        <p className="mb-6 text-sm text-muted">{t('Enter a product, brand or category above.')}</p>
+      )}
 
       <ProductListing
         result={result}
+        query={query}
         sort={query.sort ?? 'relevance'}
         cardVariant={template.cardVariant}
         gridClassName={template.gridClassName}
         locale={config.store.language}
-        emptyTitle="No products matched that search"
-        emptyBody="Check the spelling, try a shorter or more general word, or browse a category instead."
+        currency={config.store.currency}
+        emptyTitle={t('No products matched that search')}
+        emptyBody={t('Check the spelling, try a shorter or more general word, or browse a category instead.')}
       />
     </div>
   );

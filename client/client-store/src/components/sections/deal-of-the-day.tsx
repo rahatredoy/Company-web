@@ -4,6 +4,7 @@ import type { ProductSummary } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PriceDisplay } from '@/components/commerce/price-display';
+import { getT } from '@/lib/i18n/server';
 import { cn } from '@/lib/utils';
 import { Countdown } from './countdown';
 
@@ -18,7 +19,7 @@ import { Countdown } from './countdown';
  * same two numbers it renders as the price — so the badge cannot claim 25% off
  * while the prices show 20%.
  */
-export function DealOfTheDay({
+export async function DealOfTheDay({
   product,
   deadline,
   title,
@@ -36,6 +37,8 @@ export function DealOfTheDay({
   layout?: 'split' | 'stacked';
   className?: string;
 }) {
+  const t = await getT();
+
   return (
     <div
       className={cn(
@@ -66,13 +69,13 @@ export function DealOfTheDay({
 
         {product.discountPercent ? (
           <Badge tone="soft" size="lg" className="mt-3">
-            Save {product.discountPercent}%
+            {t('Save {percent}%', { percent: product.discountPercent })}
           </Badge>
         ) : null}
 
         <Button asChild size="md" className="mt-5 w-full sm:w-auto">
           <Link href={`/product/${product.slug}`}>
-            {product.inStock ? 'Shop now' : 'View product'}
+            {product.inStock ? t('Shop now') : t('View product')}
           </Link>
         </Button>
       </div>
@@ -100,7 +103,7 @@ export function DealOfTheDay({
 
         {!product.inStock ? (
           <span className="absolute inset-x-0 bottom-0 bg-foreground/75 py-1.5 text-center text-xs font-medium text-white">
-            Out of stock
+            {t('Out of stock')}
           </span>
         ) : null}
       </div>

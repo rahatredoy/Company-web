@@ -1,20 +1,14 @@
-import { and, asc, count, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import {
-  attributeValues,
-  attributes,
-  customers,
-  orderItems,
-  orders,
-  paymentMethods,
-  products,
-  storeSettings,
-} from '../../db/schema/index';
+import { attributeValues, attributes, orders, paymentMethods, storeSettings } from '../../db/schema/index';
 import { audit } from '../../lib/audit';
 import { invalidateStorefrontOnWrite } from '../../lib/cache';
-import { conflict, notFound } from '../../lib/errors';
-import { noContent, ok, parseBody, parseParams, parseQuery, uuidParamSchema } from '../../lib/http';
+import { ERROR_CODES, conflict, notFound, unprocessable } from '../../lib/errors';
+import { isSupportedCurrency } from '../../lib/currencies';
+import { isSupportedLanguage, resolveLanguage } from '../../lib/languages';
+import { forgetStoreLocale } from '../../lib/store-currency';
+import { noContent, ok, parseBody, parseParams, uuidParamSchema } from '../../lib/http';
 import {
   DEFAULT_MEASURE_OPTIONS,
   MAX_MEASURE_OPTIONS,
@@ -26,27 +20,51 @@ import { storeOf } from '../../plugins/tenant';
 
 const settingsSchema = z.object({
   storeName: z.string().trim().min(1, 'Give the store a name.').max(120),
-  currency: z.string().trim().length(3, 'Use a three-letter code.').toUpperCase(),
+  currency: z.string().trim().length(3, 'Choose a currency.').toUpperCase(),
+  /**
+   * Required to be true when the currency moves on a store that has taken
+   * orders — see the handler. Absent is false, so an older client that has
+   * never heard of it is refused rather than allowed to re-label a trading shop.
+   */
+  confirmCurrencyChange: z.boolean().default(false),
+  /**
+   * One of `lib/languages.ts` — checked in the handler, and only when it moves,
+   * for the reason the currency is: a store provisioned with a regional code
+   * such as `en-US` must still be able to save its phone number.
+   */
   language: z.string().trim().min(2).max(8),
   timezone: z.string().trim().min(1).max(64),
   businessName: z.string().trim().max(160).nullable().default(null),
   businessEmail: z.string().trim().max(254).nullable().default(null),
   businessPhone: z.string().trim().max(24).nullable().default(null),
   businessAddress: z.string().trim().max(2000).nullable().default(null),
-  seoTitle: z.string().trim().max(160).nullable().default(null),
-  seoDescription: z.string().trim().max(300).nullable().default(null),
+  /*
+   * Omitted means unchanged: the panel's Settings screen no longer asks for
+   * these, and a save that leaves them out must not blank the storefront's
+   * title. Drizzle skips an `undefined` in `.set()`, so the column is untouched.
+   */
+  seoTitle: z.string().trim().max(160).nullable().optional(),
+  seoDescription: z.string().trim().max(300).nullable().optional(),
   whatsappNumber: z.string().trim().max(24).nullable().default(null),
   whatsappEnabled: z.boolean().default(false),
-  lowStockThreshold: z.coerce.number().int().min(0).max(10_000).default(5),
+  /**
+   * Omitted means unchanged. The panel's Settings screen no longer asks for it —
+   * each product sets its own alert when it is added — and nothing else reads
+   * this store-wide copy, so a save that leaves it out must not reset it to 5.
+   */
+  lowStockThreshold: z.coerce.number().int().min(0).max(10_000).optional(),
   /**
    * The shop's default picker for products sold by weight or volume.
    *
-   * Set once here rather than per product, because a greengrocer sells fifty
-   * vegetables the same four ways. A product may still name its own list; an
-   * empty one here just means every measure product falls back to the platform
-   * default (1kg/500gm/250gm/100gm).
+   * A product may still name its own list; an empty one here just means every
+   * measure product falls back to the platform default (1kg/500gm/250gm/100gm).
+   *
+   * **Omitted means unchanged**, not empty. The panel's Settings screen no
+   * longer edits this list — sizes are picked on each product — so a save from
+   * it carries no `measureOptions`, and defaulting that to `[]` would silently
+   * reset the shop's list on every change of store name or phone number.
    */
-  measureOptions: z.array(measureOptionSchema).max(MAX_MEASURE_OPTIONS).default([]),
+  measureOptions: z.array(measureOptionSchema).max(MAX_MEASURE_OPTIONS).optional(),
 });
 
 const attributeSchema = z.object({
@@ -86,12 +104,20 @@ const paymentSchema = z.object({
 });
 
 /**
- * The store's own settings, its attribute vocabulary, and the numbers.
+ * The store's own settings, its payment methods and its attribute vocabulary.
  *
  * Currency is here and it is the one field with teeth: prices are stored as
  * plain decimals with no currency of their own, so changing it re-labels every
- * existing price rather than converting it. The panel says so; this refuses to
- * do it silently once orders exist.
+ * catalogue price rather than converting it — ৳40 becomes $40. That is exactly
+ * right for a shop whose prices were always meant in the new currency, and
+ * wrong for one that was genuinely trading in the old, so once orders exist the
+ * change is taken only with `confirmCurrencyChange`, which the panel sends after
+ * showing the owner what it will and will not do.
+ *
+ * What it never does is touch an order. `orders.currency` is snapshotted at
+ * checkout, so every order already taken keeps the currency it was charged in,
+ * and every money total the panel shows adds up orders in the current currency
+ * only — a sum of dollars and taka printed with one symbol is not a figure.
  */
 export default async function settingsRoutes(app: FastifyInstance) {
   invalidateStorefrontOnWrite(app);
@@ -106,13 +132,19 @@ export default async function settingsRoutes(app: FastifyInstance) {
       const [row] = await store.db.select().from(storeSettings).limit(1);
       const preferences = row?.preferences ?? {};
 
-      const [tally] = await store.db.select({ total: count() }).from(orders);
+      const byCurrency = await store.db
+        .select({ currency: orders.currency, orders: count() })
+        .from(orders)
+        .groupBy(orders.currency)
+        .orderBy(desc(count()));
 
       return ok(reply, {
         storeName: row?.storeName ?? store.storeName,
         slug: store.slug,
         currency: row?.currency ?? store.currency,
-        language: row?.language ?? store.language,
+        // Resolved, so the picker always has an entry selected: a stored `en-US`
+        // is shown as English, which is what the whole panel is drawn in.
+        language: resolveLanguage(row?.language ?? store.language),
         timezone: row?.timezone ?? store.timezone,
         businessName: row?.businessName ?? null,
         businessEmail: row?.businessEmail ?? null,
@@ -126,8 +158,14 @@ export default async function settingsRoutes(app: FastifyInstance) {
         measureOptions: normaliseMeasureOptions(preferences.measureOptions ?? []),
         /** What a product falls back to when neither it nor the shop names a list. */
         defaultMeasureOptions: DEFAULT_MEASURE_OPTIONS,
-        /** Non-zero means changing currency is refused. */
-        orderCount: Number(tally?.total ?? 0),
+        /** Non-zero means changing currency has to be confirmed. */
+        orderCount: byCurrency.reduce((total, row) => total + Number(row.orders), 0),
+        /**
+         * How many orders were taken in each currency, most first. More than one
+         * entry means the store has switched before, and the panel says which
+         * orders its totals are leaving out.
+         */
+        orderCurrencies: byCurrency.map((row) => ({ currency: row.currency, orders: Number(row.orders) })),
       });
     },
   );
@@ -142,16 +180,40 @@ export default async function settingsRoutes(app: FastifyInstance) {
       const [existing] = await store.db.select().from(storeSettings).limit(1);
       if (!existing) throw notFound('This store has no settings row yet.');
 
+      const currencyChanged = body.currency !== existing.currency;
+      const languageChanged = body.language !== existing.language;
+
+      if (languageChanged && !isSupportedLanguage(body.language)) {
+        throw unprocessable('Choose a language from the list.', ERROR_CODES.VALIDATION_FAILED, {
+          language: ['Choose a language from the list.'],
+        });
+      }
+
+      /*
+       * Checked only when it moves. A store provisioned with a code that has
+       * since left circulation must still be able to save its other settings
+       * without being made to pick a new currency first.
+       */
+      if (currencyChanged && !isSupportedCurrency(body.currency)) {
+        throw unprocessable('Choose a currency from the list.', ERROR_CODES.UNSUPPORTED_CURRENCY, {
+          currency: ['Choose a currency from the list.'],
+        });
+      }
+
       /*
        * Prices are decimals with no currency attached, so switching the code
-       * would silently re-label every price and every past order's total. Once
-       * a shop has taken money, that is a rewrite of its own books.
+       * re-labels every price in the catalogue rather than converting it. On a
+       * shop with no orders that is simply setting it up; on one that has
+       * taken money it is a decision about its own prices, and it is refused
+       * until the request says the owner was shown that. Past orders are safe
+       * either way — they carry their own `currency`.
        */
-      if (body.currency !== existing.currency) {
+      if (currencyChanged && !body.confirmCurrencyChange) {
         const [tally] = await store.db.select({ total: count() }).from(orders);
         if (Number(tally?.total ?? 0) > 0) {
           throw conflict(
-            'Currency cannot be changed once the store has taken orders — every existing price and total is recorded in the old one.',
+            `This store has taken orders in ${existing.currency}. Switching to ${body.currency} does not convert prices — every price keeps its number and changes its symbol — so it has to be confirmed.`,
+            ERROR_CODES.CURRENCY_CHANGE_UNCONFIRMED,
           );
         }
       }
@@ -173,8 +235,11 @@ export default async function settingsRoutes(app: FastifyInstance) {
             ...(existing.preferences ?? {}),
             whatsappNumber: body.whatsappNumber ?? undefined,
             whatsappEnabled: body.whatsappEnabled,
-            lowStockThreshold: body.lowStockThreshold,
-            measureOptions: normaliseMeasureOptions(body.measureOptions),
+            lowStockThreshold: body.lowStockThreshold ?? existing.preferences?.lowStockThreshold,
+            measureOptions:
+              body.measureOptions === undefined
+                ? existing.preferences?.measureOptions
+                : normaliseMeasureOptions(body.measureOptions),
             // Kept in step so the storefront's selector logic stays honest.
             currencies: [body.currency],
             languages: [body.language],
@@ -190,9 +255,12 @@ export default async function settingsRoutes(app: FastifyInstance) {
         entity: 'store_settings',
         entityId: existing.id,
         entityLabel: body.storeName,
-        oldValues: { currency: existing.currency, storeName: existing.storeName },
-        newValues: { currency: body.currency, storeName: body.storeName },
+        oldValues: { currency: existing.currency, language: existing.language, storeName: existing.storeName },
+        newValues: { currency: body.currency, language: body.language, storeName: body.storeName },
       });
+
+      // Before the reply, not in the `onResponse` hook: see `forgetStoreLocale`.
+      if (currencyChanged || languageChanged) await forgetStoreLocale(store.tenantRef);
 
       return ok(reply, updated);
     },
@@ -595,99 +663,6 @@ export default async function settingsRoutes(app: FastifyInstance) {
       });
 
       return noContent(reply);
-    },
-  );
-
-  // --------------------------------------------------------------- reports ---
-
-  /**
-   * The numbers, computed from orders rather than read from a rollup.
-   *
-   * `store_daily_metrics` exists but nothing maintains it yet, and a figure that
-   * is quietly stale is worse than one that costs a query. A shop with enough
-   * orders for this to hurt has outgrown the assumption, and that is the point
-   * at which the rollup should start being written.
-   */
-  app.get(
-    '/reports',
-    { preHandler: [app.requireStoreAdmin, app.requirePermission('reports.view')] },
-    async (request, reply) => {
-      const store = storeOf(request);
-      const query = parseQuery(
-        z.object({ days: z.coerce.number().int().min(1).max(365).default(30) }),
-        request.query,
-      );
-
-      const since = new Date();
-      since.setDate(since.getDate() - query.days);
-
-      const counted = sql`${orders.status} not in ('cancelled', 'failed')`;
-
-      const [totals, daily, topProducts, newCustomers] = await Promise.all([
-        store.db
-          .select({
-            orders: count(),
-            revenue: sql<string>`coalesce(sum(${orders.grandTotal}), 0)::text`,
-            discounts: sql<string>`coalesce(sum(${orders.discountTotal}), 0)::text`,
-            refunded: sql<string>`coalesce(sum(${orders.refundedTotal}), 0)::text`,
-          })
-          .from(orders)
-          .where(and(gte(orders.placedAt, since), counted)),
-
-        store.db
-          .select({
-            day: sql<string>`to_char(${orders.placedAt}, 'YYYY-MM-DD')`,
-            orders: count(),
-            revenue: sql<string>`coalesce(sum(${orders.grandTotal}), 0)::text`,
-          })
-          .from(orders)
-          .where(and(gte(orders.placedAt, since), counted))
-          .groupBy(sql`to_char(${orders.placedAt}, 'YYYY-MM-DD')`)
-          .orderBy(sql`to_char(${orders.placedAt}, 'YYYY-MM-DD')`),
-
-        store.db
-          .select({
-            productId: orderItems.productId,
-            name: orderItems.productName,
-            units: sql<number>`sum(${orderItems.quantity})::int`,
-            revenue: sql<string>`coalesce(sum(${orderItems.lineTotal}), 0)::text`,
-          })
-          .from(orderItems)
-          .innerJoin(orders, eq(orders.id, orderItems.orderId))
-          .where(and(gte(orders.placedAt, since), counted))
-          .groupBy(orderItems.productId, orderItems.productName)
-          .orderBy(desc(sql`sum(${orderItems.quantity})`))
-          .limit(10),
-
-        store.db
-          .select({ total: count() })
-          .from(customers)
-          .where(gte(customers.createdAt, since)),
-      ]);
-
-      const [catalogue] = await store.db
-        .select({ total: count() })
-        .from(products)
-        .where(eq(products.status, 'active'));
-
-      const revenue = Number(totals[0]?.revenue ?? 0);
-      const orderCount = Number(totals[0]?.orders ?? 0);
-
-      return ok(reply, {
-        days: query.days,
-        currency: store.currency,
-        totals: {
-          orders: orderCount,
-          revenue: totals[0]?.revenue ?? '0',
-          discounts: totals[0]?.discounts ?? '0',
-          refunded: totals[0]?.refunded ?? '0',
-          averageOrderValue: orderCount > 0 ? (revenue / orderCount).toFixed(2) : '0.00',
-          newCustomers: Number(newCustomers[0]?.total ?? 0),
-          activeProducts: Number(catalogue?.total ?? 0),
-        },
-        daily: daily.map((row) => ({ ...row, orders: Number(row.orders) })),
-        topProducts: topProducts.map((row) => ({ ...row, units: Number(row.units) })),
-      });
     },
   );
 }

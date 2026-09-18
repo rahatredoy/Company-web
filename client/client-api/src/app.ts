@@ -7,6 +7,7 @@ import { config, isProduction } from './config/index';
 import { logger } from './lib/logger';
 import requestContext from './plugins/request-context';
 import errorHandler from './plugins/error-handler';
+import https from './plugins/https';
 import security from './plugins/security';
 import tenant from './plugins/tenant';
 import auth from './plugins/auth';
@@ -15,10 +16,12 @@ import authRoutes from './modules/auth/routes';
 import catalogRoutes from './modules/catalog/routes';
 import customerRoutes from './modules/customers/routes';
 import dashboardRoutes from './modules/dashboard/routes';
+import discountRoutes from './modules/discounts/routes';
 import fulfilmentRoutes from './modules/fulfilment/routes';
 import inventoryRoutes from './modules/inventory/routes';
 import marketingRoutes from './modules/marketing/routes';
 import orderRoutes from './modules/orders/routes';
+import oauthRoutes from './modules/oauth/google.routes';
 import adminReviewRoutes from './modules/reviews/routes';
 import settingsRoutes from './modules/settings/routes';
 import storefrontRoutes from './modules/storefront/routes';
@@ -45,6 +48,18 @@ export async function buildApp() {
 
   await app.register(requestContext);
   await app.register(errorHandler);
+
+  /*
+   * Transport first, before anything reads the request.
+   *
+   * A plaintext request has already spent whatever it was carrying by the
+   * time it arrives, so there is nothing to gain by compressing it, tagging
+   * it or resolving its tenant — and one thing to lose, which is the chance
+   * to answer before a handler acts on credentials that crossed the wire in
+   * the clear. After the error handler so a refusal renders as an ordinary
+   * `{ code, message, requestId }` body rather than a bare 500.
+   */
+  await app.register(https);
 
   /*
    * Compression, before anything that produces a body.
@@ -108,6 +123,7 @@ export async function buildApp() {
       await instance.register(adminReviewRoutes);
       await instance.register(inventoryRoutes);
       await instance.register(fulfilmentRoutes);
+      await instance.register(discountRoutes);
       await instance.register(marketingRoutes);
       await instance.register(websiteRoutes);
       await instance.register(settingsRoutes);
@@ -125,6 +141,19 @@ export async function buildApp() {
    * the panel's CORS policy.
    */
   await app.register(storefrontRoutes, { prefix: '/api/v1/storefront' });
+
+  /*
+   * The identity-provider callbacks, which are the only routes on this API with
+   * no store behind them.
+   *
+   * Google matches redirect URIs by exact string and supports no wildcards, so
+   * one URI is registered for the whole platform and it lands on this API's own
+   * hostname rather than on any shop's. That makes these routes tenant-free by
+   * construction — they are listed in `plugins/tenant.ts`'s exempt prefixes for
+   * the same reason the payment webhooks are — and the store a sign-in belongs
+   * to is read out of the `state` this API wrote when it sent the browser off.
+   */
+  await app.register(oauthRoutes, { prefix: '/api/v1/oauth' });
 
   if (!isProduction) {
     app.log.info(

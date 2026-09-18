@@ -1,23 +1,28 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { Heart } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ProductSummary } from '@/types';
 import { useWishlist } from '@/lib/commerce/collections';
+import { WishlistIcon } from '@/lib/commerce/wishlist-icon';
 import { useHydrated } from '@/lib/hooks/use-hydrated';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
- * The wishlist heart.
+ * The wishlist button.
  *
  * A separate client island so `ProductCard` can stay a Server Component — the
  * card is rendered up to a hundred times on a listing page, and turning the
  * whole thing into client JavaScript to make one button work would ship the
  * markup twice.
  *
- * Until this existed the heart on every card was a `<button>` with no `onClick`:
- * a control that looked interactive, was announced as a button, and did nothing.
+ * Until this existed the control on every card was a `<button>` with no
+ * `onClick`: it looked interactive, was announced as a button, and did nothing.
+ *
+ * The glyph comes from `lib/commerce/wishlist-icon` rather than from
+ * `lucide-react` here, because six other surfaces show the same thing and they
+ * have to agree — see that file for why it is a bookmark and not a heart.
  */
 export function WishlistButton({
   product,
@@ -28,6 +33,7 @@ export function WishlistButton({
   variant?: 'floating' | 'inline';
   className?: string;
 }) {
+  const t = useT();
   const router = useRouter();
   const wishlist = useWishlist();
   const hydrated = useHydrated();
@@ -39,8 +45,8 @@ export function WishlistButton({
   const onClick = () => {
     const added = wishlist.toggle(product);
     toast[added ? 'success' : 'message'](
-      added ? 'Saved to your wishlist' : 'Removed from your wishlist',
-      added ? { action: { label: 'View', onClick: () => router.push('/wishlist') } } : undefined,
+      added ? t('Saved to your wishlist') : t('Removed from your wishlist'),
+      added ? { action: { label: t('View'), onClick: () => router.push('/wishlist') } } : undefined,
     );
   };
 
@@ -56,8 +62,8 @@ export function WishlistButton({
           className,
         )}
       >
-        <Heart className={cn('size-4', saved && 'fill-current')} aria-hidden />
-        {saved ? 'Saved' : 'Add to wishlist'}
+        <WishlistIcon className={cn('size-4', saved && 'fill-current')} aria-hidden />
+        {saved ? t('Saved') : t('Add to wishlist')}
       </button>
     );
   }
@@ -67,14 +73,18 @@ export function WishlistButton({
       type="button"
       onClick={onClick}
       aria-pressed={saved}
-      aria-label={saved ? `Remove ${product.name} from wishlist` : `Add ${product.name} to wishlist`}
+      aria-label={
+        saved
+          ? t('Remove {name} from wishlist', { name: product.name })
+          : t('Add {name} to wishlist', { name: product.name })
+      }
       className={cn(
         'absolute right-2 top-2 z-20 grid size-9 place-items-center rounded-full bg-surface/90 shadow-[var(--shadow-card)] transition-colors',
         saved ? 'text-primary' : 'text-foreground hover:text-primary',
         className,
       )}
     >
-      <Heart className={cn('size-4', saved && 'fill-current')} aria-hidden />
+      <WishlistIcon className={cn('size-4', saved && 'fill-current')} aria-hidden />
     </button>
   );
 }

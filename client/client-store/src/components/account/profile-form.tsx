@@ -68,11 +68,25 @@ export function ProfileForm({ customer }: { customer: Customer }) {
 
       <div>
         <Field name="email" label="Email address" hint="Change this from the Security page">
-          {(props) => <Input {...props} type="email" defaultValue={customer.email} disabled />}
+          {(props) => (
+            <Input {...props} type="email" defaultValue={customer.email ?? ''} disabled />
+          )}
         </Field>
 
+        {/*
+          An account made from a phone number has no address at all, and saying
+          "not verified yet — check your inbox" about a blank box would send
+          somebody looking through an inbox for a message nobody sent.
+        */}
         <p className="mt-2 flex items-center gap-1.5 text-xs">
-          {customer.emailVerified ? (
+          {!customer.email ? (
+            <>
+              <MailWarning className="size-3.5 text-muted" aria-hidden />
+              <span className="text-muted">
+                No email yet — add one so we can send order confirmations
+              </span>
+            </>
+          ) : customer.emailVerified ? (
             <>
               <BadgeCheck className="size-3.5 text-success" aria-hidden />
               <span className="text-success">Verified</span>

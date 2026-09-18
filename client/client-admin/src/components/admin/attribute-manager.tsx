@@ -47,7 +47,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui/toaster';
 import { api, errorMessage } from '@/lib/api';
-import { formatNumber } from '@/lib/format';
+import { useT, type MessageKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { AttributeRow } from '@/lib/types';
 import { PageHeader } from './page-header';
@@ -72,11 +72,11 @@ import { SELECT_CLASS } from './category-tree';
 
 const PAGE_SIZES = [10, 25, 50, 100];
 
-const INPUT_LABEL: Record<AttributeRow['inputType'], string> = {
+const INPUT_LABEL: Record<AttributeRow['inputType'], MessageKey> = {
   select: 'List',
   color: 'Swatches',
   text: 'Free text',
-  number: 'Number',
+  number: 'Number::input',
 };
 
 export interface AttributeFilterState {
@@ -98,6 +98,7 @@ export function AttributeManager({
   initial: AttributeFilterState;
 }) {
   const router = useRouter();
+  const t = useT();
 
   const [filters, setFilters] = React.useState({
     search: initial.search,
@@ -190,6 +191,7 @@ export function AttributeManager({
     router.refresh();
   };
 
+  // i18n-ignore (a type argument, not text)
   async function run(label: string, work: () => Promise<unknown>) {
     setBusy(true);
     try {
@@ -227,13 +229,24 @@ export function AttributeManager({
   async function removeOne(row: AttributeRow) {
     const warning =
       row.productCount > 0
-        ? `\n\n${formatNumber(row.productCount)} product${row.productCount === 1 ? ' uses' : 's use'} it, so the API will refuse until they stop.`
+        ? `\n\n${t.plural(
+            row.productCount,
+            '{count} product uses it, so the API will refuse until they stop.',
+            '{count} products use it, so the API will refuse until they stop.',
+          )}`
         : '';
-    if (!globalThis.confirm(`Delete “${row.name}” and its ${row.values.length} value(s)?${warning}`)) return;
-    await run('Attribute deleted.', () => api.delete(`/api/v1/admin/attributes/${row.id}`));
+    if (
+      !globalThis.confirm(
+        `${t('Delete “{name}” and its {count} value(s)?', { name: row.name, count: row.values.length })}${warning}`,
+      )
+    ) {
+      return;
+    }
+    await run(t('Attribute deleted.'), () => api.delete(`/api/v1/admin/attributes/${row.id}`));
   }
 
-  async function bulk(label: string, work: (row: AttributeRow) => Promise<unknown>) {
+  // `done` words the success toast for however many rows were chosen. i18n-ignore (a type argument, not text)
+  async function bulk(done: (count: number) => string, work: (row: AttributeRow) => Promise<unknown>) {
     const chosen = rows.filter((row) => selected.has(row.id));
     if (!chosen.length) return;
 
@@ -242,10 +255,17 @@ export function AttributeManager({
     const failed = results.filter((result) => result.status === 'rejected');
     setBusy(false);
 
-    if (failed.length === 0) toast.success(`${label} ${chosen.length} attribute${chosen.length === 1 ? '' : 's'}.`);
+    if (failed.length === 0) toast.success(done(chosen.length));
     else if (failed.length === chosen.length) {
       toast.error(errorMessage((failed[0] as PromiseRejectedResult).reason));
-    } else toast.error(`${chosen.length - failed.length} done, ${failed.length} refused — see each row.`);
+    } else {
+      toast.error(
+        t('{done} done, {refused} refused — see each row.', {
+          done: chosen.length - failed.length,
+          refused: failed.length,
+        }),
+      );
+    }
 
     refresh();
   }
@@ -256,11 +276,24 @@ export function AttributeManager({
 
     const inUse = chosen.filter((row) => row.productCount > 0).length;
     const note = inUse
-      ? `\n\n${inUse} of them ${inUse === 1 ? 'is' : 'are'} used by products and will be refused.`
+      ? `\n\n${t.plural(
+          inUse,
+          '{count} of them is used by products and will be refused.',
+          '{count} of them are used by products and will be refused.',
+        )}`
       : '';
-    if (!globalThis.confirm(`Delete ${chosen.length} attribute${chosen.length === 1 ? '' : 's'}?${note}`)) return;
+    if (
+      !globalThis.confirm(
+        `${t.plural(chosen.length, 'Delete {count} attribute?', 'Delete {count} attributes?')}${note}`,
+      )
+    ) {
+      return;
+    }
 
-    await bulk('Deleted', (row) => api.delete(`/api/v1/admin/attributes/${row.id}`));
+    await bulk(
+      (count) => t.plural(count, 'Deleted {count} attribute.', 'Deleted {count} attributes.'),
+      (row) => api.delete(`/api/v1/admin/attributes/${row.id}`),
+    );
   }
 
   // -------------------------------------------------------------- reorder
@@ -278,7 +311,7 @@ export function AttributeManager({
 
     ids.splice(to, 0, ids.splice(from, 1)[0]!);
 
-    await run('Order saved.', () =>
+    await run(t('Order saved.'), () =>
       api.patch('/api/v1/admin/attributes/reorder', {
         order: ids.map((id, index) => ({ id, sortOrder: index })),
       }),
@@ -328,38 +361,58 @@ export function AttributeManager({
     <TooltipProvider delayDuration={200}>
       <div className="space-y-6">
         <PageHeader
-          title="Attributes"
-          breadcrumb={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Attributes' }]}
+          title={t('Attributes')}
+          breadcrumb={[{ label: t('Dashboard'), href: '/dashboard' }, { label: t('Attributes') }]}
           actions={
             <>
               <Button variant="outline" onClick={exportCsv} disabled={visible.length === 0}>
-                <Download /> Export
+                <Download /> {t('Export')}
               </Button>
 
               {canManage ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" disabled={selected.size === 0 || busy}>
-                      Bulk Actions
-                      {selected.size ? <Badge variant="primary">{selected.size}</Badge> : null}
+                      {t('Bulk Actions')}
+                      {selected.size ? <Badge variant="primary">{t.number(selected.size)}</Badge> : null}
                       <ChevronDown />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuLabel>{selected.size} selected</DropdownMenuLabel>
+                    <DropdownMenuLabel>{t('{count} selected', { count: selected.size })}</DropdownMenuLabel>
                     <DropdownMenuItem
-                      onSelect={() => bulk('Offered as a filter', (row) => put(row, { isFilterable: true }))}
+                      onSelect={() =>
+                        bulk(
+                          (count) =>
+                            t.plural(
+                              count,
+                              'Offered as a filter {count} attribute.',
+                              'Offered as a filter {count} attributes.',
+                            ),
+                          (row) => put(row, { isFilterable: true }),
+                        )
+                      }
                     >
-                      <Filter /> Offer as a filter
+                      <Filter /> {t('Offer as a filter')}
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onSelect={() => bulk('Removed from filters', (row) => put(row, { isFilterable: false }))}
+                      onSelect={() =>
+                        bulk(
+                          (count) =>
+                            t.plural(
+                              count,
+                              'Removed from filters {count} attribute.',
+                              'Removed from filters {count} attributes.',
+                            ),
+                          (row) => put(row, { isFilterable: false }),
+                        )
+                      }
                     >
-                      <Filter /> Remove from filters
+                      <Filter /> {t('Remove from filters')}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem destructive onSelect={bulkDelete}>
-                      <Trash2 /> Delete
+                      <Trash2 /> {t('Delete')}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -367,7 +420,7 @@ export function AttributeManager({
 
               {canManage ? (
                 <Button onClick={() => setPanel({ open: true, row: null })}>
-                  <Plus /> Add Attribute
+                  <Plus /> {t('Add Attribute')}
                 </Button>
               ) : null}
             </>
@@ -379,32 +432,34 @@ export function AttributeManager({
           <StatCard
             icon={Boxes}
             tint="primary"
-            label="Total Attributes"
+            label={t('Total Attributes')}
             value={stats.total}
             note={
-              stats.unused > 0 ? `${formatNumber(stats.unused)} not used by any product` : 'All in use'
+              stats.unused > 0
+                ? t('{count} not used by any product', { count: stats.unused })
+                : t('All in use')
             }
           />
           <StatCard
             icon={SwatchBook}
             tint="success"
-            label="Buying Options"
+            label={t('Buying Options')}
             value={stats.variant}
-            note={`${formatNumber(stats.total - stats.variant)} descriptive only`}
+            note={t('{count} descriptive only', { count: stats.total - stats.variant })}
           />
           <StatCard
             icon={Filter}
             tint="warning"
-            label="Storefront Filters"
+            label={t('Storefront Filters')}
             value={stats.filterable}
-            note="Offered in the filter panel"
+            note={t('Offered in the filter panel')}
           />
           <StatCard
             icon={ListTree}
             tint="danger"
-            label="Total Values"
+            label={t('Total Values')}
             value={stats.values}
-            note="Choices across every attribute"
+            note={t('Choices across every attribute')}
           />
         </div>
 
@@ -425,8 +480,8 @@ export function AttributeManager({
             <Input
               value={term}
               onChange={(event) => setTerm(event.target.value)}
-              placeholder="Search attributes or values…"
-              aria-label="Search attributes"
+              placeholder={t('Search attributes or values…')}
+              aria-label={t('Search attributes')}
               className="pl-9"
             />
           </div>
@@ -434,41 +489,41 @@ export function AttributeManager({
           <select
             value={filters.kind}
             onChange={(event) => change('kind', event.target.value as AttributeFilterState['kind'])}
-            aria-label="Kind"
+            aria-label={t('Kind')}
             className={cn(SELECT_CLASS, 'lg:w-48')}
           >
-            <option value="all">All Kinds</option>
-            <option value="variant">Buying options</option>
-            <option value="descriptive">Descriptive only</option>
+            <option value="all">{t('All Kinds')}</option>
+            <option value="variant">{t('Buying options')}</option>
+            <option value="descriptive">{t('Descriptive only')}</option>
           </select>
 
           <select
             value={filters.filterable}
             onChange={(event) => change('filterable', event.target.value as AttributeFilterState['filterable'])}
-            aria-label="Filterable"
+            aria-label={t('Filterable')}
             className={cn(SELECT_CLASS, 'lg:w-44')}
           >
-            <option value="all">Filter or not</option>
-            <option value="yes">Offered as filter</option>
-            <option value="no">Not a filter</option>
+            <option value="all">{t('Filter or not')}</option>
+            <option value="yes">{t('Offered as filter')}</option>
+            <option value="no">{t('Not a filter')}</option>
           </select>
 
           <select
             value={filters.inputType}
             onChange={(event) => change('inputType', event.target.value as AttributeFilterState['inputType'])}
-            aria-label="Shown as"
+            aria-label={t('Shown as')}
             className={cn(SELECT_CLASS, 'lg:w-40')}
           >
-            <option value="all">All Types</option>
-            <option value="select">List</option>
-            <option value="color">Swatches</option>
-            <option value="text">Free text</option>
-            <option value="number">Number</option>
+            <option value="all">{t('All Types')}</option>
+            <option value="select">{t(INPUT_LABEL.select)}</option>
+            <option value="color">{t(INPUT_LABEL.color)}</option>
+            <option value="text">{t(INPUT_LABEL.text)}</option>
+            <option value="number">{t(INPUT_LABEL.number)}</option>
           </select>
 
           <div className="flex items-center gap-2 lg:ml-auto">
             <Button type="submit" variant="outline">
-              <SlidersHorizontal /> Filter
+              <SlidersHorizontal /> {t('Filter')}
             </Button>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -481,12 +536,12 @@ export function AttributeManager({
                     setTerm('');
                     setPage(1);
                   }}
-                  aria-label="Reset filters"
+                  aria-label={t('Reset filters')}
                 >
                   <RotateCcw />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Reset filters</TooltipContent>
+              <TooltipContent>{t('Reset filters')}</TooltipContent>
             </Tooltip>
           </div>
         </form>
@@ -510,30 +565,35 @@ export function AttributeManager({
                         return next;
                       })
                     }
-                    aria-label="Select every attribute on this page"
+                    aria-label={t('Select every attribute on this page')}
                   />
                 </TableHead>
-                <TableHead className="w-56">Attribute</TableHead>
-                <TableHead>Values</TableHead>
-                <TableHead className="w-28 text-right">Products</TableHead>
+                <TableHead className="w-56">{t('Attribute')}</TableHead>
+                <TableHead>{t('Values')}</TableHead>
+                <TableHead className="w-28 text-right">{t('Products')}</TableHead>
                 <TableHead className="w-52">
                   <span className="inline-flex items-center gap-1.5">
-                    Kind
+                    {t('Kind')}
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <button type="button" aria-label="What these badges mean">
+                        <button type="button" aria-label={t('What these badges mean')}>
                           <Info className="size-3.5" aria-hidden />
                         </button>
                       </TooltipTrigger>
                       <TooltipContent className="max-w-72">
-                        <b>Buying option</b> — picking a value selects a different thing to buy, with its own SKU,
-                        price and stock. <b>Descriptive</b> — it only narrows a listing. <b>Filter</b> — offered in
-                        the storefront’s filter panel.
+                        {t.rich(
+                          '{buyingOption} — picking a value selects a different thing to buy, with its own SKU, price and stock. {descriptive} — it only narrows a listing. {filter} — offered in the storefront’s filter panel.',
+                          {
+                            buyingOption: <b>{t('Buying option')}</b>,
+                            descriptive: <b>{t('Descriptive')}</b>,
+                            filter: <b>{t('Filter')}</b>,
+                          },
+                        )}
                       </TooltipContent>
                     </Tooltip>
                   </span>
                 </TableHead>
-                <TableHead className="w-28 text-right">Actions</TableHead>
+                <TableHead className="w-28 text-right">{t('Actions')}</TableHead>
               </TableRow>
             </TableHeader>
 
@@ -541,8 +601,8 @@ export function AttributeManager({
               {pageRows.length === 0 ? (
                 <TableEmpty colSpan={7}>
                   {rows.length === 0
-                    ? 'No attributes yet. Add one to give products options like size or colour.'
-                    : 'No attribute matches these filters.'}
+                    ? t('No attributes yet. Add one to give products options like size or colour.')
+                    : t('No attribute matches these filters.')}
                 </TableEmpty>
               ) : (
                 pageRows.map((row) => {
@@ -578,8 +638,8 @@ export function AttributeManager({
                             }}
                             role="button"
                             tabIndex={-1}
-                            aria-label={`Reorder ${row.name}`}
-                            title="Drag to reorder"
+                            aria-label={t('Reorder {name}', { name: row.name })}
+                            title={t('Drag to reorder')}
                             className="grid size-6 cursor-grab place-items-center text-muted-foreground active:cursor-grabbing"
                           >
                             <GripVertical className="size-4" aria-hidden />
@@ -602,7 +662,7 @@ export function AttributeManager({
                               return next;
                             })
                           }
-                          aria-label={`Select ${row.name}`}
+                          aria-label={t('Select {name}', { name: row.name })}
                         />
                       </TableCell>
 
@@ -631,8 +691,8 @@ export function AttributeManager({
                               ) : null}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {INPUT_LABEL[row.inputType]} · {row.values.length} value
-                              {row.values.length === 1 ? '' : 's'}
+                              {t(INPUT_LABEL[row.inputType])} ·{' '}
+                              {t.plural(row.values.length, '{count} value', '{count} values')}
                             </p>
                           </div>
                         </div>
@@ -640,7 +700,7 @@ export function AttributeManager({
 
                       <TableCell>
                         {row.values.length === 0 ? (
-                          <span className="text-xs text-muted-foreground">No values yet.</span>
+                          <span className="text-xs text-muted-foreground">{t('No values yet.')}</span>
                         ) : (
                           <div className="flex flex-wrap items-center gap-1.5">
                             {shown.map((value) => (
@@ -657,7 +717,7 @@ export function AttributeManager({
                             ))}
                             {row.values.length > shown.length ? (
                               <span className="text-xs text-muted-foreground">
-                                +{row.values.length - shown.length} more
+                                {t('+{count} more', { count: row.values.length - shown.length })}
                               </span>
                             ) : null}
                           </div>
@@ -665,15 +725,15 @@ export function AttributeManager({
                       </TableCell>
 
                       <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {formatNumber(row.productCount)}
+                        {t.number(row.productCount)}
                       </TableCell>
 
                       <TableCell>
                         <div className="flex flex-wrap items-center gap-1.5">
                           <Badge variant={row.isVariantAttribute ? 'success' : 'neutral'}>
-                            {row.isVariantAttribute ? 'Buying option' : 'Descriptive'}
+                            {row.isVariantAttribute ? t('Buying option') : t('Descriptive')}
                           </Badge>
-                          {row.isFilterable ? <Badge variant="info">Filter</Badge> : null}
+                          {row.isFilterable ? <Badge variant="info">{t('Filter')}</Badge> : null}
                         </div>
                       </TableCell>
 
@@ -686,18 +746,22 @@ export function AttributeManager({
                                   <Button
                                     variant="ghost"
                                     size="icon-sm"
-                                    aria-label={`Edit ${row.name}`}
+                                    aria-label={t('Edit {name}', { name: row.name })}
                                     onClick={() => setPanel({ open: true, row })}
                                   >
                                     <Pencil />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>Edit and manage values</TooltipContent>
+                                <TooltipContent>{t('Edit and manage values')}</TooltipContent>
                               </Tooltip>
 
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon-sm" aria-label={`More actions for ${row.name}`}>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={t('More actions for {name}', { name: row.name })}
+                                  >
                                     <MoreVertical />
                                   </Button>
                                 </DropdownMenuTrigger>
@@ -705,17 +769,17 @@ export function AttributeManager({
                                   <DropdownMenuItem
                                     onSelect={() =>
                                       void run(
-                                        row.isFilterable ? 'Removed from filters.' : 'Offered as a filter.',
+                                        row.isFilterable ? t('Removed from filters.') : t('Offered as a filter.'),
                                         () => put(row, { isFilterable: !row.isFilterable }),
                                       )
                                     }
                                   >
                                     <Filter />
-                                    {row.isFilterable ? 'Remove from filters' : 'Offer as a filter'}
+                                    {row.isFilterable ? t('Remove from filters') : t('Offer as a filter')}
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem destructive onSelect={() => void removeOne(row)}>
-                                    <Trash2 /> Delete
+                                    <Trash2 /> {t('Delete')}
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
@@ -735,10 +799,16 @@ export function AttributeManager({
         <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
           <p className="text-sm text-muted-foreground">
             {visible.length === 0
-              ? 'No attributes to show'
-              : `Showing ${formatNumber((safePage - 1) * pageSize + 1)} to ${formatNumber(
-                  Math.min(safePage * pageSize, visible.length),
-                )} of ${formatNumber(visible.length)} attribute${visible.length === 1 ? '' : 's'}`}
+              ? t('No attributes to show')
+              : t.plural(
+                  visible.length,
+                  'Showing {from} to {to} of {count} attribute',
+                  'Showing {from} to {to} of {count} attributes',
+                  {
+                    from: (safePage - 1) * pageSize + 1,
+                    to: Math.min(safePage * pageSize, visible.length),
+                  },
+                )}
           </p>
 
           <div className="flex items-center gap-3">
@@ -748,12 +818,12 @@ export function AttributeManager({
                 setPageSize(Number(event.target.value));
                 setPage(1);
               }}
-              aria-label="Attributes per page"
+              aria-label={t('Attributes per page')}
               className={cn(SELECT_CLASS, 'h-9 w-36')}
             >
               {PAGE_SIZES.map((size) => (
                 <option key={size} value={size}>
-                  {size} per page
+                  {t('{count} per page', { count: size })}
                 </option>
               ))}
             </select>
@@ -764,7 +834,7 @@ export function AttributeManager({
                 size="icon-sm"
                 onClick={() => setPage(safePage - 1)}
                 disabled={safePage <= 1}
-                aria-label="Previous page"
+                aria-label={t('Previous page')}
               >
                 <ChevronLeft />
               </Button>
@@ -781,7 +851,7 @@ export function AttributeManager({
                     onClick={() => setPage(entry)}
                     aria-current={entry === safePage ? 'page' : undefined}
                   >
-                    {entry}
+                    {t.number(entry)}
                   </Button>
                 ),
               )}
@@ -790,7 +860,7 @@ export function AttributeManager({
                 size="icon-sm"
                 onClick={() => setPage(safePage + 1)}
                 disabled={safePage >= totalPages}
-                aria-label="Next page"
+                aria-label={t('Next page')}
               >
                 <ChevronRight />
               </Button>

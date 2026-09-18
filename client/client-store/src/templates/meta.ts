@@ -1,3 +1,5 @@
+import type { MessageKey } from '@/lib/i18n';
+
 /**
  * Template identity and display metadata — the client-safe half of the registry.
  *
@@ -67,8 +69,13 @@ export function normaliseTemplateKey(key: string | null | undefined): TemplateKe
     : DEFAULT_TEMPLATE;
 }
 
-/** Display metadata, for the design picker and for previews. */
-export const TEMPLATE_META: Record<TemplateKey, { name: string; description: string }> = {
+/**
+ * Display metadata, for the design picker and for previews.
+ *
+ * The names are the platform's design names and are the same in every language;
+ * the description is copy, and is a dictionary key the picker translates.
+ */
+export const TEMPLATE_META: Record<TemplateKey, { name: string; description: MessageKey }> = {
   marketplace: {
     name: 'Marketplace',
     description: 'Dense, search-led layout for large multi-category catalogues.',

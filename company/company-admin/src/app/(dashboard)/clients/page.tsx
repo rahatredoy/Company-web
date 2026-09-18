@@ -39,7 +39,7 @@ export const metadata: Metadata = { title: 'Clients' };
  * fact on screen and fits the row inside the page. Badges run a size smaller
  * because two of them now share a cell.
  */
-const CELL_BADGE = 'px-1.5 py-0 text-[11px]';
+const CELL_BADGE = 'px-1.5 py-0 text-[10.5px]';
 
 const STATUS_FILTERS = [
   { value: 'all', label: 'All' },
@@ -108,14 +108,14 @@ export default async function ClientsPage({
                           <span className="block truncate font-medium hover:text-primary">
                             {client.businessName}
                           </span>
-                          <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                          <span className="block truncate font-mono text-[10.5px] text-muted-foreground">
                             {client.tenantId ?? 'no tenant yet'}
                           </span>
                         </Link>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         <span className="block max-w-36 truncate">{client.ownerName}</span>
-                        <span className="block text-[11px] text-muted-foreground">{client.phone ?? '—'}</span>
+                        <span className="block text-[10.5px] text-muted-foreground">{client.phone ?? '—'}</span>
                       </TableCell>
                       {/*
                         Two different logins: the website account, and the store
@@ -125,7 +125,7 @@ export default async function ClientsPage({
                         narrow enough to truncate the long ones.
                       */}
                       <TableCell>
-                        <dl className="max-w-52 min-w-0 space-y-0.5 text-[11px]">
+                        <dl className="max-w-52 min-w-0 space-y-0.5 text-[10.5px]">
                           <div className="flex gap-1.5" title={client.email}>
                             <dt className="w-9 shrink-0 text-muted-foreground">Web</dt>
                             <dd className="truncate">{client.email}</dd>
@@ -165,7 +165,7 @@ export default async function ClientsPage({
                         {client.trialStatus ? (
                           <>
                             <StatusBadge status={client.trialStatus} className={CELL_BADGE} />
-                            <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                            <span className="mt-0.5 block text-[10.5px] text-muted-foreground">
                               {formatDate(client.trialEndsAt)}
                             </span>
                           </>
@@ -180,7 +180,7 @@ export default async function ClientsPage({
                           <span className="text-muted-foreground">—</span>
                         )}
                         <span
-                          className="mt-0.5 block max-w-40 truncate text-[11px] text-muted-foreground"
+                          className="mt-0.5 block max-w-40 truncate text-[10.5px] text-muted-foreground"
                           title={client.domain ?? undefined}
                         >
                           {client.domain ?? 'no domain'}
@@ -196,7 +196,7 @@ export default async function ClientsPage({
                       <TableCell className="whitespace-nowrap">
                         <span className="block">{formatDate(client.registeredAt)}</span>
                         <span
-                          className="block text-[11px] text-muted-foreground"
+                          className="block text-[10.5px] text-muted-foreground"
                           title={client.lastLoginAt ? formatDateTime(client.lastLoginAt) : undefined}
                         >
                           {client.lastLoginAt
@@ -206,7 +206,7 @@ export default async function ClientsPage({
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         <StatusBadge status={client.accountStatus} className={CELL_BADGE} />
-                        <span className="mt-0.5 block text-[11px] font-medium">
+                        <span className="mt-0.5 block text-[10.5px] font-medium">
                           {client.amount ? formatMoney(client.amount, client.currency) : '—'}
                         </span>
                       </TableCell>

@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/toaster';
+import { useT } from '@/lib/i18n';
 
 const LIMIT = 12;
 
@@ -47,6 +48,7 @@ export function ProductGallery({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const t = useT();
   const fileRef = React.useRef<HTMLInputElement>(null);
 
   const [rows, setRows] = React.useState<Draft[]>(() =>
@@ -95,14 +97,14 @@ export function ProductGallery({
           | null;
 
         if (!response.ok || !payload?.data?.url) {
-          setError(payload?.message ?? `${file.name} could not be uploaded.`);
+          setError(payload?.message ?? t('{file} could not be uploaded.', { file: file.name }));
           continue;
         }
 
         const url = payload.data.url;
         setRows((current) => [...current, { key: nextKey(), url, altText: '' }]);
       } catch (caught) {
-        setError(errorMessage(caught, 'We could not reach the store. Try again.'));
+        setError(errorMessage(caught, t('We could not reach the store. Try again.')));
       }
     }
 
@@ -126,7 +128,7 @@ export function ProductGallery({
 
     try {
       await api.put(`/api/v1/admin/products/${productId}/media`, { media: payload });
-      toast.success(payload.length === 0 ? 'Gallery cleared.' : 'Gallery saved.');
+      toast.success(payload.length === 0 ? t('Gallery cleared.') : t('Gallery saved.'));
       router.refresh();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -138,10 +140,12 @@ export function ProductGallery({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Gallery</CardTitle>
+        <CardTitle>{t('Gallery')}</CardTitle>
         <CardDescription>
-          Extra pictures shown on the product page, in this order. Up to {LIMIT}. The main image is set on the
-          form above.
+          {t(
+            'Extra pictures shown on the product page, in this order. Up to {limit}. The main image is set on the form above.',
+            { limit: LIMIT },
+          )}
         </CardDescription>
       </CardHeader>
 
@@ -151,7 +155,7 @@ export function ProductGallery({
         {rows.length === 0 ? (
           <div className="grid place-items-center gap-2 rounded-lg border border-dashed py-10 text-sm text-muted-foreground">
             <ImagePlus className="size-6" aria-hidden />
-            No gallery images yet.
+            {t('No gallery images yet.')}
           </div>
         ) : (
           <ul className="space-y-3">
@@ -170,16 +174,17 @@ export function ProductGallery({
                   <Input
                     value={row.url}
                     onChange={(event) => patch(row.key, { url: event.target.value })}
+                    // i18n-ignore — an address format, not language
                     placeholder="https://…"
-                    aria-label={`Image ${index + 1} address`}
+                    aria-label={t('Image {number} address', { number: index + 1 })}
                     disabled={!canManage}
                   />
                   <Input
                     value={row.altText}
                     onChange={(event) => patch(row.key, { altText: event.target.value })}
-                    placeholder="Describe the picture — read aloud by screen readers"
+                    placeholder={t('Describe the picture — read aloud by screen readers')}
                     maxLength={200}
-                    aria-label={`Image ${index + 1} description`}
+                    aria-label={t('Image {number} description', { number: index + 1 })}
                     disabled={!canManage}
                   />
                 </div>
@@ -192,7 +197,7 @@ export function ProductGallery({
                       size="icon-sm"
                       onClick={() => move(index, -1)}
                       disabled={index === 0}
-                      aria-label="Move up"
+                      aria-label={t('Move up')}
                     >
                       <ArrowUp aria-hidden />
                     </Button>
@@ -202,7 +207,7 @@ export function ProductGallery({
                       size="icon-sm"
                       onClick={() => move(index, 1)}
                       disabled={index === rows.length - 1}
-                      aria-label="Move down"
+                      aria-label={t('Move down')}
                     >
                       <ArrowDown aria-hidden />
                     </Button>
@@ -211,7 +216,7 @@ export function ProductGallery({
                       variant="ghost"
                       size="icon-sm"
                       onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))}
-                      aria-label="Remove image"
+                      aria-label={t('Remove image')}
                     >
                       <Trash2 aria-hidden />
                     </Button>
@@ -241,7 +246,7 @@ export function ProductGallery({
               disabled={uploading || rows.length >= LIMIT}
             >
               {uploading ? <Loader2 className="animate-spin" aria-hidden /> : <Upload aria-hidden />}
-              {uploading ? 'Uploading…' : 'Upload images'}
+              {uploading ? t('Uploading…') : t('Upload images')}
             </Button>
             <Button
               type="button"
@@ -250,10 +255,10 @@ export function ProductGallery({
               onClick={addBlank}
               disabled={rows.length >= LIMIT}
             >
-              Paste an address
+              {t('Paste an address')}
             </Button>
             <Button type="button" size="sm" className="ml-auto" onClick={save} loading={saving}>
-              Save gallery
+              {t('Save gallery')}
             </Button>
           </div>
         ) : null}

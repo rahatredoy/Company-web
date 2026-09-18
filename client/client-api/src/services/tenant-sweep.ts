@@ -64,28 +64,23 @@ async function eachReadyTenant(
 }
 
 /**
- * Deletes sessions that can no longer authenticate.
+ * Tidies the session index.
  *
- * `customer_sessions` is the one that grows: a store admin signs in once a day,
- * while every shopper login leaves a row. Nothing deleted them before this
- * sweep existed, so the table only ever got longer.
+ * There is nothing to delete any more: a session is a Redis record that expires
+ * exactly when its token does, so an expired session removes itself. What
+ * outlives it is the per-principal index that "sign out everywhere" reads, which
+ * keeps naming records that are already gone — that is what this prunes.
+ *
+ * It no longer visits the stores one at a time. The keys are tenant-scoped
+ * already, so one pass over the shared Redis covers every store at once and a
+ * suspended or unreachable tenant cannot make the sweep fail.
  */
 export async function sweepSessions(): Promise<SweepResult> {
-  let admin = 0;
-  let customer = 0;
+  const pruned = await purgeExpiredSessions();
 
-  const result = await eachReadyTenant(async (_tenant, db) => {
-    const removed = await purgeExpiredSessions(db);
-    admin += removed.admin;
-    customer += removed.customer;
-  });
+  logger.info({ pruned }, 'session index swept');
 
-  logger.info(
-    { stores: result.visited, adminSessions: admin, customerSessions: customer, failed: result.failed },
-    'expired sessions swept',
-  );
-
-  return { ...result, detail: { adminSessions: admin, customerSessions: customer } };
+  return { visited: 0, skipped: 0, failed: 0, detail: { prunedIndexEntries: pruned } };
 }
 
 /**

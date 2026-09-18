@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { useDetail } from '@/hooks/use-detail';
-import { formatDateTime, formatNumber, titleCase } from '@/lib/format';
+import { useT, type MessageKey } from '@/lib/i18n';
 import type { BannerRow, BannerView } from '@/lib/types';
 import {
   DetailBool,
@@ -15,6 +15,15 @@ import {
   DetailStorefrontLink,
 } from './detail-sheet';
 import { LazyImage } from './lazy-image';
+
+/** The placement, in the words `titleCase` used to make of the enum. */
+const POSITION_LABEL: Record<BannerRow['position'], MessageKey> = {
+  home_hero: 'Home Hero',
+  home_promo: 'Home Promo',
+  category_top: 'Category Top',
+  sidebar: 'Sidebar',
+  popup: 'Popup',
+};
 
 /**
  * Whether a banner's window has opened or closed yet.
@@ -30,13 +39,14 @@ import { LazyImage } from './lazy-image';
  * for anything that has to tick.
  */
 function ScheduleBadges({ startsAt, endsAt }: { startsAt: string | null; endsAt: string | null }) {
+  const t = useT();
   const [now] = React.useState(() => Date.now());
 
   if (startsAt && new Date(startsAt).getTime() > now) {
-    return <StatusBadge status="queued" label="Not started" />;
+    return <StatusBadge status="queued" label={t('Not started')} />;
   }
   if (endsAt && new Date(endsAt).getTime() < now) {
-    return <StatusBadge status="expired" label="Finished" />;
+    return <StatusBadge status="expired" label={t('Finished')} />;
   }
   return null;
 }
@@ -61,6 +71,7 @@ export function BannerDetail({
   onOpenChange: (open: boolean) => void;
   storefrontBase: string | null;
 }) {
+  const t = useT();
   const detail = useDetail<BannerView>({
     path: '/api/v1/admin/banners',
     id: row?.id ?? null,
@@ -73,8 +84,10 @@ export function BannerDetail({
     <DetailSheet
       open={open}
       onOpenChange={onOpenChange}
-      title={banner?.title ?? row?.title ?? 'Banner'}
-      subtitle={banner ? titleCase(banner.position) : row ? titleCase(row.position) : undefined}
+      title={banner?.title ?? row?.title ?? t('Banner')}
+      subtitle={
+        banner ? t(POSITION_LABEL[banner.position]) : row ? t(POSITION_LABEL[row.position]) : undefined
+      }
       badge={
         banner ? (
           <>
@@ -86,55 +99,55 @@ export function BannerDetail({
       loading={detail.loading}
       error={detail.error}
       onRetry={detail.reload}
-      footer={storefrontBase ? <DetailStorefrontLink href={storefrontBase} label="Open the shop" /> : null}
+      footer={storefrontBase ? <DetailStorefrontLink href={storefrontBase} label={t('Open the shop')} /> : null}
     >
       {banner ? (
         <div className="space-y-6">
-          <DetailSection title="Artwork">
+          <DetailSection title={t('Artwork')}>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Desktop</p>
+                <p className="text-xs text-muted-foreground">{t('Desktop')}</p>
                 <a href={banner.imageUrl} target="_blank" rel="noreferrer">
                   <LazyImage
                     src={banner.imageUrl}
                     alt=""
                     className="h-32 w-full rounded-lg border border-border bg-muted"
-                    fallback={<span className="text-xs text-muted-foreground">No image</span>}
+                    fallback={<span className="text-xs text-muted-foreground">{t('No image')}</span>}
                   />
                 </a>
               </div>
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Phone</p>
+                <p className="text-xs text-muted-foreground">{t('Phone')}</p>
                 {banner.mobileImageUrl ? (
                   <a href={banner.mobileImageUrl} target="_blank" rel="noreferrer">
                     <LazyImage
                       src={banner.mobileImageUrl}
                       alt=""
                       className="h-32 w-full rounded-lg border border-border bg-muted"
-                      fallback={<span className="text-xs text-muted-foreground">No image</span>}
+                      fallback={<span className="text-xs text-muted-foreground">{t('No image')}</span>}
                     />
                   </a>
                 ) : (
                   <div className="grid h-32 w-full place-items-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
-                    The desktop artwork is used
+                    {t('The desktop artwork is used')}
                   </div>
                 )}
               </div>
             </div>
           </DetailSection>
 
-          <DetailSection title="Content">
+          <DetailSection title={t('Content')}>
             <DetailGrid>
-              <DetailField label="Title" value={banner.title} />
-              <DetailField label="Subtitle" value={banner.subtitle} />
-              <DetailField label="Button" value={banner.buttonLabel} />
+              <DetailField label={t('Title')} value={banner.title} />
+              <DetailField label={t('Subtitle')} value={banner.subtitle} />
+              <DetailField label={t('Button')} value={banner.buttonLabel} />
               {/* Where it actually goes, which is the category when one is
                   chosen — `resolveBanners` resolves it to `/category/<slug>`
                   and it outranks the typed address. Both are shown rather than
                   only the winner, because a banner carrying a stale path is
                   worth seeing before it becomes the destination again. */}
               <DetailField
-                label="Opens"
+                label={t('Opens')}
                 value={
                   banner.categorySlug ? (
                     <span className="break-all">
@@ -144,52 +157,56 @@ export function BannerDetail({
                     <span className="break-all">{banner.linkUrl}</span>
                   ) : null
                 }
-                hint={banner.categorySlug || banner.linkUrl ? undefined : 'Not clickable.'}
+                hint={banner.categorySlug || banner.linkUrl ? undefined : t('Not clickable.')}
                 full
               />
               <DetailField
-                label="Typed address"
+                label={t('Typed address')}
                 value={banner.linkUrl ? <span className="break-all">{banner.linkUrl}</span> : null}
                 hint={
                   banner.categorySlug && banner.linkUrl
-                    ? 'Kept, but the category above is what it opens.'
+                    ? t('Kept, but the category above is what it opens.')
                     : undefined
                 }
                 full
               />
-              <DetailField label="Desktop image" value={<span className="break-all">{banner.imageUrl}</span>} full />
               <DetailField
-                label="Phone image"
+                label={t('Desktop image')}
+                value={<span className="break-all">{banner.imageUrl}</span>}
+                full
+              />
+              <DetailField
+                label={t('Phone image')}
                 value={banner.mobileImageUrl ? <span className="break-all">{banner.mobileImageUrl}</span> : null}
                 full
               />
             </DetailGrid>
           </DetailSection>
 
-          <DetailSection title="Where and when">
+          <DetailSection title={t('Where and when')}>
             <DetailGrid>
-              <DetailField label="Position" value={titleCase(banner.position)} />
+              <DetailField label={t('Position')} value={t(POSITION_LABEL[banner.position])} />
               <DetailField
-                label="Category"
+                label={t('Category')}
                 value={banner.categoryName}
-                hint={banner.categoryName ? 'Where clicking it goes.' : 'It opens no category.'}
+                hint={banner.categoryName ? t('Where clicking it goes.') : t('It opens no category.')}
               />
-              <DetailField label="Category ID" value={<DetailId value={banner.categoryId} />} />
-              <DetailField label="Order in its slot" value={formatNumber(banner.sortOrder)} />
-              <DetailField label="Active" value={<DetailBool value={banner.isActive} />} />
+              <DetailField label={t('Category ID')} value={<DetailId value={banner.categoryId} />} />
+              <DetailField label={t('Order in its slot')} value={t.number(banner.sortOrder)} />
+              <DetailField label={t('Active')} value={<DetailBool value={banner.isActive} />} />
               <DetailField
-                label="Starts"
-                value={formatDateTime(banner.startsAt)}
-                hint={banner.startsAt ? undefined : 'Live as soon as it is active.'}
+                label={t('Starts')}
+                value={t.dateTime(banner.startsAt)}
+                hint={banner.startsAt ? undefined : t('Live as soon as it is active.')}
               />
               <DetailField
-                label="Ends"
-                value={formatDateTime(banner.endsAt)}
-                hint={banner.endsAt ? undefined : 'Runs until it is switched off.'}
+                label={t('Ends')}
+                value={t.dateTime(banner.endsAt)}
+                hint={banner.endsAt ? undefined : t('Runs until it is switched off.')}
               />
-              <DetailField label="Banner ID" value={<DetailId value={banner.id} />} />
-              <DetailField label="Created" value={formatDateTime(banner.createdAt)} />
-              <DetailField label="Updated" value={formatDateTime(banner.updatedAt)} />
+              <DetailField label={t('Banner ID')} value={<DetailId value={banner.id} />} />
+              <DetailField label={t('Created')} value={t.dateTime(banner.createdAt)} />
+              <DetailField label={t('Updated')} value={t.dateTime(banner.updatedAt)} />
             </DetailGrid>
           </DetailSection>
         </div>

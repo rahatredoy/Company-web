@@ -1,7 +1,7 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { contactMessages, faqs, newsletterSubscribers, pages } from '../../db/schema/index';
+import { contactMessages, faqs, pages } from '../../db/schema/index';
 import { CACHE_TTL, cached, tenantKey } from '../../lib/cache';
 import { notFound } from '../../lib/errors';
 import { clientIp, noContent, ok, parseBody, parseParams } from '../../lib/http';
@@ -9,10 +9,6 @@ import { storeOf } from '../../plugins/tenant';
 import type { CmsPageView, FaqView } from './types';
 
 const slugParamSchema = z.object({ slug: z.string().trim().min(1).max(220) });
-
-const newsletterSchema = z.object({
-  email: z.string().trim().toLowerCase().email('Enter a valid email address.').max(254),
-});
 
 const contactSchema = z.object({
   name: z.string().trim().min(1, 'Tell us your name.').max(140),
@@ -98,32 +94,6 @@ export default async function contentRoutes(app: FastifyInstance) {
 
     return ok(reply, list);
   });
-
-  app.post(
-    '/newsletter',
-    {
-      config: { rateLimit: { max: 5, timeWindow: '10 minutes' } },
-    },
-    async (request, reply) => {
-      const store = storeOf(request);
-      const { email } = parseBody(newsletterSchema, request.body);
-
-      /*
-       * Re-subscribing is an update, never a second row, and the response is the
-       * same either way. Telling an anonymous caller "already subscribed" turns
-       * this endpoint into a way to test whether an address shops here.
-       */
-      await store.db
-        .insert(newsletterSubscribers)
-        .values({ email, source: 'storefront' })
-        .onConflictDoUpdate({
-          target: newsletterSubscribers.email,
-          set: { status: 'subscribed', unsubscribedAt: null, subscribedAt: sql`now()` },
-        });
-
-      return noContent(reply);
-    },
-  );
 
   app.post(
     '/contact',

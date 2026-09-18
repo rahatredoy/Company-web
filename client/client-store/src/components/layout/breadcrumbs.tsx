@@ -1,6 +1,4 @@
-import Link from 'next/link';
-import { ChevronRight } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
 
 export interface Crumb {
   label: string;
@@ -8,62 +6,23 @@ export interface Crumb {
 }
 
 /**
- * Breadcrumb trail.
+ * Breadcrumb structured data — and only the structured data.
  *
- * Rendered as an ordered list inside a labelled `nav`, with the current page
- * marked `aria-current` and not linked — a breadcrumb whose last item links to
- * the page you are already on is a control that does nothing.
+ * The visible trails were removed from every page: "Home / Electronics" above
+ * a page a visitor reached by clicking Electronics restated the click they had
+ * just made, and did it across the top of the screen where the products go.
+ * The header's back button answers the one question the trail was actually
+ * good for, from a fixed position, on every page.
  *
- * The separators are `aria-hidden`: a screen reader announces list structure
- * already, and reading "chevron right" between every crumb is noise.
+ * A crawler has neither a back button nor the click, so it still gets the
+ * hierarchy — the markup costs no space and search results render it as the
+ * path under the title.
  */
-export function Breadcrumbs({ items, className }: { items: Crumb[]; className?: string }) {
-  if (items.length === 0) return null;
-
-  return (
-    <nav aria-label="Breadcrumb" className={cn('min-w-0', className)}>
-      <ol className="flex flex-wrap items-center gap-1 text-xs text-muted sm:text-sm">
-        <li className="flex items-center gap-1">
-          <Link href="/" className="hover:text-primary">
-            Home
-          </Link>
-          <ChevronRight className="size-3.5 shrink-0 text-subtle" aria-hidden />
-        </li>
-
-        {items.map((item, index) => {
-          const last = index === items.length - 1;
-
-          return (
-            <li key={`${item.label}-${index}`} className="flex min-w-0 items-center gap-1">
-              {item.href && !last ? (
-                <Link href={item.href} className="hover:text-primary">
-                  {item.label}
-                </Link>
-              ) : (
-                <span aria-current={last ? 'page' : undefined} className={cn(last && 'truncate text-foreground')}>
-                  {item.label}
-                </span>
-              )}
-
-              {!last ? <ChevronRight className="size-3.5 shrink-0 text-subtle" aria-hidden /> : null}
-            </li>
-          );
-        })}
-      </ol>
-    </nav>
-  );
-}
-
-/**
- * Breadcrumb structured data.
- *
- * Emitted separately from the visual trail so the JSON-LD carries absolute
- * URLs — search engines need them fully qualified, while the links on the page
- * should stay relative.
- */
-export function BreadcrumbJsonLd({ items, origin }: { items: Crumb[]; origin: string }) {
+export async function BreadcrumbJsonLd({ items, origin }: { items: Crumb[]; origin: string }) {
+  // In the language the page is in: a search result prints this path under a title in that language.
+  const t = await getT();
   const listItems = [
-    { name: 'Home', href: '/' },
+    { name: t('Home'), href: '/' },
     ...items.filter((item) => item.href).map((item) => ({ name: item.label, href: item.href! })),
   ];
 

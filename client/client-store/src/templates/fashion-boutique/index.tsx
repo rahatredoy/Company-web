@@ -1,10 +1,12 @@
 import { ShieldCheck } from 'lucide-react';
 import type { StoreConfig } from '@/types';
 import type { StorefrontTemplate, TemplateChromeProps, TemplateHomepageProps, TemplatePreset } from '../registry';
+import { TEMPLATE_META } from '../meta';
 import { StoreLogo } from '../chrome';
 import { AnnouncementBar } from '@/components/layout/announcement-bar';
 import { HeaderActions } from '@/components/layout/header-actions';
 import { MobileNav } from '@/components/layout/mobile-nav';
+import { BackButton } from '@/components/layout/back-button';
 import { SearchBox } from '@/components/layout/search-box';
 import { MegaMenu } from '@/components/layout/mega-menu';
 import { CategoryMenuButton } from '@/components/layout/category-menu-button';
@@ -13,6 +15,7 @@ import { BENEFIT_ICONS } from '@/components/sections/benefits-strip';
 import { HomepageSections } from '@/sections/section-renderer';
 import { readBenefits, type BenefitItem } from '@/sections/parse';
 import { cn } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
 
 /**
  * Fashion Boutique — editorial, photographic, collection-led.
@@ -43,27 +46,30 @@ const preset: TemplatePreset = {
   sectionRhythm: 'airy',
 };
 
-function Header({ config }: TemplateChromeProps) {
+async function Header({ config }: TemplateChromeProps) {
+  const t = await getT();
+
   return (
     <header className="sticky top-0 z-40 bg-surface shadow-[var(--shadow-header)]">
       <AnnouncementBar announcement={config.announcement} />
 
       <div className="container-store flex h-[4.5rem] items-center gap-5">
         <MobileNav config={config} />
+        <BackButton />
         <StoreLogo config={config} serif priority />
 
         <MegaMenu
           config={config}
           style={preset.megaMenu}
           className="flex-1 justify-center"
-          linkClassName="uppercase tracking-[0.08em] text-[13px]"
+          linkClassName="uppercase tracking-[0.08em] text-[12px]"
         />
 
         <div className="ml-auto flex items-center gap-2">
           <SearchBox
             variant="inline"
             className="hidden w-56 xl:block"
-            placeholder="Search for products…"
+            placeholder={t('Search for products…')}
           />
           <SearchBox variant="icon" className="hidden lg:block xl:hidden" />
           <HeaderActions locale={config.store.language} />
@@ -93,7 +99,10 @@ function Header({ config }: TemplateChromeProps) {
  * replaced by invented ones. Now the strip renders the store's own section, and
  * a store with none gets a category button and nothing else.
  */
-function BrowseStrip({ config, benefits }: { config: StoreConfig; benefits: BenefitItem[] }) {
+async function BrowseStrip({ config, benefits }: { config: StoreConfig; benefits: BenefitItem[] }) {
+  // The claims are the store's own words; a claim still exactly as seeded is translated.
+  const t = await getT();
+
   return (
     <div className="container-store pt-4">
       <div className={cn('grid gap-4', benefits.length > 0 && 'lg:grid-cols-[15rem_minmax(0,1fr)]')}>
@@ -108,9 +117,9 @@ function BrowseStrip({ config, benefits }: { config: StoreConfig; benefits: Bene
                 <li key={`${benefit.title}-${index}`} className="flex items-center gap-2.5 px-4 py-3">
                   <Icon className="size-5 shrink-0 text-primary" aria-hidden />
                   <span className="min-w-0">
-                    <span className="block truncate text-[13px] font-semibold">{benefit.title}</span>
+                    <span className="block truncate text-[12px] font-semibold">{t.loose(benefit.title)}</span>
                     {benefit.description ? (
-                      <span className="block truncate text-[11px] text-muted">{benefit.description}</span>
+                      <span className="block truncate text-[10.5px] text-muted">{t.loose(benefit.description)}</span>
                     ) : null}
                   </span>
                 </li>
@@ -151,7 +160,7 @@ const GRID = 'product-grid grid grid-cols-2 gap-5 sm:grid-cols-2 lg:grid-cols-3 
 const template: StorefrontTemplate = {
   key: 'fashion_boutique',
   name: 'Fashion Boutique',
-  description: 'Editorial photography and elegant type, built for apparel.',
+  description: TEMPLATE_META.fashion_boutique.description,
   Header,
   Footer,
   Homepage,

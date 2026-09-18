@@ -2,6 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import type { StoreConfig } from '@/types';
 import { cn } from '@/lib/utils';
+import { getT } from '@/lib/i18n/server';
 
 /**
  * Header and footer building blocks shared by every template.
@@ -48,7 +49,7 @@ export function StoreLogo({
   );
 }
 
-export function DesktopNav({
+export async function DesktopNav({
   config,
   className,
   linkClassName,
@@ -59,8 +60,10 @@ export function DesktopNav({
 }) {
   if (config.navigation.header.length === 0) return null;
 
+  const t = await getT();
+
   return (
-    <nav aria-label="Main" className={cn('hidden lg:block', className)}>
+    <nav aria-label={t('Main')} className={cn('hidden lg:block', className)}>
       <ul className="flex items-center gap-7">
         {config.navigation.header.map((item) => (
           <li key={item.id}>
@@ -73,7 +76,7 @@ export function DesktopNav({
                 linkClassName,
               )}
             >
-              {item.label}
+              {t.loose(item.label)}
             </Link>
           </li>
         ))}
@@ -86,12 +89,14 @@ export function DesktopNav({
  * The always-visible category rail the marketplace and electronics designs put
  * beside their hero. Categories come from store configuration, never hard-coded.
  */
-export function CategorySidebar({ config, title = 'All Categories' }: { config: StoreConfig; title?: string }) {
+export async function CategorySidebar({ config, title }: { config: StoreConfig; title?: string }) {
   if (config.categoryMenu.length === 0) return null;
 
+  const t = await getT();
+
   return (
-    <nav aria-label="Categories" className="hidden overflow-hidden rounded-(--radius-card) border border-border bg-surface lg:block">
-      <p className="bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground">{title}</p>
+    <nav aria-label={t('Categories')} className="hidden overflow-hidden rounded-(--radius-card) border border-border bg-surface lg:block">
+      <p className="bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground">{title ?? t('All Categories')}</p>
       <ul className="max-h-[26rem] overflow-y-auto py-1">
         {config.categoryMenu.map((category) => (
           <li key={category.id}>

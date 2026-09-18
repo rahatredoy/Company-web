@@ -2,13 +2,14 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { Heart, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { CartLine } from '@/types';
 import { QuantityStepper } from '@/components/ui/quantity-stepper';
 import { PriceDisplay } from '@/components/commerce/price-display';
 import { useCart } from '@/lib/commerce/cart';
 import { useWishlist } from '@/lib/commerce/collections';
+import { WishlistIcon } from '@/lib/commerce/wishlist-icon';
 import { formatMoney } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
@@ -166,7 +167,7 @@ export function CartLineItem({
                 onClick={moveToWishlist}
                 className="inline-flex items-center gap-1.5 rounded-(--radius-button) px-2 py-1.5 text-xs text-muted transition-colors hover:text-primary"
               >
-                <Heart className="size-3.5" aria-hidden />
+                <WishlistIcon className="size-3.5" aria-hidden />
                 Save for later
               </button>
             ) : null}

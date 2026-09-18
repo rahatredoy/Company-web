@@ -1,9 +1,8 @@
-import { eq, sql } from 'drizzle-orm';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { and, eq, sql } from 'drizzle-orm';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
-  couponRedemptions,
-  coupons,
+  customerAddresses,
   inventoryTransactions,
   orderAddresses,
   orderItems,
@@ -13,29 +12,26 @@ import {
   payments,
 } from '../../db/schema/index';
 import type { TenantExecutor } from '../../db/tenant-manager';
-import { RATE_LIMITS } from '../../lib/constants';
 import { ERROR_CODES, unprocessable } from '../../lib/errors';
-import { clientIp, ok, parseBody, parseQuery } from '../../lib/http';
+import { clientIp, ok, parseBody } from '../../lib/http';
 import { enforce } from '../../lib/rate-limit';
 import { moneyToNumber, toMoney } from '../../lib/utils';
 import { storeOf, type StoreContext } from '../../plugins/tenant';
-import {
-  applyCoupon,
-  CouponError,
-  priceLines,
-  quoteShipping,
-  reserveStock,
-  type PricedLine,
-} from './checkout.service';
+import { priceLines, reserveStock, type PricedLine } from './checkout.service';
 import { claimOrderNumber } from './orders.service';
-import { rememberGuestOrder } from './guest-orders';
-import { loadMeasureDefaults, loadStoreCurrency } from './service';
-
-const shippingQuerySchema = z.object({
-  country: z.string().trim().max(60).optional(),
-  city: z.string().trim().max(80).optional(),
-  postalCode: z.string().trim().max(20).optional(),
-});
+import { loadMeasureDefaults } from './service';
+import { PAYMENT_CHANNEL_CHOICES } from '../../lib/discounts/rules';
+import {
+  MAX_CODES,
+  fromCents,
+  loadDiscountSettings,
+  lockCustomerDiscounts,
+  normaliseCodes,
+  quoteDiscounts,
+  redeemDiscounts,
+  resolveChannel,
+  toCents,
+} from '../discounts/service';
 
 const addressSchema = z.object({
   fullName: z.string().trim().min(2, 'Enter a name.').max(120),
@@ -70,78 +66,115 @@ const checkoutSchema = z.object({
     .min(1, 'Your basket is empty.')
     .max(50),
   shippingAddress: addressSchema,
-  shippingMethodId: z.string().trim().min(1).max(40),
+  /**
+   * Which saved address the form was filled from, if any.
+   *
+   * It is what makes an edit made at the till an **edit**: without it the only
+   * honest thing to do with a changed address is add it beside the old one, and
+   * the next checkout would prefill whichever of the two was default — usually
+   * the one the shopper had just corrected. Optional, because a first order has
+   * no saved address to have come from, and never trusted: `rememberAddress`
+   * matches it against the sender's own rows in the WHERE clause.
+   */
+  shippingAddressId: z.string().uuid().nullable().optional(),
   paymentProvider: z.string().trim().min(1).max(40),
+  /**
+   * What the shopper is paying with under that provider — a card, bKash, Nagad.
+   * Only ever used to decide a bank or wallet offer, and checked against what
+   * the provider can actually take.
+   */
+  paymentChannel: z.enum(PAYMENT_CHANNEL_CHOICES).nullable().optional(),
+  /**
+   * The first 6 to 8 digits of the card, for a card offer. Never the whole
+   * number: this is the issuer prefix, which says whose card it is and nothing
+   * that could charge it.
+   */
+  cardBin: z
+    .string()
+    .trim()
+    .regex(/^\d{6,8}$/, 'Enter the first 6 digits of your card.')
+    .nullable()
+    .optional(),
+  /** Every code in the basket. `couponCode` is the single-code form older baskets still send. */
+  couponCodes: z.array(z.string().trim().max(40)).max(MAX_CODES).optional(),
   couponCode: z.string().trim().max(40).nullable().optional(),
   notes: z.string().trim().max(500).nullable().optional(),
-});
-
-const couponSchema = z.object({
-  code: z.string().trim().min(1, 'Enter a code.').max(40),
-  subtotal: z.coerce.number().min(0).default(0),
 });
 
 /**
  * Taking an order.
  *
- * Guest-capable by design — requiring an account to buy something is how a shop
- * loses the sale — so `optionalCustomer` attaches the shopper when there is one
- * and says nothing when there is not.
+ * **An order needs an account.** `POST /checkout` is guarded by
+ * `requireCustomer`, so a signed-out basket is refused with a 401 rather than
+ * taken as a guest: every order belongs to a customer record, and the shop can
+ * answer "who bought this" without matching an email address typed at the till.
+ *
+ * This is the *only* place that decision is enforceable. The storefront sends
+ * `/checkout` to the sign-in page first, but a redirect is a courtesy to
+ * somebody using a browser — the guard is what makes it true of a POST from
+ * anything else.
+ *
+ * Discounts are priced for the basket by `POST /discounts/quote`
+ * (`discounts.routes.ts`), which keeps `optionalCustomer` — it is asked before
+ * the sign-in the order will require, and refusing to price a code until then
+ * would hide the discount at the moment it is being decided on. Checkout runs
+ * the same engine again, inside the order transaction, and its answer is the
+ * one charged.
  */
 export default async function checkoutRoutes(app: FastifyInstance) {
-  app.get('/checkout/shipping-methods', async (request, reply) => {
+  app.post('/checkout', { preHandler: [app.requireCustomer] }, async (request, reply) => {
     const store = storeOf(request);
-    const query = parseQuery(shippingQuerySchema, request.query);
-    return ok(reply, await quoteShipping(store.db, query));
-  });
-
-  /**
-   * Server-side coupon check for the cart.
-   *
-   * The cart is browser-local and its totals are an estimate, but the *discount*
-   * cannot be: a figure shown in the basket and a different one charged at the
-   * till is a complaint every time. This is the same function checkout itself
-   * calls, so the two can never drift.
-   */
-  app.post('/coupons/validate', { preHandler: [app.optionalCustomer] }, async (request, reply) => {
-    const store = storeOf(request);
-    const body = parseBody(couponSchema, request.body);
-    await enforce(request, 'coupon-validate', RATE_LIMITS.bulkWrite);
-
-    try {
-      const outcome = await applyCoupon(store.db, body.code, body.subtotal, {
-        customerId: request.customer?.customerId ?? null,
-        email: request.customer?.email ?? null,
-      });
-      return ok(reply, { valid: true as const, ...outcome });
-    } catch (error) {
-      if (error instanceof CouponError) {
-        return ok(reply, { valid: false as const, reason: error.refusal, message: error.message });
-      }
-      throw error;
-    }
-  });
-
-  app.post('/checkout', { preHandler: [app.optionalCustomer] }, async (request, reply) => {
-    const store = storeOf(request);
+    // Guaranteed by `requireCustomer`. Named once so the order, its coupon
+    // redemption and anything added later attach to the same shopper.
+    const customer = request.customer!;
     const body = parseBody(checkoutSchema, request.body);
     await enforce(request, 'checkout', { max: 12, windowSeconds: 60 });
 
-    const currency = await loadStoreCurrency(store);
+    const settings = await loadDiscountSettings(store);
+    const currency = settings.currency;
     const method = await resolvePaymentMethod(store, body.paymentProvider);
+    const channel = resolveChannel(method.provider, body.paymentChannel ?? null);
+    const cardBin = channel === 'card' ? (body.cardBin ?? null) : null;
+    const codes = normaliseCodes([...(body.couponCodes ?? []), body.couponCode]);
+    const measureDefaults = await loadMeasureDefaults(store);
 
     const placed = await store.db.transaction(async (tx) => {
-      const lines = await priceLines(tx, body.lines, await loadMeasureDefaults(store));
+      // Before anything is read: a second checkout by the same customer waits
+      // here, so the two cannot both spend one voucher or one allowance.
+      await lockCustomerDiscounts(tx, customer.customerId);
+
+      const lines = await priceLines(tx, body.lines, measureDefaults);
       const subtotal = lines.reduce((sum, line) => sum + moneyToNumber(line.lineTotal), 0);
 
-      const shipping = await resolveShipping(tx, body, subtotal);
-      const coupon = await resolveCoupon(tx, body.couponCode, subtotal, request.customer, body.email);
+      const quote = await quoteDiscounts(tx, settings, {
+        lines,
+        codes,
+        address: { country: body.shippingAddress.country, city: body.shippingAddress.city },
+        customerId: customer.customerId,
+        contact: { email: body.email, phone: body.phone },
+        payment: { channel, cardBin },
+      });
 
-      const discount = moneyToNumber(coupon?.discount ?? '0');
-      const shippingTotal = moneyToNumber(shipping.price);
+      /*
+       * A code the shopper entered that does not apply stops the order rather
+       * than being dropped from it. They were shown a total with it; charging a
+       * different one without saying so is the one thing a till must not do.
+       */
+      const refusal = quote.refused[0];
+      if (refusal) {
+        throw unprocessable(refusal.message, ERROR_CODES.DISCOUNT_NOT_APPLICABLE, {
+          couponCodes: quote.refused.map((entry) => `${entry.code}: ${entry.message}`),
+        });
+      }
+
+      // There is no delivery charge: the total is the subtotal less discounts.
       // Tax is not modelled yet; it is carried as an explicit zero rather than
-      // omitted, so the receipt's arithmetic is visible and adds up.
-      const grandTotal = Math.max(0, subtotal - discount + shippingTotal);
+      // omitted, so the receipt's arithmetic is visible and adds up. Worked in
+      // cents so the figures on the receipt add up exactly.
+      const grandCents = Math.max(0, toCents(subtotal) - quote.itemCents);
+      const discount = quote.itemCents / 100;
+      const grandTotal = grandCents / 100;
+      const appliedCodes = quote.applied.filter((entry) => entry.code);
 
       const orderNumber = await claimOrderNumber(tx);
 
@@ -149,7 +182,7 @@ export default async function checkoutRoutes(app: FastifyInstance) {
         .insert(orders)
         .values({
           orderNumber,
-          customerId: request.customer?.customerId ?? null,
+          customerId: customer.customerId,
           email: body.email,
           phone: body.phone,
           customerName: body.shippingAddress.fullName,
@@ -159,22 +192,20 @@ export default async function checkoutRoutes(app: FastifyInstance) {
           subtotal: toMoney(subtotal),
           discountTotal: toMoney(discount),
           taxTotal: '0.00',
-          shippingTotal: toMoney(shippingTotal),
           grandTotal: toMoney(grandTotal),
-          couponCode: coupon?.code ?? null,
-          couponId: coupon?.id ?? null,
+          couponCode: appliedCodes.map((entry) => entry.code).join(', ').slice(0, 200) || null,
+          couponId: appliedCodes[0]?.id ?? null,
           paymentProvider: method.provider,
           paymentMethodLabel: method.label,
-          shippingMethodId: shipping.id,
-          shippingMethodLabel: shipping.name,
-          estimatedDeliveryAt: estimatedDelivery(shipping.estimatedDaysMax),
+          paymentChannel: channel,
+          cardBin,
           customerNote: body.notes ?? null,
           ipAddress: clientIp(request) || null,
         })
         .returning();
 
       await tx.insert(orderItems).values(
-        lines.map((line) => ({
+        lines.map((line, index) => ({
           orderId: order!.id,
           productId: line.productId,
           variantId: line.variantId,
@@ -187,6 +218,9 @@ export default async function checkoutRoutes(app: FastifyInstance) {
           quantity: line.quantity,
           measureLabel: line.measureLabel,
           measure: line.measure,
+          // This line's share of every discount on the order, so a return or a
+          // report can say what the line was actually sold for.
+          lineDiscount: fromCents(quote.lineCents[String(index)] ?? 0),
           lineTotal: line.lineTotal,
         })),
       );
@@ -212,22 +246,13 @@ export default async function checkoutRoutes(app: FastifyInstance) {
 
       await commitStock(tx, order!.id, lines);
 
-      if (coupon) {
-        await tx.insert(couponRedemptions).values({
-          couponId: coupon.id,
-          orderId: order!.id,
-          customerId: request.customer?.customerId ?? null,
-          email: request.customer ? null : body.email,
-          discountAmount: coupon.discount,
-        });
-
-        // Conditional so a coupon cannot be pushed past its own limit by two
-        // orders committing at the same moment.
-        await tx
-          .update(coupons)
-          .set({ usedCount: sql`${coupons.usedCount} + 1` })
-          .where(eq(coupons.id, coupon.id));
-      }
+      await redeemDiscounts(tx, {
+        orderId: order!.id,
+        customerId: customer.customerId,
+        quote,
+        originalCents: toCents(subtotal),
+        finalCents: grandCents,
+      });
 
       await tx.insert(payments).values({
         orderId: order!.id,
@@ -242,13 +267,20 @@ export default async function checkoutRoutes(app: FastifyInstance) {
     });
 
     /*
-     * Lets this browser read its own receipt.
-     *
-     * `/checkout/success/<n>` fetches the order straight after this returns, and
-     * a guest has no session to authorise it with. Without this they would be
-     * bounced off the confirmation page for the order they had just paid for.
+     * Written after the order commits, for the reason `audit()` is: the address
+     * book is a convenience, and a shopper whose order was taken must never be
+     * told it failed because we could not remember where they live. Its failure
+     * costs the next checkout's prefill and nothing else, so it is logged rather
+     * than raised.
      */
-    await rememberGuestOrder(request, reply, store, placed.orderNumber);
+    await rememberAddress(
+      store,
+      customer.customerId,
+      body.shippingAddress,
+      body.shippingAddressId ?? null,
+    ).catch((error: unknown) => {
+      request.log.warn({ err: error }, 'could not save the checkout address to the address book');
+    });
 
     return ok(
       reply,
@@ -262,6 +294,120 @@ export default async function checkoutRoutes(app: FastifyInstance) {
       201,
     );
   });
+}
+
+/**
+ * Where the order was sent, kept so the next checkout opens already filled in.
+ *
+ * Nothing else writes this: an order's address is snapshotted onto
+ * `order_addresses` and is deliberately frozen there, so without this the
+ * address book stayed empty for every shopper who never opened
+ * `/account/addresses` — and the checkout form, which prefills from it, asked
+ * the same nine questions on every single order.
+ *
+ * Three outcomes, in this order, and the order is the whole design.
+ *
+ * 1. **An address the customer already has saved is left exactly as it is.**
+ *    Ordering twice to the same place must not fill the address book with
+ *    copies of itself, and it is compared on its content rather than on its id
+ *    because the same address typed again is the same address.
+ * 2. **Otherwise the address the form was filled from is updated in place.**
+ *    What the shopper corrected at the till is what they meant; adding the
+ *    correction beside the original would prefill whichever of the two happened
+ *    to be default next time, which is as likely as not the one they had just
+ *    fixed.
+ * 3. **Otherwise it is written as a new address**, which is the first order,
+ *    and — only when it is the only one — the default. A one-off address never
+ *    takes the default away from a book the shopper has curated themselves.
+ *
+ * `sourceId` came from the browser and is therefore matched against the
+ * sender's own rows in the WHERE clause rather than trusted. The worst a forged
+ * one can do is overwrite an address belonging to whoever sent it.
+ */
+async function rememberAddress(
+  store: StoreContext,
+  customerId: string,
+  submitted: z.infer<typeof addressSchema>,
+  sourceId: string | null,
+): Promise<void> {
+  /*
+   * `customer_addresses.phone` is narrower than checkout's own phone field. The
+   * order itself carries the number in full; a truncated copy here would prefill
+   * a wrong phone on every later order, so an over-long one is not remembered at
+   * all rather than remembered incorrectly.
+   */
+  if (submitted.phone.length > 24) return;
+
+  const address = {
+    fullName: submitted.fullName,
+    phone: submitted.phone,
+    addressLine1: submitted.addressLine1,
+    addressLine2: submitted.addressLine2 ?? null,
+    city: submitted.city,
+    state: submitted.state ?? null,
+    postalCode: submitted.postalCode ?? null,
+    country: submitted.country,
+  };
+
+  await store.db.transaction(async (tx) => {
+    const existing = await tx
+      .select()
+      .from(customerAddresses)
+      .where(eq(customerAddresses.customerId, customerId));
+
+    if (existing.some((row) => sameAddress(row, address))) return;
+
+    const source = sourceId ? existing.find((row) => row.id === sourceId) : undefined;
+
+    if (source) {
+      await tx
+        .update(customerAddresses)
+        .set({ ...address, updatedAt: new Date() })
+        .where(
+          and(
+            eq(customerAddresses.id, source.id),
+            eq(customerAddresses.customerId, customerId),
+          ),
+        );
+      return;
+    }
+
+    await tx.insert(customerAddresses).values({
+      ...address,
+      customerId,
+      isDefault: existing.length === 0,
+    });
+  });
+}
+
+/**
+ * Two addresses are the same address if every part of them reads the same.
+ *
+ * Compared on trimmed, case-folded text with runs of whitespace collapsed,
+ * because "House 4, Road 12" and "house 4,  road 12" are one place and saving
+ * both would defeat the point of the check. Every field is compared, phone and
+ * name included: correcting only the phone number is a real edit, and treating
+ * it as a match would quietly drop the correction.
+ */
+function sameAddress(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean {
+  const fields = [
+    'fullName',
+    'phone',
+    'addressLine1',
+    'addressLine2',
+    'city',
+    'state',
+    'postalCode',
+    'country',
+  ] as const;
+
+  const normalise = (value: unknown): string =>
+    typeof value === 'string' ? value.trim().toLowerCase().replace(/\s+/g, ' ') : '';
+
+  return fields.every((field) => normalise(a[field]) === normalise(b[field]));
 }
 
 /**
@@ -288,52 +434,6 @@ async function resolvePaymentMethod(store: StoreContext, provider: string) {
   }
 
   return enabled;
-}
-
-/** The quoted price is re-derived here; the browser's copy is never trusted. */
-async function resolveShipping(
-  tx: TenantExecutor,
-  body: { shippingMethodId: string; shippingAddress: { country: string; city: string } },
-  subtotal: number,
-) {
-  const quotes = await quoteShipping(
-    tx,
-    { country: body.shippingAddress.country, city: body.shippingAddress.city },
-    subtotal,
-  );
-
-  const chosen = quotes.find((quote) => quote.id === body.shippingMethodId);
-  if (!chosen) {
-    throw unprocessable(
-      'That delivery option is not available for this address.',
-      ERROR_CODES.VALIDATION_FAILED,
-      { shippingMethodId: ['Choose a delivery option.'] },
-    );
-  }
-
-  return chosen;
-}
-
-async function resolveCoupon(
-  tx: TenantExecutor,
-  code: string | null | undefined,
-  subtotal: number,
-  customer: FastifyRequest['customer'],
-  email: string,
-) {
-  if (!code) return null;
-
-  try {
-    return await applyCoupon(tx, code, subtotal, {
-      customerId: customer?.customerId ?? null,
-      email: customer ? null : email,
-    });
-  } catch (error) {
-    if (error instanceof CouponError) {
-      throw unprocessable(error.message, ERROR_CODES.COUPON_EXPIRED, { couponCode: [error.message] });
-    }
-    throw error;
-  }
 }
 
 /**
@@ -376,13 +476,6 @@ async function commitStock(tx: TenantExecutor, orderId: string, lines: PricedLin
       referenceId: orderId,
     });
   }
-}
-
-function estimatedDelivery(days: number | null): Date | null {
-  if (days === null) return null;
-  const at = new Date();
-  at.setDate(at.getDate() + days);
-  return at;
 }
 
 /**

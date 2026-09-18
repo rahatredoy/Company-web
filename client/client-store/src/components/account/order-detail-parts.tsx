@@ -1,7 +1,10 @@
+'use client';
+
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Address, CartTotals, OrderDetail } from '@/types';
-import { formatMoney, pluralise } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
+import { formatMoney } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
 /**
@@ -10,6 +13,10 @@ import { cn } from '@/lib/utils';
  *
  * Written once because those three views must agree. Three copies of a totals
  * block is three chances for one of them to forget the discount line.
+ *
+ * A client module because the address book, itself a client component, draws
+ * `AddressBlock` too — every prop here is plain data, so the server pages that
+ * render these lose nothing by it.
  */
 
 export function OrderLines({
@@ -23,6 +30,8 @@ export function OrderLines({
   locale: string;
   className?: string;
 }) {
+  const t = useT();
+
   return (
     <ul className={cn('divide-y divide-border', className)}>
       {lines.map((line, index) => (
@@ -49,7 +58,7 @@ export function OrderLines({
             ) : null}
 
             <span className="block text-xs text-muted">
-              {line.quantity} × {formatMoney(line.unitPrice, currency, locale)}
+              {t.number(line.quantity)} × {formatMoney(line.unitPrice, currency, locale)}
             </span>
           </span>
 
@@ -71,35 +80,27 @@ export function OrderTotals({
   locale: string;
   className?: string;
 }) {
+  const t = useT();
   const hasDiscount = Number.parseFloat(totals.discount) > 0;
 
   return (
     <dl className={cn('space-y-2 text-sm', className)}>
-      <Row label="Subtotal" value={formatMoney(totals.subtotal, totals.currency, locale)} />
+      <Row label={t('Subtotal')} value={formatMoney(totals.subtotal, totals.currency, locale)} />
 
       {hasDiscount ? (
         <Row
-          label="Discount"
+          label={t('Discount')}
           value={`− ${formatMoney(totals.discount, totals.currency, locale)}`}
           tone="success"
         />
       ) : null}
 
-      <Row
-        label="Shipping"
-        value={
-          totals.shipping === null
-            ? 'To be confirmed'
-            : formatMoney(totals.shipping, totals.currency, locale)
-        }
-      />
-
       {Number.parseFloat(totals.tax) > 0 ? (
-        <Row label="Tax" value={formatMoney(totals.tax, totals.currency, locale)} />
+        <Row label={t('Tax')} value={formatMoney(totals.tax, totals.currency, locale)} />
       ) : null}
 
       <div className="flex items-baseline justify-between border-t border-border pt-2.5">
-        <dt className="font-semibold">Total</dt>
+        <dt className="font-semibold">{t('Total')}</dt>
         <dd className="text-lg font-bold tabular-nums">
           {formatMoney(totals.total, totals.currency, locale)}
         </dd>
@@ -126,7 +127,8 @@ export function AddressBlock({
   address: Omit<Address, 'id' | 'isDefault' | 'label'> | null;
   className?: string;
 }) {
-  if (!address) return <p className={cn('text-sm text-subtle', className)}>No address on file.</p>;
+  const t = useT();
+  if (!address) return <p className={cn('text-sm text-subtle', className)}>{t('No address on file.')}</p>;
 
   return (
     <address className={cn('text-sm not-italic leading-relaxed text-muted', className)}>
@@ -149,10 +151,11 @@ export function OrderSummaryMeta({
   order: OrderDetail;
   className?: string;
 }) {
+  const t = useT();
+
   return (
     <p className={cn('text-sm text-muted', className)}>
-      {order.itemCount} {pluralise(order.itemCount, 'item')}
-      {order.shippingMethodLabel ? ` · ${order.shippingMethodLabel}` : ''}
+      {t.plural(order.itemCount, '{count} item', '{count} items')}
       {order.paymentMethodLabel ? ` · ${order.paymentMethodLabel}` : ''}
     </p>
   );

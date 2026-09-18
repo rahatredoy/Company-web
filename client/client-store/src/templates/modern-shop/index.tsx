@@ -1,14 +1,17 @@
 import type { StorefrontTemplate, TemplateChromeProps, TemplateHomepageProps, TemplatePreset } from '../registry';
+import { TEMPLATE_META } from '../meta';
 import { StoreLogo } from '../chrome';
-import { AnnouncementBar } from '@/components/layout/announcement-bar';
 import { HeaderActions } from '@/components/layout/header-actions';
 import { MobileNav } from '@/components/layout/mobile-nav';
+import { BackButton } from '@/components/layout/back-button';
 import { SearchBox } from '@/components/layout/search-box';
 import { MegaMenu, type NavFlag } from '@/components/layout/mega-menu';
 import { CategorySidebar } from '@/components/layout/category-sidebar';
 import { LocaleSelects } from '@/components/layout/locale-selects';
 import { SiteFooter } from '@/components/layout/site-footer';
 import { HomepageSections } from '@/sections/section-renderer';
+import { getT } from '@/lib/i18n/server';
+import type { MessageKey } from '@/lib/i18n';
 
 /**
  * Modern Shop — the default template.
@@ -41,41 +44,44 @@ const preset: TemplatePreset = {
 };
 
 /** Nav pips, keyed by destination so a renamed or translated menu keeps them. */
-const NAV_FLAGS: Record<string, NavFlag> = {
+const NAV_FLAGS: Record<string, { label: MessageKey; tone: NavFlag['tone'] }> = {
   '/new-arrivals': { label: 'New', tone: 'primary' },
   '/sale': { label: 'Hot', tone: 'sale' },
 };
 
-function Header({ config, locale }: TemplateChromeProps) {
+async function Header({ config, locale }: TemplateChromeProps) {
+  const t = await getT();
+  const flags: Record<string, NavFlag> = Object.fromEntries(
+    Object.entries(NAV_FLAGS).map(([href, flag]) => [href, { ...flag, label: t(flag.label) }]),
+  );
+
   return (
     <header className="sticky top-0 z-40 bg-surface shadow-[var(--shadow-header)]">
-      <AnnouncementBar
-        announcement={config.announcement}
-        className="bg-primary text-primary-foreground"
-        trailing={
-          <LocaleSelects
-            languages={config.store.languages}
-            currencies={config.store.currencies}
-            language={locale.language}
-            currency={locale.currency}
-          />
-        }
-      />
-
       <div className="container-store flex h-16 items-center gap-4">
         <MobileNav config={config} />
+        <BackButton />
         <StoreLogo config={config} priority />
 
         <MegaMenu
           config={config}
           style={preset.megaMenu}
-          flags={NAV_FLAGS}
+          flags={flags}
           className="flex-1 justify-center"
         />
 
         <div className="ml-auto flex items-center gap-2">
           <SearchBox variant="inline" className="hidden w-64 xl:block" />
           <SearchBox variant="icon" className="hidden lg:block xl:hidden" />
+          {/* Renders nothing at all unless the store offers a second language or
+              currency, which is why it can sit in the action row unconditionally. */}
+          <LocaleSelects
+            languages={config.store.languages}
+            currencies={config.store.currencies}
+            language={locale.language}
+            currency={locale.currency}
+            tone="muted"
+            className="hidden lg:flex"
+          />
           <HeaderActions locale={config.store.language} />
         </div>
       </div>
@@ -107,7 +113,7 @@ function Homepage({ config, sections }: TemplateHomepageProps) {
           <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
             {/* Every department, in a rail the height of the hero beside it — the
                 list scrolls rather than stopping short of the catalogue. */}
-            <CategorySidebar config={config} headerTone="primary" />
+            <CategorySidebar config={config} />
             <div className="min-w-0 [&>section]:!pt-0">
               <HomepageSections
                 sections={[hero]}
@@ -139,7 +145,7 @@ const GRID = 'product-grid grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 
 const template: StorefrontTemplate = {
   key: 'modern_shop',
   name: 'Modern Shop',
-  description: 'Clean, balanced and conversion-focused. The default.',
+  description: TEMPLATE_META.modern_shop.description,
   Header,
   Footer,
   Homepage,

@@ -6,10 +6,23 @@ type AddressRow = typeof customerAddresses.$inferSelect;
 export interface CustomerView {
   id: string;
   fullName: string;
-  email: string;
+  /** Null on an account created from a phone number that has not added one. */
+  email: string | null;
   phone: string | null;
+  /** True only of an address that was actually proved, never merely present. */
   emailVerified: boolean;
+  /** The number a phone sign-in matches, in E.164 — null unless one was proved. */
+  phoneE164: string | null;
+  phoneVerified: boolean;
+  /**
+   * Whether a password exists at all. False for an account created by phone or
+   * by Google, which is what lets the account screen offer "set a password"
+   * rather than a "change password" form with nothing to change.
+   */
+  hasPassword: boolean;
   acceptsMarketing: boolean;
+  /** `YYYY-MM-DD`. What a birthday offer is checked against. */
+  birthDate: string | null;
 }
 
 export interface AddressView {
@@ -41,7 +54,12 @@ export function customerView(row: CustomerRow): CustomerView {
     email: row.email,
     phone: row.phone,
     emailVerified: row.emailVerifiedAt !== null,
+    phoneE164: row.phoneE164,
+    phoneVerified: row.phoneVerifiedAt !== null,
+    // The hash itself is never sent — the whole reason this is a whitelist.
+    hasPassword: row.passwordHash !== null,
     acceptsMarketing: row.acceptsMarketing,
+    birthDate: row.birthDate,
   };
 }
 

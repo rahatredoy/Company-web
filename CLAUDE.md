@@ -94,17 +94,20 @@ Correctness is checked by `tsx` scripts that hit the **live** API and real datab
 
 ```bash
 cd client/client-api
-npx tsx scripts/verify-slice0.ts              # 34 checks: tenant isolation + store-admin auth
+npx tsx scripts/verify-slice0.ts              # 41 checks: tenant isolation + store-admin auth, JWT shape and revocation
 npx tsx scripts/verify-catalog.ts             # 41 checks: categories, brands, products
 npx tsx scripts/verify-cursor-pagination.ts   # 88 checks: every admin list walked by cursor
-npx tsx scripts/verify-detail-views.ts --password '…'   # 39 checks: every View panel's detail endpoint
-npx tsx scripts/verify-edit-fields.ts --slug throwaway --password '…'   # 37 checks: every edit form's fields round-trip, sale window, banner destination and category icons included
+npx tsx scripts/verify-detail-views.ts --password '…'   # 34 checks: every View panel's detail endpoint
+npx tsx scripts/verify-edit-fields.ts --slug throwaway --password '…'   # 33 checks: every edit form's fields round-trip, sale price, banner destination and category icons included
 npx tsx scripts/verify-product-insights.ts --password '…'   # 50 checks: adding a product, and the figures its screen reads
 npx tsx scripts/verify-measure-selling.ts --password '…'   # 28 checks: selling by weight — the rate, the sizes, the floor, and the grams that actually move
-npx tsx scripts/verify-storefront.ts --password '…'   # 44 checks: the public read path, shop-by-category block included
+npx tsx scripts/verify-storefront.ts --password '…'   # 67 checks: the public read path, the filter panel and shop-by-category block included
 npx tsx scripts/verify-home-rotation.ts   # 18 checks: a lap of the homepage covers the whole catalogue
-npx tsx scripts/verify-commerce.ts   --password '…'   # 55 checks: accounts, checkout, orders, returns, reviews
-npx tsx scripts/verify-admin.ts      --password '…'   # 96 checks: every admin section, uploads included
+npx tsx scripts/verify-commerce.ts   --password '…'   # 71 checks: accounts, checkout, orders, returns, reviews, the address book
+npx tsx scripts/verify-admin.ts      --password '…'   # 91 checks: every admin section, uploads included
+npx tsx scripts/verify-auth-methods.ts   # 48 checks: email, phone-and-code and Google sign-in
+npx tsx scripts/verify-https.ts   # 34 checks: transport posture — needs no server, database or network
+npx tsx scripts/audit-insecure-urls.ts   # every stored address that is not https, across a tenant
 npx tsx scripts/verify-schema.ts
 npx tsx scripts/set-store-password.ts
 
@@ -115,6 +118,7 @@ npx tsx scripts/set-trial-days.ts --days 7     # db:seed only ever *creates* the
 npx tsx scripts/verify-dashboard-states.ts     # the dashboard rendered for 3 real accounts, billing gate included
 npx tsx scripts/verify-admin-trusted-device.ts # 24 checks: admin sign-in, passcode, remembered browser
 npx tsx scripts/verify-domain-routing.ts       # 13 checks: hostname → tenant → surface; needs client-api on 4100
+npx tsx scripts/verify-https.ts                # 32 checks: transport posture — needs no server, database or network
 npx tsx scripts/list-tenants.ts
 npm run admin:credentials -- --email you@example.com --password '…'   # move the one admin login
 npx tsx scripts/delete-tenant.ts --slug old-shop                      # dry run; --yes to go ahead
@@ -154,7 +158,7 @@ All four frontends are pure API consumers: no database URL, no payment or storag
 
 ### The admin panel
 
-**All 23 sidebar destinations are built.** `client-api`'s admin modules are `dashboard`, `catalog`, `orders`, `customers`, `reviews`, `inventory`, `fulfilment` (shipping/returns/refunds), `marketing` (coupons/banners/newsletter/contact messages), `website` (design/homepage/pages/FAQs) and `settings` (settings/payment methods/attributes/reports); `client-admin` renders each. `app/(dashboard)/[...section]/page.tsx` is now a plain 404 — its "coming soon" branch became unreachable and was removed rather than left to rot.
+**All 14 sidebar destinations are built.** `client-api`'s admin modules are `dashboard`, `catalog`, `orders`, `customers`, `reviews`, `inventory`, `fulfilment` (returns/refunds), `marketing` (coupons/banners/contact messages), `website` (design/pages/FAQs) and `settings` (settings/payment methods/attributes); `client-admin` renders each. There is no Reports or Staff screen: the dashboard is where the numbers are read, and a store's one admin needs no staff list. Returns and refunds are **one screen with two tabs** (`/returns`, `/returns?tab=refunds`) under one sidebar entry shown to an admin holding either permission; each tab is still its own server-rendered first batch, a tab the admin cannot read is not drawn, and `/refunds` redirects onto its tab. There is no Inventory screen either: a product's own page already shows its stock per variant, its movements, and the Add stock / Adjust stock sheet (`/products/<id>?stock=add|adjust` opens it), so a second list of the same numbers was removed. The low-stock list is `/products?stock=low` and `/inventory` redirects to `/products`. There is no warehouse screen at all: provisioning seeds the one default warehouse a shop needs, a new product is stocked into it, and the product page's stock sheet still reads `GET /warehouses` — the endpoints are unchanged, only the panel's editor for them was removed. The `inventory` API module stays whole — the product screen writes through `/inventory/adjust` and `/inventory/threshold`, and the verify scripts still walk its list and detail endpoints. **There is no shipping at all**, at the owner's request (migration `0018_drop_shipping.sql`, schema `1.17.0`): no zones or delivery options, no delivery charge (a grand total is the subtotal less discounts), no separate `shipping_status`, no shipments or tracking, no `free_shipping` discount type and no Free Delivery offer. What a shopper sees of delivery is the **order status** — shipped, out for delivery, delivered — and the delivery **address**, both of which stay. `/shipping` redirects to `/orders`; `GET /storefront/checkout/shipping-methods` and `POST /admin/orders/:id/shipments` answer 404, and the verify scripts assert that. `damage_reason.shipping_damage` is stock damaged in transit and is unrelated. There is no Homepage screen either: `homepage_sections` is written by provisioning's seed and by the scripts in `client-api/scripts/`, and the storefront reads it through `GET /storefront/home` exactly as before. There is no Design screen either: layout, colour, logo, favicon, footer tagline and the announcement strip are part of **Settings** (`/website/design` redirects there), because they are set up once rather than worked in. Settings is **one screen with one Save** — no tabs — laid out as two columns of compact `SettingsSection` blocks (store, contact and payment methods beside storefront and announcement strip). Save writes `PUT /settings` and then `PUT /website/design`, each only when the admin may write it; the design is read only under `website.view`, so without it those blocks are not drawn rather than failing the screen. It deliberately does **not** show warehouses, the stock alert, weight sizes, the SEO title/description or category icons, and every one of those survives a save, because both endpoints keep what is stored for a key the body omits. The `website` API module did not change. `app/(dashboard)/[...section]/page.tsx` is now a plain 404 — its "coming soon" branch became unreachable and was removed rather than left to rot.
 
 There are two **screen endpoints** on either platform, and both are allowed to be: `GET /admin/dashboard?days=&granularity=` answers the whole home screen — KPI deltas against the previous window, a gap-free sales series, recent orders, best sellers, low stock — in one call, because eight panels over the same two tables would otherwise be eight round trips and eight chances for one slow query to hold up the render. Its shape follows the page and is not a resource contract.
 
@@ -222,8 +226,13 @@ a phone, and nothing to get wrong forty times a page) and priced chips on the
 product page, where there is width to compare them. Two sizes of one product are
 **two basket lines** — `lineId` includes the measure — or picking 1kg after
 500gm would silently re-price the earlier one. The store-wide default list lives
-in `store_settings.preferences.measureOptions`, edited once on the Settings
-screen, and `products.measure_options` being null is what defers to it.
+in `store_settings.preferences.measureOptions`, and `products.measure_options`
+being null is what defers to it. **The panel no longer edits that list** — sizes
+are picked on each product's Details tab — and Settings no longer asks for the
+store-wide `lowStockThreshold` (nothing read it; each product carries its own
+alert) or for `seoTitle`/`seoDescription`. `PUT /settings` therefore treats all
+four keys as **omitted means unchanged**: defaulting them to `[]`, `5` and `null`
+would have reset the stored values on every save of the store name.
 
 `npx tsx scripts/verify-measure-selling.ts --password '…'` is the proof (28
 checks): it prices a real product per kilo, buys 4 × 100gm through the public
@@ -232,28 +241,14 @@ came off a 40kg shelf — plus that an unlisted size and an under-minimum basket
 are both refused, and that switching the mode off clears the rate rather than
 leaving it to print.
 
-**The sale window is the panel's, not just the schema's.**
-`product_variants.sale_starts_at` / `sale_ends_at` were always enforced by
-`storefront/service.ts#effectiveSale` — at checkout and on the product page —
-and nothing in the admin panel could set either, which made every sale price
-permanent from the moment it was typed. All three editing surfaces offer it now
-(Details tab, Variants tab, Quick Edit), and `lib/local-datetime.ts` moves the
-value in the **browser's** clock, because `<input type="datetime-local">` has no
-timezone and the column does — rendering the ISO string straight into the box
-would move a Dhaka evening sale by six hours.
-
-**Wiring it exposed a half-finished feature and finished it.** `effectiveSale`
-was applied on the product page and at checkout only; every *listing* read the
-denormalised `products.sale_price_from`, which carries no window — so a card
-could advertise a price the product page then refused. `service.ts` now exports
-`liveSalePriceSql` (the sale a shopper can get right now) and
-`liveSaleExistsSql` (its semi-join for filters), and the summary columns, the
-`sale` filter, `effectivePriceSql`, search and the homepage `sale` source all
-read them. **A window is checked in SQL at read time**, so a sale ends itself
-rather than waiting for a sweep — and the four cache layers mean a page can be
-at most its own TTL stale about it, which the 60-second edge bound already
-covers. The `exists` form is deliberate: it is asked over every candidate row in
-the catalogue, and it stops at the first matching variant.
+**A sale price has no dates**, at the owner's request (migration
+`0019_drop_variant_sale_window.sql`, schema `1.18.0`): it applies from the moment
+it is saved until it is cleared. `product_variants.sale_starts_at` /
+`sale_ends_at` and every Sale starts / Sale ends control are gone. Listings still
+read the sale through `service.ts#liveSalePriceSql` / `liveSaleExistsSql` rather
+than the denormalised `products.sale_price_from`, so a switched-off variant
+cannot advertise a price nobody can buy; the `exists` form is deliberate, because
+it is asked over every candidate row and stops at the first matching variant.
 
 **The Details tab writes more than the create panel asks for**, and the gap is
 deliberate: `POST /products` has no `seoTitle`, `minOrderQuantity` or
@@ -276,10 +271,10 @@ that already exists, and has to be: stock only ever moves by a ledgered delta
 (`POST /inventory/adjust`), and a number typed into a list-replacing form would
 be an absolute write with no movement behind it. The Variants tab shows the two
 states apart for the same reason — an opening-stock box on a new row, and the
-count plus an `Adjust` link to `/inventory` on an existing one — and
+count on an existing one, moved with the page's own Adjust stock sheet — and
 `GET /products/:id` returns `stock: null` against `stock: 0` so it can.
 
-**Adding a product asks less than editing one.** The create panel is six sections — basic information, classification, media, pricing, inventory, variants — and nothing else, because merchandising flags and the four list-shaped tabs cannot be answered before the product exists. `POST /products` takes the whole thing in **one transaction**: the product, its variants (`variants[]` when the owner switched them on, otherwise the single one described by the top-level `sku`/`price`), an `inventory_levels` row per variant in the default warehouse, an `initial` ledger row for any opening quantity, the main picture and the gallery. `sku`/`price` are required *only* when `variants` is absent — a product created from a list has no single SKU of its own — and a variant that names no `costPrice` inherits the body's, so the form can ask for cost once. The level row is written even at zero, so a new variant reads as *tracked and empty* rather than as never counted. **`PATCH /products/:id` edits the default variant but recomputes `price_from` across the whole list**, because a variable product's shelf price is its cheapest sellable variant and copying the default's price over it would re-price the product every time anyone opened the details tab.
+**Adding a product asks less than editing one.** The create panel shows only what every product needs — name, description, main image and gallery, category and brand, price and sale price, opening stock and the low stock alert — and folds the rest behind **Advanced options** (video, cost price, SKU, barcode, stock tracking, selling by weight, variants). Merchandising flags and the four list-shaped tabs are not asked at all, because they cannot be answered before the product exists. The fold **hides rather than unmounts**, so a value typed there is still sent after it is closed, and an API or browser validation error on a folded field opens it again. A product has **one description**: `short_description` was dropped (`drizzle/0014_*`), a product page with no `seo_description` is described by the opening of `description`, and storefront search matches the name. `POST /products` takes the whole thing in **one transaction**: the product, its variants (`variants[]` when the owner switched them on, otherwise the single one described by the top-level `sku`/`price`), an `inventory_levels` row per variant in the default warehouse, an `initial` ledger row for any opening quantity, the main picture and the gallery. `price` is required *only* when `variants` is absent — a product created from a list has no single price of its own — and `sku` is never required on create: an empty or absent one is generated (`generateSku`, three letters of the name and six random characters, checked for uniqueness), though the edit form still refuses to clear one. A variant that names no `costPrice` inherits the body's, so the form can ask for cost once. The level row is written even at zero, so a new variant reads as *tracked and empty* rather than as never counted. **`PATCH /products/:id` edits the default variant but recomputes `price_from` across the whole list**, because a variable product's shelf price is its cheapest sellable variant and copying the default's price over it would re-price the product every time anyone opened the details tab.
 
 **`products.track_inventory` is a real switch, not a label.** Off means stock is still counted but never refuses a sale — made to order, digital, restocked faster than the panel is opened. It is **not** the same as having no `inventory_levels` rows, which means a shop that has never opened the inventory screens; both read as sellable, for different reasons, and `reserveStock`, `inStockSql`, `stockBandFor` and the product screen's badge all honour both. Those four have to agree exactly, or a product is offered by the listing and then denied by its own page. `products.video_url` is one optional clip kept beside the gallery rather than inside it: `product_media` can hold a `video` row, but the gallery is written back as a whole list of images, so a video in it would be dragged about as a thumbnail and dropped by the next save.
 
@@ -290,11 +285,11 @@ Rules worth knowing before changing any of it:
 - **Status graphs are server-side.** `ORDER_TRANSITIONS` in `lib/constants.ts` — not the enum — decides what an order may become next, and returns and refunds have their own maps in `modules/fulfilment/`. The panel only renders `allowedTransitions`; the API re-checks, so a stale page gets a clear 409 rather than a bad write.
 - **Stock only ever moves by a single conditional `UPDATE`**, and every movement writes an `inventory_transactions` row in the same transaction. The `>= 0` CHECK constraints are the backstop: an overdraw fails as `INSUFFICIENT_STOCK` (matched on SQLSTATE `23514`, because Drizzle wraps the driver error and the constraint name is on the `cause`, not the message).
 - **`sold_count` moves on dispatch, nowhere else** — counting it at checkout would rank abandoned and cancelled orders as best sellers.
-- **Deleting is often archiving**: a product that has sold, a coupon that has been claimed, a customer at all (there is no delete — order history points at them; blocking is the lever). A newsletter subscriber is marked unsubscribed rather than deleted, because a deleted row is one the next signup silently re-adds.
+- **Deleting is often archiving**: a product that has sold, a coupon that has been claimed, a customer at all (there is no delete — order history points at them; blocking is the lever).
 - **`pages.body_html` is sanitised on write** by `lib/sanitise.ts` — the storefront renders it as HTML trusting exactly that. It is a deliberate copy of `client-store/src/lib/sanitise-html.ts`, which runs again at render.
 - **A policy page cannot be deleted** (`systemKey` set): the footer and checkout copy link to it, and removing one leaves dead links nobody looks for.
-- **Currency cannot change once the store has taken an order.** Prices are decimals with no currency of their own, so switching the code re-labels every past total rather than converting it.
-- **A store has exactly one admin**, enforced by `store_admins_singleton_key`. No endpoint creates one, so `/staff` explains that rather than offering an invite that the database would refuse.
+- **The currency is picked from a list and is the store's everywhere.** Settings offers every ISO 4217 code in circulation (`lib/currencies.ts`, copied into both `client-api` and `client-admin` — the API validates against the list the panel draws), and `store_settings.currency` is then what the panel prints, the storefront quotes and checkout charges. **`lib/store-currency.ts#loadStoreCurrency` is the one reader for both halves of the API**: the tenant record's `currency` is only what provisioning started the store with and nothing moves it, and the admin session used to report that copy — so a store switched to BDT showed dollars on every panel screen but Settings. Prices are decimals with no currency of their own, so a switch **re-labels rather than converts** (40 stays 40); on a store that has taken orders the API refuses it with `CURRENCY_CHANGE_UNCONFIRMED` unless the body carries `confirmCurrencyChange: true`, which the panel sends only from a dialog that says so. Orders are never touched — `orders.currency` is snapshotted at checkout — so **every money total filters to the current currency** (`inCurrency` on the dashboard, and the same predicate in the orders strip, product insights, customer spend and coupon totals) while counts still count every order: a sum of dollars and taka under one symbol is not a figure. A save that moves the currency calls `forgetStoreCurrency` *before* replying, because `invalidateStorefrontOnWrite` runs in `onResponse` and the panel's `router.refresh()` would otherwise race it back to the old value. The storefront basket re-labels itself on load (`useSyncCartCurrency`) for the same reason nothing is converted.
+- **A store has exactly one admin**, enforced by `store_admins_singleton_key`. No endpoint creates one, and the panel has no staff screen.
 
 ### How a storefront read is answered
 
@@ -315,7 +310,7 @@ Responses are compressed (`@fastify/compress`, brotli then gzip, over 1 KB only)
 list. It used to open the storefront, which answers a different question: the
 shop's product page shows a price, a picture and a description, and says nothing
 about cost price, stock buckets, SKUs, or the variants that are switched off —
-and more than half these lists (customers, refunds, subscribers, messages) have
+and more than half these lists (customers, refunds, messages) have
 no storefront page at all. The storefront link is still offered, under a `Store`
 icon beside the eye and in each panel's footer, where it reads as one of the
 things you can do with a row rather than as the meaning of "view".
@@ -340,19 +335,82 @@ it makes the reader guess which fields are which.
 Rules worth knowing before adding one:
 
 - **A panel shows every column of its row**, including the ones no screen used
-  to: an order's four stage timestamps and `inventory_released`, a product's
-  `view_count` and `return_window_days`, a message's `ip_address`, a return's
-  `reviewed_at`/`received_at`/`completed_at`, a coupon's redemption ledger.
-  `scripts/verify-detail-views.ts` asserts field *presence*, not truthiness — a
-  nullable column that came back null is correct and a column the handler forgot
-  to select is not, and both read as falsy.
-- **Two columns are credentials and are never sent.** `customers.password_hash`
-  is reported as a `hasPassword` flag, `newsletter_subscribers.
-  unsubscribe_token_hash` as `hasUnsubscribeToken` — sending the latter would
-  hand whoever is reading the screen the power to unsubscribe that address.
-  `customer_sessions.token_hash` is omitted the same way. The customer endpoint
+  to: an order's four stage timestamps and `inventory_released`, a message's
+  `ip_address`, a return's `reviewed_at`/`received_at`/`completed_at`, a
+  coupon's redemption ledger. `scripts/verify-detail-views.ts` asserts field
+  *presence*, not truthiness — a nullable column that came back null is correct
+  and a column the handler forgot to select is not, and both read as falsy.
+- **The product panel is the exception, at the owner's request.** It shows what
+  an owner acts on rather than every column: six figures beside the picture —
+  **selling price, purchase price (`cost_price`), profit per sale** on top, in
+  stock, sold and rating below — then the owner's **private note**, then
+  Sales / Stock / Details side by side, then Customers (wishlists, reviews to
+  approve, returns) and the last few stock movements, then variants (only when
+  there are more than one, each with its own purchase price and profit),
+  description and specifications, gallery and search listing. The tiles and
+  the Stock card are today's price against today's purchase price, and a sale
+  counts only inside its window. Sales, Customers and the movements come from a
+  **second read**, `GET /products/:id/insights?days=30`, so the record draws the
+  panel at once and a failed aggregate costs only those cards; "Profit made" is
+  shown only when every variant has a purchase price, because the insights query
+  counts a missing one as zero cost. An unset value is left out rather than
+  dashed — except the purchase price, which says "Not set" since no profit can
+  be shown without it — a card with nothing in it is not drawn, and ids, the
+  stock-record count and `view_count` are gone. It is built from
+  `DetailStat`, `DetailColumns`, `DetailCard`, `DetailFactList` and `keepFacts`
+  in `detail-sheet.tsx`. Only the UI narrowed — `GET /products/:id` still
+  returns every column, and the verify script still checks them all.
+- **The order panel is laid out for reading too, at the owner's request** — but
+  unlike the product panel it drops no column, it only moves the ones nobody
+  acts on to the bottom. Top to bottom: a progress strip (placed → confirmed →
+  packed → shipped → delivered, each dated from its stage timestamp or, where
+  there is none — `packed` has no column — the status history; a cancelled or
+  failed order shows only the steps it reached, then the reason and whether its
+  stock was released), three figures (total, items, payment), then
+  cards two or three across: customer beside the delivery address (billing
+  only when it differs), items with the totals under them, payment,
+  returns beside refunds, the two notes, and history beside a
+  **Record** card holding the ids, IP, `inventory_released`, timestamps and the
+  folded `metadata`. `statusLabel`/`statusVariant` are exported from
+  `status-badge.tsx` so a figure can print a status as words in its colour.
+  It is also the second panel that writes, at the owner's request: its footer
+  carries the order's `allowedTransitions` as buttons (Confirm order, Mark as
+  packed, Cancel order …). They are handed in by `order-manager.tsx` as
+  `moves` and call the list's own `moveOne`, so the cancel-reason prompt, the
+  `orders.cancel` gate and the refresh are the row menu's exactly; a move that
+  lands re-reads the record so the next buttons are the new status's.
+  It also edits the staff note (`PATCH /orders/:id/note`, `orders.update`).
+  **An order has no screen of its own** — `/orders/[id]` was removed as a
+  duplicate of this panel. Every other screen links to an order as
+  `/orders?view=<id>`, which the list opens with the panel already showing
+  (closing it drops `view` from the address), and `next.config.ts` redirects
+  the old `/orders/<id>` there.
+- **Neither does a return or a customer, and no panel has an "Open full
+  record" button.** `/returns/[id]` and `/customers/[id]` were removed at the
+  owner's request; View (and Edit, where a list has one) is the whole surface.
+  What those pages did moved into the panels: the return's review / reject /
+  inspect / complete buttons are the return panel's footer (`ReturnWorkflow`,
+  `returns.approve`), and blocking, marketing consent and the staff note are a
+  *Staff actions* block in the customer panel (`CustomerActions`,
+  `customers.update`). Both lists open from `?view=<id>` through
+  `hooks/use-detail.ts#useAddressedView`, and `next.config.ts` redirects the old
+  paths there.
+- **`products.owner_note` is the one thing a View panel writes** (migration
+  `0016`, `PUT /products/:id/note`, `products.update`). It is the owner's
+  private note — a supplier, a reorder reminder — and it is private by
+  construction rather than by filter: only the admin detail read returns it,
+  and every storefront product query names its columns, so **a storefront
+  query that ever selects `products` whole would leak it**. Saving a note
+  leaves `updated_at` alone ("last edited" is about what shoppers see), audits
+  that a note changed but never its text, and is marked `config: {
+  storefrontUnaffected: true }` so `invalidateStorefrontOnWrite` does not drop
+  the store's whole catalogue cache over a value no shopper can read.
+- **A password hash is a credential and is never sent.** `customers.password_hash`
+  is reported as a `hasPassword` flag. A customer's sessions carry no credential at all now — the token is a JWT that
+  is never written down — so unlike the `token_hash` column they replace there is
+  nothing there to remember to leave out. The customer endpoint
   names its columns one by one rather than spreading the table, so a column added
-  later cannot ride along; the verify script checks all three.
+  later cannot ride along; the verify script checks it.
 - **The lockout columns are not credentials and are returned.**
   `failed_login_count` and `locked_until` are what answer "why can this person
   not sign in", which is the most common thing a shop is asked and could not
@@ -370,8 +428,9 @@ Rules worth knowing before adding one:
   carries — and deliberately *not* the same `:id` as
   `/inventory/:id/transactions`, which is keyed by **variant** because the ledger
   spans warehouses. The two are documented rather than reconciled; the level
-  endpoint returns its own warehouse-scoped copy of the movements so the panel
-  needs one call.
+  endpoint returns its own warehouse-scoped copy of the movements so one call
+  answers it. No panel screen reads either any more (the Inventory screen was
+  removed); both are still exercised by the verify scripts.
 
 ### Lists are scrolled, not paged
 
@@ -441,17 +500,26 @@ from a `'use client'` module and imported by a server component is not that valu
 reached the API and every list 422'd. That module carries no directive on purpose.
 
 Two screens are exceptions to the fetching, not to the rendering. Categories and
-brands still read their whole set in one go, because a drag reorder renumbers the
-real list and the category tree cannot be batched without cutting a family in
-half. They render through the same virtualised table (the tree flattened to its
-open rows), so they lost their pagers along with everything else.
+brands still read their whole set in one go — a category drag reorder renumbers
+the real list and the tree cannot be batched without cutting a family in half,
+and brands are few enough that the screen counts and filters them in the
+browser. They render through the same virtualised table (the tree flattened to
+its open rows), so they lost their pagers along with everything else.
+
+**A brand is a name, an address, a description and one uploaded logo.** Its
+`website_url`, `sort_order`, `seo_title` and `seo_description` columns were
+dropped (migration `0017`), along with `PATCH /brands/reorder` and the list's
+drag handle: brands are listed by name everywhere, and a brand page is described
+to search engines by its own name and description. The logo takes a file only
+(`pasteable={false}`). `PATCH /brands/:id` writes only the keys the body sent,
+because Zod 4 applies `.default()` even under `.partial()`.
 
 ### Two caches sit in process, not in Redis
 
 Redis is shared between both platforms and is usually not local to either, so a round trip to it is the largest fixed cost in a request. Two values are read on literally every request and are held in the API process as well:
 
 - **The tenant record** (`lib/company-client.ts`). Held 3 seconds. `company-api/src/lib/tenant-cache.ts` **publishes** every key it deletes on `tenant:v2:invalidate`, and `subscribeToInvalidations` clears it — so a suspension, an expiry or a domain change still lands at once and the TTL is only the backstop for a dropped message. The channel name is copied into both files on purpose; change them together.
-- **The store currency** (`modules/storefront/service.ts`). Held 5 seconds. It is part of every catalogue cache key, so it cannot be fetched alongside the listing it keys — and it is frozen for the life of a trading store anyway.
+- **The store currency** (`lib/store-currency.ts`). Held 5 seconds. It is part of every catalogue cache key, so it cannot be fetched alongside the listing it keys — and it moves only when the owner saves a different one, which drops both copies on the instance that took the write; any other instance catches up within the 5 seconds.
 
 `/health` is on the rate limiter's `allowList` for the same reason: a liveness probe that depends on a remote Redis fails when Redis blips and takes healthy instances out of rotation.
 
@@ -475,7 +543,107 @@ Deleting is not always deleting: a product with `sold_count > 0` is set inactive
 
 **The catalogue half is unguarded, and therefore may never return an unpublished row** — the same fact twice. The store admin session is what separates the panel's view of the catalogue from a shopper's, and there is no session here, so the filter lives in the query: `status = 'active'`, `is_active`, `status = 'published'`, `status = 'approved'`. `scripts/verify-storefront.ts` is what proves it still does.
 
-**The account half is guarded by `requireCustomer`** — a fourth cookie family (`store_customer_session`, rows in `customer_sessions`) that satisfies none of the other three and carries no permissions at all. `lib/session.ts` owns it alongside the admin ones so it inherits `cookieDomain`, the per-store `.{slug}.{root}` scoping that is the reason one store's session cannot be offered to another store's origin.
+**The account half is guarded by `requireCustomer`** — a fourth cookie family (`store_customer_session`, a JWT signed with a key of its own and naming a tenant-scoped Redis record) that satisfies none of the other three and carries no permissions at all. `lib/session.ts` owns it alongside the admin ones so it inherits `cookieDomain`, the per-store `.{slug}.{root}` scoping that is the reason one store's session cannot be offered to another store's origin.
+
+**Every listing scrolls, and the filter panel asks the shopper's own questions.**
+`/shop`, a category, a brand and a search are one component
+(`components/catalog/product-listing.tsx`), so all four changed together.
+
+There are **no page numbers anywhere on the storefront**. A pager made a shopper
+decide, twenty products in, whether the shop was worth a second click — and
+charged for that decision twice, since page two was a whole new document: header,
+filter rail, facet counts and total all re-fetched and re-rendered to change the
+cards in the middle. `components/catalog/listing-feed.tsx` appends **20 at a
+time** (`PAGE_SIZE`) through the `loadListingPage` Server Action — an action for
+the reason `loadCatalogPage` is one: the Commerce API identifies the store from
+the hostname, and a client component rebuilding `storeCall` for itself is how a
+"load more" quietly reads a different store. A batch is items and a count and
+**no facets**, which is most of what an infinite listing would otherwise cost.
+
+Three things about it are load-bearing.
+
+- **The first batch is the server's and stays the server's**, exactly as the
+  homepage feed's is: it arrives rendered, so the page paints products without
+  waiting for JavaScript and a crawler sees them, and `router.refresh()` after a
+  filter change is what moves it. `ProductListing` keys the feed on a
+  fingerprint of that batch, so a listing that has genuinely moved on remounts
+  instead of appending pages of a list that no longer exists.
+- **The trigger is the last element *inside* the grid**, not a marker under it.
+  On a phone every product grid is a sideways-scrolled rail (see *A phone is
+  given the desktop layout*), so "under the grid" is on screen in the first
+  frame and a marker there would pull the whole catalogue down at once. As a
+  child of the grid it rides to the far end of the rail, and an
+  `IntersectionObserver` — which honours clipping by every scrolling ancestor —
+  reports it hidden until the shopper actually gets there. One element, both
+  layouts, no branch. The observer is rebuilt after each batch, because it
+  reports *crossings*: a marker that stayed in view would never report again and
+  the scroll would stall one batch in.
+- **`?page=` still works and is still a real page.** The "Show 20 more" control
+  is an anchor to the next one that JavaScript intercepts, so a visitor without
+  it — a crawler included — gets a working, indexable listing rather than twenty
+  products and a dead button. The endpoint kept its offset paging for the same
+  reason; unlike the admin panel's keyset lists it is bounded (500 pages) and
+  sits behind four cache layers, so the cost of a deep `OFFSET` is paid rarely
+  and never twice.
+
+**The panel offers four questions, in the order a shopper asks them** —
+which aisle, which offer, what price, whose — and `buildFacets` pushes them in
+that order because the sidebar draws them in the order they arrive.
+
+- **Category** (`?sub=`) is the group that was missing. On a category page it
+  lists that department's own children; on `/shop` and `/search` it lists the
+  departments. It replaced the subcategory chips that used to sit above the
+  grid: the same control, drawn a second time, in a place with no counts and
+  room for one choice. `sub` is genuinely multi-select now, and
+  `ListingFilters` keeps `categoryIds` (the page's own scope) apart from
+  `subCategoryIds` (what is ticked) so the group can be counted with its own
+  filter lifted — a merged list cannot have half of itself lifted, which is what
+  made ticking a department a one-way door. A department's count is its whole
+  subtree, rolled up in memory from **one** grouped scan rather than a query per
+  candidate.
+- **Offers** (`?offer=`) is the row of badges: On Sale, Discounted, Flash Deal,
+  Clearance, Coupon Available, Best Seller, Trending, Top Rated.
+  **Every one is a fact some other part of the platform already acts on** — a
+  running `flash_sales` campaign, a coupon whose minimum spend this product's own
+  price clears, the "Best seller" flash the card already prints, a purchase in the last 30 days — rather
+  than a label an owner ticks. A filter that promises a deal the till does not
+  honour is worse than no filter, which is also why `coupons.scope` and
+  `target_ids` are not read here: `applyCoupon` ignores them, so every live
+  coupon is order-wide in fact. The three discount offers are one ladder (any
+  sale → 10% → 40%), so each is a subset of the one above and Clearance is a
+  narrowing of On Sale rather than a competing claim. Trending counts **orders**
+  because `products.view_count` and `product_daily_metrics` are both declared
+  and neither is written by anything in this API — a filter over either would
+  return nothing for ever and read as a broken shop.
+- **Price** (`?price=200-500`) is a ladder of bands rather than two number
+  boxes, which asked a shopper to type two numbers to discover the shop sells
+  nothing between them. Bounds are half-open so nothing is counted twice, the
+  thresholds are fixed rather than quantiles of the current result set — a
+  bracket that moves as the listing is filtered cannot be learned — and the
+  option carries `min`/`max` as numbers so the **storefront** writes the label:
+  it holds the currency and the visitor's locale, and `৳` is half the width of
+  `BDT` in a column that narrow.
+- **Colour and the star ladder are gone.** A swatch attribute picks a *variant*,
+  which is the thing carrying the price and the stock a checkout reserves, so it
+  belongs to the product page's selector where the shopper can see which
+  combinations exist and which are in stock; in the panel it was a list of names
+  taking the height of six departments to answer a question nobody asks before
+  choosing the product. Rating became the "Top Rated" offer. `?rating=`,
+  `?minPrice=` and `?maxPrice=` all still work — the endpoint's contract did not
+  narrow — they are simply no longer drawn.
+
+An option that would return **nothing** is dropped everywhere: a box whose only
+outcome is an empty grid. An option that would return **everything** is dropped
+from Availability and kept in Offers, and the difference is deliberate —
+availability is one box, so one that cannot narrow is pure noise, while
+"Top Rated 241" out of 241 is the shop answering a question about itself.
+Both `?price=` and `?offer=` are whitelists against what the panel published, so
+a hand-edited value asks for nothing rather than for something no facet could
+have offered. `scripts/verify-storefront.ts` proves the pair of them: it takes
+the count printed beside every option, asks the listing for that option, and
+requires the total to be the number the shopper was shown — a facet that counts
+one thing and filters another is invisible from outside, because both halves
+answer 200.
 
 **A card can add to the basket, and a card with options asks first.** A shopper
 filling a basket with everyday things was made to open a product page per item
@@ -530,9 +698,110 @@ special happens on the server render: the cart's `serverSnapshot` is empty, so
 the first paint is the plain plus and `useSyncExternalStore` swaps in the stepper
 on hydration.
 
-**Checkout sits between the two.** `optionalCustomer` attaches a shopper when one is signed in and says nothing when there is not, because requiring an account in order to buy something is how a shop loses the sale. The request carries **ids and quantities and no money at all** — price, sale window, coupon, shipping and totals are every one of them recomputed from the tenant database, because the basket lives in `localStorage` and anything priced there is a number the customer could have edited. Stock moves `available → reserved` with a **single conditional `UPDATE`**, never read-modify-write; the `>= 0` CHECK constraints are what turn a race for the last unit into `INSUFFICIENT_STOCK` rather than an oversell.
+**There are three ways into a shop, and they make one kind of account.**
+Email and password is the original; a phone number and a six-digit code is the
+one this market actually expects; Google is one tap on a device already signed
+in. `store_settings` has no say in it — the API reports what is available in
+`config.auth`, the sign-in page draws only that, and the API refuses the rest, so
+a control can never lead to a 503.
 
-Two things worth knowing. `GET /account/me` answers **404, not 401**, when signed out — the storefront's account layout redirects on a null customer and a 401 would throw instead. And a guest who has just paid is let back onto their own receipt by `store_guest_orders`, an opaque cookie whose SHA-256 keys a Redis set of the order numbers that browser placed; without it `/checkout/success/<n>` would 401 the customer who had just bought something.
+**A phone number is an identity, and `customers.phone` is not it.** That column
+has always been a contact detail an admin or a customer could type in any shape,
+so it holds whatever a store has collected over its life and cannot carry a
+unique index without a migration that discards somebody's number. `phone_e164`
+is a second column written **only by a passed code**, so every value in it is
+normalised, unique and proved. `lib/phone.ts#toE164` is the single normaliser —
+copied nowhere, deliberately, because the shape written at sign-up is the shape a
+later sign-in must reproduce exactly and two copies of that rule is a customer
+locked out of their own account by a spelling.
+
+**`customers.email` is nullable now**, because an account made from a handset
+has no address until its owner adds one. Postgres treats NULLs in a unique index
+as distinct, so `customers_email_key` was left exactly as it was. What this costs
+is one honest question at the till: checkout still requires an email for the
+receipt, and a phone-only shopper is asked for one there rather than at sign-up,
+where it would have been a second thing to answer before buying anything.
+
+**The phone flow is three steps and their order is the design.** `request` sends
+a code and says *nothing* about whether the number has an account — a resend
+inside the cooldown answers in the same shape as a fresh send, for exactly that
+reason. `verify` checks the code and only then reveals which it was: a known
+number is signed in, an unknown one comes back `name_required` with a ticket.
+`register` spends the ticket. Asking for a name up front would have been shorter
+and would have made the form an account-existence oracle anybody could walk. No
+password is set anywhere in it, because one would add a secret to forget without
+adding a factor — the code and the password would live on the same handset.
+
+**Codes are sent by `lib/sms.ts`, which has one driver and it is `log`.** That is
+the same arrangement `MAIL_DRIVER=log` provides for reset links: in development
+the code is written to the API log, which is how you read it. A real gateway is a
+branch in that file and a value added to `SMS_DRIVER`; it is deliberately not
+guessed at, because every Bangladeshi provider has a different idea of what an
+API looks like and a wrong guess is worse than an obvious gap. In production the
+body is never logged.
+
+**Google is one redirect URI for the whole platform**, and everything awkward
+about the flow follows from that. Google matches redirect URIs by exact string
+and supports no wildcard, so registering one per shop does not scale past the
+first few and makes custom domains impossible. The registered URI is
+`{API_PUBLIC_URL}/api/v1/oauth/google/callback` — this API's own address, and
+therefore the one route on it with **no tenant**, listed in `plugins/tenant.ts`'s
+exempt prefixes beside the payment webhooks. Which store a sign-in belongs to
+rides in `state`, which the API wrote itself and spends once; the callback then
+parks the profile under a single-use hand-off code and bounces the browser back
+to the shop, where `POST /auth/google/exchange` runs under the store's own
+hostname and the session cookie can land on the origin it belongs to. Signing
+anyone in at the callback would mean setting a cookie for a domain that response
+is not served from, which browsers correctly refuse.
+
+Three more things about it are load-bearing. **An account is matched on Google's
+`sub`, never on the address** — a Workspace administrator can change a user's
+email and a released Gmail address can in principle be reissued, so matching on
+one hands somebody another person's order history. **An existing password account
+is linked on the spot, but only when Google says `email_verified`**; without that
+flag the address is something the profile merely claims, and linking on a claim
+would let anyone who can create an account at an identity provider take over a
+shop account by naming its owner. And **the `id_token` signature is deliberately
+not verified**: OIDC Core §3.1.3.7 permits TLS server authentication instead when
+the token comes straight back from the token endpoint, which it does here, over
+HTTPS, authenticated with the client secret. The claims that say what the token
+is *for* — `iss`, `aud`, `exp` — are still checked, because an `aud` that is not
+this client is a token minted for a different application.
+
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are both-or-neither: with neither,
+`config.auth.google` is false, the button is not drawn and every Google route
+answers 503. `SMS_DEFAULT_COUNTRY_CODE` (default `+880`) is what completes a
+number typed the way it is dialled at home.
+
+**Checkout is on the guarded side.** `POST /checkout` requires a customer (`requireCustomer`), so a signed-out basket is refused with a 401 rather than taken as a guest: every order belongs to a customer record, and the shop can answer "who bought this" without matching an email address typed at the till. The storefront's `/checkout` page redirects to `/login?next=/checkout` before the form is drawn — but that is a courtesy to somebody using a browser, and the guard is what makes it true of a POST from anything else. **Only `POST /checkout` moved**: `/coupons/validate` keeps `optionalCustomer`, because it is asked from the basket, before the sign-in the order will demand, and refusing to price a code until then would hide the discount at the moment it is being decided on. The request carries **ids and quantities and no money at all** — price, sale price, coupon and totals are every one of them recomputed from the tenant database, because the basket lives in `localStorage` and anything priced there is a number the customer could have edited. Stock moves `available → reserved` with a **single conditional `UPDATE`**, never read-modify-write; the `>= 0` CHECK constraints are what turn a race for the last unit into `INSUFFICIENT_STOCK` rather than an oversell.
+
+Two things worth knowing. `GET /account/me` answers **404, not 401**, when signed out — the storefront's account layout redirects on a null customer and a 401 would throw instead. And `store_guest_orders` — an opaque cookie whose SHA-256 keys a Redis set of the order numbers a browser placed — is no longer written by checkout, because the buyer now always has an account and `/checkout/success/<n>` is authorised by their session. It is still **read** by `GET /account/orders/:orderNumber`, so the receipts of orders taken while checkout was a guest flow keep opening for the browsers that placed them until those cookies expire; drop that read once no such order is inside its return window.
+
+**Where an order went is remembered, so the next checkout opens filled in.** An
+order's address is snapshotted onto `order_addresses` and frozen there, and
+nothing wrote `customer_addresses` except the address book screen — so a shopper
+who never opened `/account/addresses` was asked the same nine questions on every
+order, and the form's prefill had nothing to read. `rememberAddress` in
+`checkout.routes.ts` writes it **after the transaction commits**, for the reason
+`audit()` does: the address book is a convenience, and an order that was taken
+must never be reported as failed because we could not remember where it went —
+its failure costs the next prefill and is logged rather than raised.
+
+Three outcomes, in a fixed order, and the order is the design. An address whose
+**content** already matches a saved one is left exactly as it is, so ordering
+twice to the same place cannot fill the book with copies of itself. Otherwise
+the address the form was filled from — named by the optional
+`shippingAddressId` the form posts back — is **updated in place**, because a
+correction made at the till is the shopper's address now, and saving it beside
+the original would prefill whichever was default next time, as likely as not
+the one they had just fixed. Otherwise it is written as new, and becomes the
+default only when it is the only one, so a one-off delivery never takes the
+default from a book the shopper curated. That id is the browser's and is
+matched against the sender's own rows in the WHERE clause rather than trusted;
+the worst a forged one can do is overwrite an address of the sender's own. The
+one thing deliberately not remembered is a phone longer than
+`customer_addresses.phone` holds (24, against checkout's own 32) — the order
+carries it in full, and a truncated copy would prefill a wrong number for ever.
 
 Payment is **COD plus a `mock` gateway** (`services`… `payments.routes.ts`), both live in the `payment_provider` enum and neither needing credentials. Stripe and SSLCommerz are adapter seams. The mock gateway confirms over GET because a form POST from the API's own origin would be refused by the CSRF hook; a real gateway posts a signed webhook to the tenant-exempt `/api/v1/webhooks` prefix instead, where `payment_webhook_events`' unique `(provider, event_id)` makes a redelivery a no-op.
 
@@ -558,7 +827,7 @@ wired would have meant tidying the catalogue silently deleted artwork.
 Where they appear is a **homepage block naming a placement**, not artwork saved
 into the page: a `banner` or `promo_trio` section carrying `config.bannerPosition`
 is filled in by `resolveBanners` at read time, so a campaign starts and finishes
-on its own dates with nobody opening the homepage screen. `banner` also reads
+on its own dates with nobody touching the homepage. `banner` also reads
 `config.columns` and `config.ratio`; `{ columns: 1, ratio: 'strip' }` is the wide
 advertising break between two product rows, and `PromoBannerCard` drops the scrim
 and the text column entirely for a banner with no copy, because artwork with the
@@ -676,8 +945,7 @@ had to reach the enum, the migrations or any tenant database.
   that the list is complete, and a "+4 more" is the rail again. `Category.
   children` is already in the categories payload, so the depth costs no second
   call; it stops at grandchildren, because a fourth level turns a homepage panel
-  into a file explorer. Still rendered for a store that asks for it — the panel's
-  *How it lists* control picks between the three modes, and
+  into a file explorer. Still rendered for a store whose block asks for it, and
   `scripts/show-products-under-categories.ts` is what moved the stores seeded
   before the products mode existed (idempotent, dry until `--yes`; it rewrites
   the two keys and leaves a hand-edited `categoryIds`, `limit`, `rows` or
@@ -688,7 +956,7 @@ had to reach the enum, the migrations or any tenant database.
   thing on the page, and it existed because nothing else showed the shop rather
   than answering a question about it, which is what the department panels do now,
   aisle by aisle instead of as one undifferentiated wall. Still rendered for a
-  store that adds one from the panel, and `add-catalog-blocks.ts` still offers it
+  store that has one, and `add-catalog-blocks.ts` still offers it
   to an older store. It **cannot** be a longer rail: a section's products are resolved
   into the homepage payload that four cache layers then hold, and `readLimit`
   caps that at 24 for exactly that reason. So the first batch is server-rendered
@@ -748,7 +1016,7 @@ it is outside the tree React hydrates. With JavaScript off nothing is marked and
 the phone gets the plain desktop grid. Body text is still scaled with the page, so
 fine print is a pinch-zoom away — zoom is deliberately never disabled.
 
-A newly provisioned store is seeded with a usable shop by `services/store-content-seed.ts`: navigation, a homepage, the six policy pages, FAQs, cash-on-delivery, a default warehouse, zone and shipping method. It is guarded on the `content_seed_version` key in `platform_sync`, **not** on "is the table empty" — an owner who deletes the seeded pages must not get them back on the next request.
+A newly provisioned store is seeded with a usable shop by `services/store-content-seed.ts`: navigation, a homepage, the six policy pages, FAQs, cash-on-delivery and a default warehouse. It is guarded on the `content_seed_version` key in `platform_sync`, **not** on "is the table empty" — an owner who deletes the seeded pages must not get them back on the next request.
 
 ### The tenant cluster is sharded
 
@@ -802,6 +1070,106 @@ Both this and `services/store-admin.ts` reach the tenant databases through `db/t
 
 The store admin login and the SaaS account login are now **independent**: changing or resetting one deliberately does not touch the other.
 
+### Everything is HTTPS
+
+Plaintext HTTP is refused, everywhere, in production. Not preferred against —
+refused. It is enforced in four places rather than one, because HTTPS is the
+guarantee whose failure has **no symptom**: a platform served over plaintext
+renders identically, answers identically and logs identically to one served over
+TLS. The only difference is who else can read it, and nothing in the application
+notices. So each layer catches a different way of getting it wrong.
+
+1. **At boot** (`config/env.ts`, both APIs). In production the API refuses to
+   start unless every address it prints or calls is `https://` —
+   `API_PUBLIC_URL`, `WEBSITE_URL`, `ADMIN_URL`, `COMPANY_API_URL`,
+   `CLIENT_ADMIN_URL_PATTERN`, `ADMIN_URL_PATTERN`, `STORE_URL_PATTERN`,
+   `R2_ENDPOINT`, `R2_PUBLIC_URL`. A deployment that is wrong about this fails
+   loudly at the one moment somebody is watching, rather than running perfectly
+   well and quietly insecure.
+2. **Per request** (`plugins/https.ts`, both APIs). `x-forwarded-proto` is read —
+   trustworthy for the reason `request.ip` already is, because `trustProxy` is on
+   and the edge sets it. A **safe method is redirected 307**; **anything else is
+   refused 403** (`HTTPS_REQUIRED`). The asymmetry is the point: by the time a
+   POST arrives, its body and its `Cookie` header have already crossed the
+   network in the clear, and inviting the client to replay them over TLS does not
+   un-send the first copy. `/health` is exempt, because a load balancer probes it
+   over plain http on the instance's own address.
+3. **In the browser** (the request hook + `next.config.ts`, all four Next apps).
+   The hook upgrades a plaintext request; HSTS — two years, `includeSubDomains`,
+   `preload` — is what stops the browser sending one at all, and the CSP's
+   `upgrade-insecure-requests` catches sub-resources authored with an absolute
+   http address. HSTS is **production-only**: it is ignored over http anyway, but
+   `next dev` behind an https tunnel would pin `includeSubDomains` onto
+   `localhost` itself and make every other localhost port unreachable until the
+   pin expired.
+
+   The hook lives in `src/proxy.ts` on the two client apps and `src/middleware.ts`
+   on the two company ones — the same file under Next 16's name and Next 15's.
+   See the trap below; the two names must never appear in one app.
+4. **In the values** (`lib/secure-url.ts`, both APIs; `secure()` in each
+   frontend's env module). Covered below.
+
+**307, not 308, and never 301.** A 301 lets an intermediary rewrite the method.
+A 308 fixes that but is *permanent and cached*, so a proxy that mislabels its own
+https traffic as http would pin an infinite redirect into every visitor's browser
+— and fixing the proxy would not un-pin it. Nothing is lost by making the
+redirect temporary, because the browser is not meant to learn the upgrade from
+it: HSTS is what does that, and it is the stronger promise, rewriting the request
+before it is sent rather than after it has already gone out in the clear once.
+
+**`z.string().url()` is not a scheme check**, and every URL column on the
+platform used to rest on one. Zod builds on `new URL()`, which parses far more
+than the name suggests — `javascript:alert(1)`, `data:text/html;base64,…`,
+`vbscript:` and `file:///etc/passwd` all pass it. The first two are the whole of
+stored XSS: a banner's `linkUrl`, a category's `imageUrl` and a product's
+`videoUrl` are owner-authored and then rendered by the storefront as an `href`
+and a `src`, so a `javascript:` value in one is script the shop serves to its own
+customers under its own origin. `lib/secure-url.ts` replaces it —
+`httpsUrl`, `httpsUrlNullable`, `linkTarget` — and is a deliberate copy in both
+APIs, under the same rule the sanitiser is. `linkTarget` additionally refuses
+`//evil.com`: a protocol-relative URL begins with a slash and is not a path, it
+is a link off-site wearing one's clothes.
+
+This is defence in depth rather than the only line: `client-store`'s
+`sections/parse.ts` already refused these at render, and `lib/sanitise.ts` still
+refuses them inside CMS bodies. The difference is that a value refused at the
+write boundary never reaches the column, so every *other* reader of that column
+inherits the guarantee instead of having to re-derive it.
+
+**HTTPS at the edge secures the half of the journey the customer can see**, and
+the other half is the one people forget. A session token read off the wire
+between an API and Redis is the same account taken; a tenant database reached
+over plaintext is the order history of every store on that shard. So production
+also requires `rediss://`, `?sslmode=require` on `COMPANY_DATABASE_URL`, and
+`"ssl": true` on every entry in `TENANT_SHARDS` — `sslmode=prefer` and `allow`
+are refused by name, because they try TLS and fall back to plaintext without
+saying so. `ALLOW_PLAINTEXT_DATA_STORES=true` is the opt-out, deliberately
+unwieldy to type, and for a genuinely private network only. It does **not**
+soften any of the HTTPS rules.
+
+**Development is exempt and has to be.** The six apps talk to each other over
+`http://localhost` on six ports and there is no network between them, so
+`FORCE_HTTPS` follows `NODE_ENV`, `isSecureUrl` allows loopback outside
+production, and the frontends' `secure()` helper upgrades every non-loopback
+`http://` address while leaving `http://{slug}.localhost` alone. Nothing about
+`npm run dev` changed.
+
+```bash
+cd client/client-api  && npx tsx scripts/verify-https.ts   # 34 checks, no server needed
+cd company/company-api && npx tsx scripts/verify-https.ts   # 32 checks, no server needed
+cd client/client-api  && npx tsx scripts/audit-insecure-urls.ts [--slug e-comarch]
+```
+
+Both `verify-https.ts` scripts run against a synthetic environment and an
+in-process Fastify instance, so they need no database, no Redis and no network —
+which is what makes them runnable in CI and on a laptop that holds no production
+`.env`. `audit-insecure-urls.ts` is the other half: a validator only guards what
+is written after it exists, so this sweeps a tenant's URL columns for rows that
+predate it, discovering the columns from `information_schema` rather than
+carrying a list that would silently age. It separates `http://` (mixed content, a
+formatting problem) from `javascript:`/`data:` (evidence, not a formatting
+problem) and exits non-zero only on the second.
+
 ### Auth: three cookie families that never interoperate
 
 | Cookie | Issued by | Guard |
@@ -810,13 +1178,25 @@ The store admin login and the SaaS account login are now **independent**: changi
 | `company_admin_session` | company-api | `requireAdmin`, `requireAdminReauth` |
 | `store_admin_session` | client-api | `requireStoreAdmin`, `requirePermission(key)`, `requireSuperAdmin` |
 
-Sessions are opaque 32-byte tokens stored only as SHA-256. Partial/challenge sessions (`requireAdminPartial`, `store_admin_mfa`) satisfy **no** protected endpoint and are exchanged for a full session with the token rotated. `GET /session` endpoints are deliberately unguarded and return `{ authenticated: false }` rather than 401 — guarding them is what caused sign-in redirect loops. Sensitive mutations return `REAUTH_REQUIRED` when the last authentication is stale; the panels catch it, prompt, call `/reauth`, and retry once (`company-admin/src/components/admin/reauth-provider.tsx`).
+**A session is a JWT in an HttpOnly cookie, with a Redis record behind it.** The two halves answer different questions and neither is sufficient alone. The **JWT** answers *is this real, and who is it for*: HS256 over `lib/jwt.ts` — hand-rolled on `node:crypto`, no dependency, for the reason `lib/storage.ts` signs SigV4 by hand — checked with **no I/O at all**, so a forged, expired or wrong-audience cookie is refused before Redis is asked anything. The **Redis record** its `jti` names answers *is it still live*: a JWT cannot be recalled once issued, and signing out, signing out everywhere, and a password change ending every other login are exactly that. **No record means no session**, which is what keeps revocation immediate rather than advisory.
+
+Three things about the tokens are load-bearing. **The `alg` header is never trusted** — it is compared against the one algorithm the file supports before the signature is looked at, so `{"alg":"none"}` and the confuse-the-key trick both fail closed. **`aud` is mandatory and exact**, and each family signs with its own key (`ADMIN_AUTH_SECRET` / `CLIENT_AUTH_SECRET` on the company side; two keys derived from `STORE_AUTH_SECRET` on the client side), so a client token is not merely labelled differently from an admin's — it cannot be verified as one. And **everything that changes lives in the record, never in the claims**: last seen, the reauth stamp, remember-me and the passcode challenge all move during a session's life, and a claim that moves is a claim that goes stale inside a cookie the API cannot reach.
+
+**Sliding expiry is the one thing this costs.** A JWT's expiry is signed into it, so extending a session means minting a **new token for the same `jti`** — which is why `touch*` returns a token and the guards write it back every five minutes. Re-writing the cookie with the string the browser already sent would slide the cookie and not the token, and the user would still be signed out mid-task with nothing to say why.
+
+Partial/challenge sessions (`requireAdminPartial`, `store_admin_mfa`) satisfy **no** protected endpoint — they are minted under an audience of their own, so they do not merely fail a check further in, they fail to verify at all — and are exchanged for a full session with the record destroyed and the `jti` rotated. `GET /session` endpoints are deliberately unguarded and return `{ authenticated: false }` rather than 401 — guarding them is what caused sign-in redirect loops. Sensitive mutations return `REAUTH_REQUIRED` when the last authentication is stale; the panels catch it, prompt, call `/reauth`, and retry once (`company-admin/src/components/admin/reauth-provider.tsx`).
 
 The company admin's passcode is asked **once per browser**, not once per sign-in. Clearing it issues a `company_admin_device` cookie (opaque token, SHA-256 in Redis under `admin-device:*`, `ADMIN_TRUSTED_DEVICE_DAYS`, default 1); inside that window `POST /admin/login` returns `{ otpRequired: false }` and signs in on the password alone. The token is a second secret, never a credential — it is only consulted *after* the password verifies, the lookup fails closed if Redis is down, and a password change forgets every remembered browser. Signing out deliberately keeps the browser remembered; `POST /admin/logout { forgetDevice: true }` is the opt-out. `npx tsx scripts/verify-admin-trusted-device.ts` (24 checks) is the proof that none of this softens the password.
 
 Store-admin permissions are enforced in Fastify per route, never by hiding buttons. `STORE_SUPER_ADMIN` holds everything implicitly and has **no** rows in `admin_user_permissions`, so a grants-table bug can never lock an owner out.
 
 Singleton accounts are enforced by the database, not by code: a unique index on a constant column blocks a second `company_admin` row, and `store_admins_singleton_key` blocks a second store admin. No endpoint creates either.
+
+**There are no session tables.** `company_admin_sessions`, `client_sessions`, `admin_sessions` and `customer_sessions` were dropped (`company-api/drizzle/0010_*`, `client-api/drizzle/0011_*`); the record lives in the Redis both platforms already share, keyed `session:<family>:<jti>` on the company side and **tenant-scoped** `t:<ref>:session:<family>:<jti>` on the client side, with a `session-index:…:<subject>` set per principal so "sign out everywhere" needs no keyspace scan. The screens that used to read those tables — `/dashboard/security`, the panel's own sessions list, a customer's sessions in the admin panel — read the records instead and are unchanged in shape.
+
+Two consequences worth knowing. **The token is not stored in any form**, so unlike the `token_hash` column it replaces there is nothing in a dump to leave out or to replay. And **`company-api/src/services/store-admin.ts` writes the client platform's key format by hand** to end every panel session when it resets a store admin's password across the plane boundary — the same copied-constant arrangement as the `tenant:v2:invalidate` channel, and it must be changed in both places at once.
+
+`store_guest_orders` is deliberately **not** a JWT and not a session: it identifies nobody, carries no claims, and only authorises reading the receipts a browser actually created, so it stays the opaque token it always was. Checkout no longer mints one — an order needs an account — and it survives only to keep the receipts of guest-era orders reachable.
 
 ### API and error conventions (both APIs)
 
@@ -844,6 +1224,23 @@ Success is `{ data }`, or `{ data, meta }` for a list. The **admin** lists are k
   `scripts/verify-edit-fields.ts` exists because a silently-dropped field and a
   saved one look identical from the form: it sets each field an edit form offers
   and reads the record back.
+- **Next 16 calls it `proxy.ts`, and an app may have one name or the other but
+  never both.** `middleware.ts` still runs — `company-web` and `company-admin`
+  are on it — but it is the Next 15 name, and a `middleware.ts` added beside an
+  existing `proxy.ts` stops **every route in the app resolving**. It does not
+  fail as an error naming the conflict: every path returns the app's own 404,
+  rendered inside a layout that worked, which reads as a routing or data bug
+  anywhere but here. `client-store` already had `src/proxy.ts` (the design
+  preview), so its HTTPS upgrade lives in that file rather than in one of its
+  own; `client-admin` uses `proxy.ts` too, being newer. Reach for `proxy.ts` in
+  anything new, and check for the other name before adding either.
+- **`z.string().url()` is not a scheme check.** Zod builds on `new URL()`, which
+  accepts `javascript:alert(1)`, `data:text/html;base64,…`, `vbscript:` and
+  `file:///etc/passwd` — every one of them a valid URL and none of them something
+  an owner may store in a column the storefront renders as an `href` or a `src`.
+  Reach for `httpsUrl` / `httpsUrlNullable` / `linkTarget` from `lib/secure-url.ts`
+  instead; they refuse those four *and* plain `http://`, which is mixed content on
+  an https page. See *Everything is HTTPS*.
 - **Three coupon columns are declared and unread.** `coupons.scope` /
   `target_ids` / `is_stackable` are not consulted by `applyCoupon`. They are
   deliberately **not** on the edit forms: a control that sets a restriction
@@ -852,15 +1249,21 @@ Success is `{ data }`, or `{ data, meta }` for a list. The **admin** lists are k
   `banners.category_id` used to be listed here and no longer is — it is the
   banner's **destination** now, wired end to end (see *Banners*), which is the
   order this rule asks for.
-- **The storefront's category rail is fed from three places, and only one of
+- **A category is a name, an address and one uploaded picture.** Its
+  `description`, `icon_url` and `banner_url` columns were dropped (migration
+  `0013`), and the panel's category image takes a file only —
+  `ImageUpload pasteable={false}` hides the address box, which every other
+  image field still offers. Do not add any of the three back as a stray read:
+  `scripts/verify-edit-fields.ts` fails if a category response carries one.
+- **The storefront's category rail is fed from two places, and only one of
   them is on the category itself.** Which departments it lists is
-  `categories.show_in_menu`; the picture beside one is `categories.icon_url`;
-  the built-in glyph is `storefront_settings.header_configuration.categoryIcons`,
-  a **slug**-keyed map edited on the panel's *Design* screen rather than in the
-  category editor, because that is where the storefront looks it up. Moving a
-  category's slug therefore leaves its glyph behind. The panel seeds its editor
-  from the stored map rather than from the categories on screen, so saving the
-  design never prunes an entry for a category it was not showing. The rail
+  `categories.show_in_menu`; the glyph beside one is
+  `storefront_settings.header_configuration.categoryIcons`,
+  a **slug**-keyed map with **no editor in the panel** — it is written by
+  `scripts/seed-demo-store.ts`, and `PUT /website/design` keeps the stored map
+  whenever a body omits it, which the Settings screen always does. It is not on
+  the category itself because the storefront looks it up by slug, so moving a
+  category's slug leaves its glyph behind. The rail
   itself lists **every** top-level category and scrolls; it used to stop at ten
   and end on a `More Categories` link, which asked the reader to leave the page
   to find out what else was in the shop.

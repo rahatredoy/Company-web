@@ -19,13 +19,14 @@
 import pg from 'pg';
 import { eq, inArray } from 'drizzle-orm';
 import { db, pool } from '../src/db/client';
-import { clientAccounts, clientSessions, plans, tenants } from '../src/db/schema/index';
+import { clientAccounts, plans, tenants } from '../src/db/schema/index';
 import { config } from '../src/config/index';
 import { locateShard, shardClientOptions } from '../src/services/tenant-shards';
-import { generateToken, sha256 } from '../src/lib/crypto';
+import { sha256 } from '../src/lib/crypto';
 import { hashOtp } from '../src/lib/otp';
 import { hashPassword } from '../src/lib/password';
 import { addHours } from '../src/lib/utils';
+import { createClientSession, revokeAllClientSessions } from '../src/lib/session';
 
 const API = config.api.publicUrl.replace(/\/$/, '');
 /** Planted in place of the emailed passcode — see `plantOtp`. */
@@ -189,14 +190,10 @@ async function createClient(client: TestClient): Promise<{ slug: string; adminUr
     })
     .returning({ id: clientAccounts.id });
 
-  const token = generateToken(32);
-  await db.insert(clientSessions).values({
-    clientAccountId: created!.id,
-    tokenHash: sha256(token),
-    otpVerified: true,
-    expiresAt: addHours(new Date(), 4),
-  });
-  const cookie = `company_client_session=${token}`;
+  // Minted through the API's own session module: the cookie holds a signed JWT,
+  // so there is no row to plant and a hand-rolled token would not verify.
+  const session = await createClientSession(null, created!.id, false, { otpVerified: true });
+  const cookie = `company_client_session=${session.token}`;
   console.log('  account created and verified');
 
   const chosen = await call('/api/v1/client/onboarding/plan', {
@@ -260,7 +257,7 @@ async function createClient(client: TestClient): Promise<{ slug: string; adminUr
 
   // The sessions above were only needed to drive setup; a real sign-in issues
   // its own, and leaving them behind would be a live cookie in a script's log.
-  await db.delete(clientSessions).where(eq(clientSessions.clientAccountId, created!.id));
+  await revokeAllClientSessions(created!.id);
 
   return {
     slug: store.slug,

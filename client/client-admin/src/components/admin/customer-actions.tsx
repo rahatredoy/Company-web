@@ -2,16 +2,16 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import type { CustomerDetail } from '@/lib/types';
+import type { CustomerView } from '@/lib/types';
 import { api, errorMessage } from '@/lib/api';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Field } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
+import { useT } from '@/lib/i18n';
 
 /**
  * The three things staff can do to a customer record.
@@ -24,15 +24,21 @@ import { toast } from '@/components/ui/toaster';
  * panel — a reply to an email, a phone call, a word at the till — and the API
  * has always accepted it. Without the switch the only way to honour "stop
  * emailing me" was to block the account, which also stops them shopping.
+ *
+ * Drawn inside the customer's View panel — a customer has no screen of its own —
+ * so a change re-reads the panel (`onChanged`) as well as the list behind it.
  */
 export function CustomerActions({
   customer,
   canUpdate,
+  onChanged,
 }: {
-  customer: CustomerDetail;
+  customer: Pick<CustomerView, 'id' | 'fullName' | 'status' | 'acceptsMarketing' | 'adminNote'>;
   canUpdate: boolean;
+  onChanged?: () => void;
 }) {
   const router = useRouter();
+  const t = useT();
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
 
@@ -47,6 +53,7 @@ export function CustomerActions({
     try {
       await api.patch(`/api/v1/admin/customers/${customer.id}`, body);
       toast.success(message);
+      onChanged?.();
       router.refresh();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -59,7 +66,9 @@ export function CustomerActions({
     if (
       !blocked &&
       !window.confirm(
-        `Block ${customer.fullName}? They will be signed out everywhere and cannot sign in again until you unblock them.`,
+        t('Block {name}? They will be signed out everywhere and cannot sign in again until you unblock them.', {
+          name: customer.fullName,
+        }),
       )
     ) {
       return;
@@ -67,38 +76,34 @@ export function CustomerActions({
 
     void patch(
       { status: blocked ? 'active' : 'blocked' },
-      blocked ? 'Customer unblocked.' : 'Customer blocked and signed out.',
+      blocked ? t('Customer unblocked.') : t('Customer blocked and signed out.'),
     );
   };
 
   const onToggleMarketing = (next: boolean) => {
     void patch(
       { acceptsMarketing: next },
-      next ? 'Marketing emails allowed.' : 'Marketing emails stopped.',
+      next ? t('Marketing emails allowed.') : t('Marketing emails stopped.'),
     );
   };
 
   const onSaveNote = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const note = String(new FormData(event.currentTarget).get('adminNote') ?? '').trim();
-    void patch({ adminNote: note || null }, 'Note saved.');
+    void patch({ adminNote: note || null }, t('Note saved.'));
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Staff actions</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <div className="space-y-4">
         {error ? <Alert variant="danger">{error}</Alert> : null}
 
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <Label htmlFor="acceptsMarketing">Marketing emails</Label>
+            <Label htmlFor="acceptsMarketing">{t('Marketing emails')}</Label>
             <p className="mt-1 text-xs text-muted-foreground">
               {customer.acceptsMarketing
-                ? 'They have agreed to receive campaigns.'
-                : 'They will not be sent campaigns.'}
+                ? t('They have agreed to receive campaigns.')
+                : t('They will not be sent campaigns.')}
             </p>
           </div>
           <Switch
@@ -111,9 +116,9 @@ export function CustomerActions({
 
         <form onSubmit={onSaveNote} className="space-y-3 border-t pt-4">
           <Field
-            label="Internal note"
+            label={t('Internal note')}
             htmlFor="adminNote"
-            hint="Only staff see this. It never reaches the customer."
+            hint={t('Only staff see this. It never reaches the customer.')}
           >
             <Textarea
               id="adminNote"
@@ -124,7 +129,7 @@ export function CustomerActions({
             />
           </Field>
           <Button type="submit" size="sm" variant="secondary" loading={saving}>
-            Save note
+            {t('Save note')}
           </Button>
         </form>
 
@@ -135,15 +140,14 @@ export function CustomerActions({
             onClick={onToggleBlock}
             disabled={saving}
           >
-            {blocked ? 'Unblock customer' : 'Block customer'}
+            {blocked ? t('Unblock customer') : t('Block customer')}
           </Button>
           <p className="mt-2 text-xs text-muted-foreground">
             {blocked
-              ? 'They cannot sign in. Their past orders are untouched.'
-              : 'Blocking signs them out of every device immediately.'}
+              ? t('They cannot sign in. Their past orders are untouched.')
+              : t('Blocking signs them out of every device immediately.')}
           </p>
         </div>
-      </CardContent>
-    </Card>
+    </div>
   );
 }

@@ -8,9 +8,10 @@
  *
  *   npx tsx <this file> [--slug e-comarch]
  */
-import { randomBytes, createHash } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { config } from '../src/config/index';
+import { fetchTenantBySlug } from '../src/lib/company-client';
+import { createAdminSession, revokeSession } from '../src/lib/session';
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
@@ -77,30 +78,23 @@ async function main() {
   const admin = (await pool.query<{ id: string; email: string }>('select id, email from store_admins limit 1')).rows[0];
   if (!admin) throw new Error(`No store admin in ${SLUG}.`);
 
-  const refRow = (
-    await pool.query<{ tenant_ref: string }>('select tenant_ref from admin_sessions order by created_at desc limit 1')
-  ).rows[0];
+  /*
+   * A short-lived panel session, minted through the API's own session module.
+   * There is no table to plant a row in any more — the cookie carries a signed
+   * JWT — and the tenant reference now comes from the control plane rather than
+   * from whatever session happened to be lying about.
+   */
+  const tenant = await fetchTenantBySlug(SLUG);
+  if (!tenant) throw new Error(`No tenant registered for ${SLUG}.`);
 
-  let tenantRef = refRow?.tenant_ref;
-  if (!tenantRef) {
-    const sync = await pool
-      .query<{ value: string }>(`select value from platform_sync where key = 'tenant_ref' limit 1`)
-      .catch(() => ({ rows: [] as { value: string }[] }));
-    tenantRef = sync.rows[0]?.value;
-  }
-  if (!tenantRef) throw new Error('Could not work out this store’s tenantRef — sign in to the panel once, then re-run.');
-
-  const token = randomBytes(32).toString('base64url');
-  const tokenHash = createHash('sha256').update(token).digest('hex');
-
-  const session = (
-    await pool.query<{ id: string }>(
-      `insert into admin_sessions (admin_id, token_hash, tenant_ref, mfa_verified, remember, expires_at)
-       values ($1, $2, $3, true, false, now() + interval '30 minutes')
-       returning id`,
-      [admin.id, tokenHash, tenantRef],
-    )
-  ).rows[0]!;
+  const session = await createAdminSession(null, {
+    adminId: admin.id,
+    tenantRef: tenant.tenantRef,
+    mfaVerified: true,
+    remember: false,
+  });
+  const token = session.token;
+  const tenantRef = tenant.tenantRef;
 
   cookie = `store_admin_session=${token}`;
   console.log(`\n  store ${SLUG} · admin ${admin.email} · tenantRef ${tenantRef}\n`);
@@ -258,7 +252,7 @@ async function main() {
     check('an unknown stock bucket is refused', badStock.status === 422, badStock.status);
     check('the refusal names the field', Boolean(badStock.body?.details?.stock), badStock.body);
   } finally {
-    await pool.query('delete from admin_sessions where id = $1', [session.id]);
+    await revokeSession(tenant.tenantRef, session.id);
     await pool.end();
     await closeRedis().catch(() => {});
   }

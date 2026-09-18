@@ -1,10 +1,14 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
+import { getT } from '@/lib/i18n/server';
 import { serverGetOptional } from '@/lib/server-api';
 import type { SessionResponse } from '@/lib/types';
 import { SignInForm } from './sign-in-form';
 
-export const metadata: Metadata = { title: 'Sign in' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return { title: t('Sign in') };
+}
 export const dynamic = 'force-dynamic';
 
 export default async function SignInPage() {

@@ -78,6 +78,76 @@
       "when": 1787072400000,
       "tag": "0010_measure_selling",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787072400001,
+      "tag": "0011_drop_session_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787072400002,
+      "tag": "0012_phone_and_oauth_signin",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787072400003,
+      "tag": "0013_drop_category_description_icon_banner",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787072400004,
+      "tag": "0014_drop_product_short_description",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1787072400005,
+      "tag": "0015_discount_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1787072400006,
+      "tag": "0016_product_owner_note",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787072400007,
+      "tag": "0017_drop_brand_website_sort_seo",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787072400008,
+      "tag": "0018_drop_newsletter",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787072400008,
+      "tag": "0018_drop_shipping",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787072400009,
+      "tag": "0019_drop_variant_sale_window",
+      "breakpoints": true
     }
   ]
 }

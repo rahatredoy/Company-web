@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -14,10 +15,12 @@ import {
   productVariantValues,
   productVariants,
   products,
+  reviews,
   warehouses,
 } from '../../db/schema/index';
 import { audit } from '../../lib/audit';
 import { ERROR_CODES, conflict, notFound, unprocessable } from '../../lib/errors';
+import { translateFor } from '../../lib/i18n/index';
 import {
   cursorField,
   listed,
@@ -38,6 +41,7 @@ import {
 import { storeOf } from '../../plugins/tenant';
 import { settleSlug } from './service';
 import type { TenantTx } from '../../db/tenant-manager';
+import { httpsUrl } from '../../lib/secure-url';
 
 /**
  * Keeps the product's picture in `product_media` alongside the variant's own
@@ -131,6 +135,8 @@ const listQuerySchema = z.object({
    */
   stock: z.enum(['all', 'in_stock', 'low', 'out', 'untracked']).default('all'),
   featured: z.enum(['all', 'yes', 'no']).default('all'),
+  /** `pending` is the dashboard's "reviews waiting" link: products with a review to approve. */
+  reviews: z.enum(['all', 'pending']).default('all'),
   sort: z.enum(['createdAt', 'name', 'price', 'sold', 'stock', 'updatedAt']).default('createdAt'),
   order: z.enum(['asc', 'desc']).default('desc'),
 });
@@ -141,7 +147,15 @@ const money = z
   .transform((value) => (typeof value === 'number' ? value.toFixed(2) : value))
   .refine((value) => /^\d{1,10}(\.\d{1,2})?$/.test(value), 'Use an amount like 19.99.');
 
-const url = z.string().trim().url('Use a full web address.').max(2000);
+/**
+ * Every picture and clip on a product.
+ *
+ * `httpsUrl` rather than `z.string().url()`, which is not a scheme check: it
+ * accepts `javascript:` and `data:text/html` as readily as `https:`, and these
+ * values are rendered by the storefront as an `img src` and a video source. See
+ * `lib/secure-url.ts`.
+ */
+const url = httpsUrl();
 
 /**
  * One line of the create form's variant table.
@@ -158,15 +172,6 @@ const newVariantSchema = z.object({
   title: z.string().trim().max(200).nullable().default(null),
   price: money,
   salePrice: money.nullable().default(null),
-  /**
-   * When the sale price applies. Both optional, and both enforced —
-   * `storefront/service.ts#effectiveSale` ignores a `salePrice` outside its
-   * window, at checkout as well as on the product page, so a sale that has not
-   * started is not a sale. Until now nothing in the panel could set either, which
-   * made every sale price permanent the moment it was typed.
-   */
-  saleStartsAt: z.coerce.date().nullable().default(null),
-  saleEndsAt: z.coerce.date().nullable().default(null),
   costPrice: money.nullable().default(null),
   barcode: z.string().trim().max(64).nullable().default(null),
   weightGrams: z.coerce.number().int().min(0).max(10_000_000).nullable().default(null),
@@ -250,23 +255,21 @@ const writeSchema = z
     status: z.enum(['draft', 'active', 'inactive']).default('draft'),
     categoryId: z.string().uuid('Choose a category that exists.').nullable().default(null),
     brandId: z.string().uuid('Choose a brand that exists.').nullable().default(null),
-    shortDescription: z.string().trim().max(500).nullable().default(null),
     description: z.string().trim().max(50_000).nullable().default(null),
 
     /**
      * The one variant a `simple` product is sold as.
      *
-     * Optional in the shape and required in the refinement below, because a
-     * product created *with* a variant list has no single SKU or price of its
-     * own — the list carries them, and demanding a duplicate here would make the
-     * form ask for a code that names nothing.
+     * `price` is optional in the shape and required in the refinement below,
+     * because a product created *with* a variant list has no single price of its
+     * own. `sku` is optional outright: the panel keeps it under Advanced options,
+     * and a product created without one is given one (`generateSku`) — a shop
+     * that does not scan barcodes should not have to invent a code to list a
+     * product. An empty string is read the same as an absent one.
      */
-    sku: z.string().trim().min(1, 'Give the product a SKU.').max(64).optional(),
+    sku: z.string().trim().max(64).optional(),
     price: money.optional(),
     salePrice: money.nullable().default(null),
-    /** See `newVariantSchema` — the window `effectiveSale` reads. */
-    saleStartsAt: z.coerce.date().nullable().default(null),
-    saleEndsAt: z.coerce.date().nullable().default(null),
     costPrice: money.nullable().default(null),
     barcode: z.string().trim().max(64).nullable().default(null),
     weightGrams: z.coerce.number().int().min(0).max(10_000_000).nullable().default(null),
@@ -298,9 +301,6 @@ const writeSchema = z
     const hasList = (value.variants?.length ?? 0) > 0;
 
     if (!hasList) {
-      if (!value.sku) {
-        ctx.addIssue({ code: 'custom', path: ['sku'], message: 'Give the product a SKU.' });
-      }
       if (!value.price) {
         ctx.addIssue({ code: 'custom', path: ['price'], message: 'Give the product a price.' });
       }
@@ -371,28 +371,17 @@ const patchSchema = z.object({
   status: z.enum(['draft', 'active', 'inactive']).optional(),
   categoryId: z.string().uuid('Choose a category that exists.').nullable().optional(),
   brandId: z.string().uuid('Choose a brand that exists.').nullable().optional(),
-  shortDescription: z.string().trim().max(500).nullable().optional(),
   description: z.string().trim().max(50_000).nullable().optional(),
 
   sku: z.string().trim().min(1, 'Give the product a SKU.').max(64).optional(),
   price: money.optional(),
   salePrice: money.nullable().optional(),
-  /**
-   * When the sale price applies, on the default variant.
-   *
-   * Enforced rather than decorative: `storefront/service.ts#effectiveSale`
-   * ignores a `salePrice` outside its window at checkout as well as on the
-   * product page. Nothing in the panel could set either until now, which made
-   * every sale permanent the moment its price was typed.
-   */
-  saleStartsAt: z.coerce.date().nullable().optional(),
-  saleEndsAt: z.coerce.date().nullable().optional(),
   costPrice: money.nullable().optional(),
   barcode: z.string().trim().max(64).nullable().optional(),
   weightGrams: z.coerce.number().int().min(0).max(10_000_000).nullable().optional(),
-  imageUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().optional(),
+  imageUrl: url.nullable().optional(),
 
-  videoUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().optional(),
+  videoUrl: url.nullable().optional(),
   trackInventory: z.boolean().optional(),
 
   isFeatured: z.boolean().optional(),
@@ -411,13 +400,18 @@ const mediaListSchema = z.object({
   media: z
     .array(
       z.object({
-        url: z.string().trim().url('Use a full web address.').max(2000),
+        url: url,
         altText: z.string().trim().max(200).nullable().default(null),
         sortOrder: z.coerce.number().int().min(0).max(100_000).optional(),
       }),
     )
     .max(12)
     .default([]),
+});
+
+/** A private note: a few paragraphs at most, and null or blank to clear it. */
+const ownerNoteSchema = z.object({
+  note: z.string().max(5000, 'Keep the note under 5,000 characters.').nullable(),
 });
 
 const specificationListSchema = z.object({
@@ -459,13 +453,10 @@ const variantListSchema = z.object({
         title: z.string().trim().max(200).nullable().default(null),
         price: money,
         salePrice: money.nullable().default(null),
-        /** See `newVariantSchema` — the window `effectiveSale` reads. */
-        saleStartsAt: z.coerce.date().nullable().default(null),
-        saleEndsAt: z.coerce.date().nullable().default(null),
         costPrice: money.nullable().default(null),
         barcode: z.string().trim().max(64).nullable().default(null),
         weightGrams: z.coerce.number().int().min(0).max(10_000_000).nullable().default(null),
-        imageUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().default(null),
+        imageUrl: url.nullable().default(null),
         isDefault: z.boolean().default(false),
         isActive: z.boolean().default(true),
         sortOrder: z.coerce.number().int().min(0).max(100_000).optional(),
@@ -540,6 +531,35 @@ async function assertSkuFree(db: StoreDb, sku: string, exceptVariantId?: string)
   }
 }
 
+const ALPHABET = '0123456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+/**
+ * A SKU for a product created without one: up to three letters of its name and
+ * six random characters, `PUM-4K9QZ2`.
+ *
+ * The letters are there so the code still reads as the product on a packing
+ * slip; the random half is what makes it unique, and is checked rather than
+ * assumed. Thirty-four characters to the sixth is a billion and a half codes,
+ * so the retry is for correctness, not because a clash is expected. No I or O,
+ * which a person copying the code off a label reads as 1 and 0.
+ */
+async function generateSku(db: StoreDb, name: string): Promise<string> {
+  const letters = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'SKU';
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = `${letters}-${randomBytes(6)
+      .reduce((code, byte) => code + ALPHABET[byte % ALPHABET.length], '')}`;
+    const clash = await db
+      .select({ id: productVariants.id })
+      .from(productVariants)
+      .where(eq(productVariants.sku, candidate))
+      .limit(1);
+    if (clash.length === 0) return candidate;
+  }
+
+  throw conflict('Could not find a free SKU. Type one under Advanced options.', ERROR_CODES.SKU_TAKEN);
+}
+
 /**
  * Products.
  *
@@ -607,6 +627,12 @@ export default async function productRoutes(app: FastifyInstance) {
         query.categoryId ? eq(products.categoryId, query.categoryId) : undefined,
         query.brandId ? eq(products.brandId, query.brandId) : undefined,
         query.featured === 'all' ? undefined : eq(products.isFeatured, query.featured === 'yes'),
+        query.reviews === 'pending'
+          ? sql`exists (
+              select 1 from ${reviews} r
+               where r.product_id = ${products.id} and r.status = 'pending'
+            )`
+          : undefined,
         query.stock === 'untracked'
           ? sql`${levels} = 0`
           : query.stock === 'out'
@@ -650,6 +676,17 @@ export default async function productRoutes(app: FastifyInstance) {
           /** Free — they are columns on the row already being read. */
           ratingAverage: products.ratingAverage,
           ratingCount: products.ratingCount,
+          /*
+           * Every review, whatever its status, and the ones still waiting.
+           * `rating_count` counts approved rows only, so it cannot say a product
+           * has reviews to moderate. Correlated per returned row — at most a
+           * batch of them — on `reviews_product_idx`.
+           */
+          reviewCount: sql<number>`(select count(*)::int from ${reviews} r where r.product_id = ${products.id})`,
+          pendingReviewCount: sql<number>`(
+            select count(*)::int from ${reviews} r
+             where r.product_id = ${products.id} and r.status = 'pending'
+          )`,
           trackInventory: products.trackInventory,
           createdAt: products.createdAt,
           updatedAt: products.updatedAt,
@@ -666,14 +703,6 @@ export default async function productRoutes(app: FastifyInstance) {
           sku: sql<string | null>`defaults.sku`,
           barcode: sql<string | null>`defaults.barcode`,
           costPrice: sql<string | null>`defaults.cost_price`,
-          /*
-           * The sale window, so the quick-edit panel can offer it without a
-           * second read. Two more columns from the lateral that is already being
-           * walked, rather than a fetch per row the panel opens — and the list
-           * needs them anyway to say whether a sale price is actually live.
-           */
-          saleStartsAt: sql<Date | null>`defaults.sale_starts_at`,
-          saleEndsAt: sql<Date | null>`defaults.sale_ends_at`,
           /*
            * The variant's own picture first, the gallery second. That is the order
            * the storefront resolves a thumbnail in, so the list shows what a
@@ -702,7 +731,7 @@ export default async function productRoutes(app: FastifyInstance) {
         .leftJoin(stock, eq(stock.productId, products.id))
         .leftJoin(
           sql`lateral (
-            select v.sku, v.barcode, v.cost_price, v.sale_starts_at, v.sale_ends_at
+            select v.sku, v.barcode, v.cost_price
               from ${productVariants} v
              where v.product_id = ${products.id}
              order by v.is_default desc, v.sort_order asc
@@ -916,6 +945,55 @@ export default async function productRoutes(app: FastifyInstance) {
         attributeValueIds: attributeLinks.map((row) => row.attributeValueId),
         bundleProductIds: bundleRows.map((row) => row.relatedProductId),
       });
+    },
+  );
+
+  /*
+   * The owner's private note on a product.
+   *
+   * Its own endpoint rather than a field on `PATCH /products/:id`, because the
+   * note is written from the View panel while the Details tab writes the rest —
+   * two forms sharing one body would each have to send the other's field back
+   * or clear it. It does not touch `updated_at`: "last edited" is about the
+   * product a shopper sees, and jotting a reminder on it is not an edit to that.
+   *
+   * `storefrontUnaffected` keeps the module's write hook from dropping the
+   * store's whole catalogue cache over a value no shopper can read.
+   */
+  app.put(
+    '/products/:id/note',
+    {
+      preHandler: [app.requireStoreAdmin, app.requirePermission('products.update')],
+      config: { storefrontUnaffected: true },
+    },
+    async (request, reply) => {
+      const store = storeOf(request);
+      const { id } = parseParams(uuidParamSchema, request.params);
+      const body = parseBody(ownerNoteSchema, request.body);
+
+      // Blank is no note, so an emptied box reads back as null rather than "".
+      const note = body.note && body.note.trim() !== '' ? body.note.trim() : null;
+
+      const updated = (
+        await store.db
+          .update(products)
+          .set({ ownerNote: note })
+          .where(eq(products.id, id))
+          .returning({ id: products.id, name: products.name, ownerNote: products.ownerNote })
+      )[0];
+      if (!updated) throw notFound('That product no longer exists.');
+
+      // The audit row says a note changed, never what it says — it is private.
+      await audit(store.db, request, {
+        action: 'product.note',
+        module: 'catalog',
+        entity: 'product',
+        entityId: id,
+        entityLabel: updated.name,
+        newValues: { hasNote: note !== null, length: note?.length ?? 0 },
+      });
+
+      return ok(reply, { ownerNote: updated.ownerNote });
     },
   );
 
@@ -1256,8 +1334,6 @@ export default async function productRoutes(app: FastifyInstance) {
             title: variant.title,
             price: variant.price,
             salePrice: variant.salePrice,
-            saleStartsAt: variant.saleStartsAt,
-            saleEndsAt: variant.saleEndsAt,
             costPrice: variant.costPrice,
             barcode: variant.barcode,
             weightGrams: variant.weightGrams,
@@ -1402,12 +1478,10 @@ export default async function productRoutes(app: FastifyInstance) {
             }))
           : [
               {
-                sku: body.sku!,
+                sku: body.sku || (await generateSku(store.db, body.name)),
                 title: null,
                 price: body.price!,
                 salePrice: body.salePrice,
-                saleStartsAt: body.saleStartsAt,
-                saleEndsAt: body.saleEndsAt,
                 costPrice: body.costPrice,
                 barcode: body.barcode,
                 weightGrams: body.weightGrams,
@@ -1492,7 +1566,6 @@ export default async function productRoutes(app: FastifyInstance) {
             status: body.status,
             categoryId: body.categoryId,
             brandId: body.brandId,
-            shortDescription: body.shortDescription,
             description: body.description,
             priceFrom: cheapest.price.toFixed(2),
             salePriceFrom: cheapest.salePrice === null ? null : cheapest.salePrice.toFixed(2),
@@ -1532,8 +1605,6 @@ export default async function productRoutes(app: FastifyInstance) {
               barcode: line.barcode,
               price: line.price,
               salePrice: line.salePrice,
-              saleStartsAt: line.saleStartsAt,
-              saleEndsAt: line.saleEndsAt,
               costPrice: line.costPrice,
               weightGrams: line.weightGrams,
               imageUrl: line.imageUrl,
@@ -1746,15 +1817,6 @@ export default async function productRoutes(app: FastifyInstance) {
             barcode: body.barcode === undefined ? variant.barcode : body.barcode,
             price,
             salePrice,
-            /*
-             * Left alone unless sent. A form that patches only the name must not
-             * silently clear a running sale — `undefined` is "not my business",
-             * which is a different answer from an explicit null meaning "no
-             * bound", and the two are what separate an untouched window from a
-             * cleared one.
-             */
-            saleStartsAt: body.saleStartsAt === undefined ? variant.saleStartsAt : body.saleStartsAt,
-            saleEndsAt: body.saleEndsAt === undefined ? variant.saleEndsAt : body.saleEndsAt,
             costPrice: body.costPrice === undefined ? variant.costPrice : body.costPrice,
             weightGrams: body.weightGrams === undefined ? variant.weightGrams : body.weightGrams,
             imageUrl: body.imageUrl === undefined ? variant.imageUrl : body.imageUrl,
@@ -1796,8 +1858,6 @@ export default async function productRoutes(app: FastifyInstance) {
             status,
             categoryId: body.categoryId === undefined ? existing.categoryId : body.categoryId,
             brandId: body.brandId === undefined ? existing.brandId : body.brandId,
-            shortDescription:
-              body.shortDescription === undefined ? existing.shortDescription : body.shortDescription,
             description: body.description === undefined ? existing.description : body.description,
             priceFrom: cheapest?.price ?? price,
             salePriceFrom: cheapest === undefined ? salePrice : cheapest.salePrice,
@@ -1881,7 +1941,10 @@ export default async function productRoutes(app: FastifyInstance) {
         return ok(reply, {
           deleted: false,
           product: hidden,
-          message: 'This product has been ordered before, so it was hidden from the store instead of deleted.',
+          message: await translateFor(
+            request,
+            'This product has been ordered before, so it was hidden from the store instead of deleted.',
+          ),
         });
       }
 

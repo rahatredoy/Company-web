@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { formatMoney, formatNumber } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import type { DashboardGranularity } from '@/lib/types';
 
 const AXIS = {
@@ -17,20 +17,20 @@ const AXIS = {
  *
  * A weekly bucket is labelled by the day it opens rather than "week 33": nobody
  * counts weeks, and the reader is matching the point against something that
- * happened on a date.
+ * happened on a date. In the panel's language — `locale` is `t.locale`.
  */
-function bucketLabel(value: string, granularity: DashboardGranularity): string {
+function bucketLabel(value: string, granularity: DashboardGranularity, locale: string): string {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(
-    'en-US',
+    locale,
     granularity === 'month' ? { month: 'short', year: '2-digit' } : { month: 'short', day: 'numeric' },
   ).format(date);
 }
 
 /** `$2.5k`, `$1.2M` — the axis needs the size, not the cents. */
-function compactMoney(value: number, currency: string): string {
-  return new Intl.NumberFormat('en-US', {
+function compactMoney(value: number, currency: string, locale: string): string {
+  return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
     notation: 'compact',
@@ -47,6 +47,7 @@ export function SalesOverview({
   currency: string;
   granularity: DashboardGranularity;
 }) {
+  const t = useT();
   const points = React.useMemo(
     () => data.map((row) => ({ ...row, revenue: Number(row.revenue) })),
     [data],
@@ -58,9 +59,9 @@ export function SalesOverview({
     return (
       <div className="grid h-64 place-items-center rounded-lg border border-dashed text-center">
         <div className="px-6">
-          <p className="text-sm font-medium">No sales in this period</p>
+          <p className="text-sm font-medium">{t('No sales in this period')}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Orders appear here the day they are placed. Try a wider date range.
+            {t('Orders appear here the day they are placed. Try a wider date range.')}
           </p>
         </div>
       </div>
@@ -80,12 +81,12 @@ export function SalesOverview({
           <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
           <XAxis
             dataKey="bucket"
-            tickFormatter={(value: string) => bucketLabel(value, granularity)}
+            tickFormatter={(value: string) => bucketLabel(value, granularity, t.locale)}
             minTickGap={20}
             {...AXIS}
           />
           <YAxis
-            tickFormatter={(value: number) => compactMoney(value, currency)}
+            tickFormatter={(value: number) => compactMoney(value, currency, t.locale)}
             width={58}
             {...AXIS}
           />
@@ -97,11 +98,11 @@ export function SalesOverview({
               return (
                 <div className="rounded-lg border border-border bg-popover px-3 py-2 shadow-[var(--shadow-raised)]">
                   <p className="mb-1 text-xs font-medium text-muted-foreground">
-                    {bucketLabel(String(label), granularity)}
+                    {bucketLabel(String(label), granularity, t.locale)}
                   </p>
-                  <p className="text-sm font-semibold tabular-nums">{formatMoney(point.revenue, currency)}</p>
+                  <p className="text-sm font-semibold tabular-nums">{t.money(point.revenue, currency)}</p>
                   <p className="text-xs text-muted-foreground tabular-nums">
-                    {formatNumber(point.orders)} order{point.orders === 1 ? '' : 's'}
+                    {t.plural(point.orders, '{count} order', '{count} orders')}
                   </p>
                 </div>
               );
@@ -110,7 +111,7 @@ export function SalesOverview({
           <Area
             type="monotone"
             dataKey="revenue"
-            name="Revenue"
+            name={t('Revenue')}
             stroke="var(--chart-1)"
             strokeWidth={2}
             fill="url(#salesFill)"

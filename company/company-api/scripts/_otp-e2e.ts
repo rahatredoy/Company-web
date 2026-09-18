@@ -6,7 +6,8 @@
 import { createHash } from 'node:crypto';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { closeDatabase, db } from '../src/db/client';
-import { clientAccounts, clientEmailVerificationTokens, clientSessions } from '../src/db/schema/index';
+import { clientAccounts, clientEmailVerificationTokens } from '../src/db/schema/index';
+import { listClientSessions } from '../src/lib/session';
 
 const BASE = 'http://localhost:4000/api/v1';
 const email = `otp-e2e-${Date.now()}@example.com`;
@@ -113,14 +114,10 @@ check(
   challengeAsSession.json,
 );
 
-const [challengeRow] = await db
-  .select()
-  .from(clientSessions)
-  .where(and(eq(clientSessions.clientAccountId, account!.id), isNull(clientSessions.revokedAt)))
-  .orderBy(desc(clientSessions.createdAt))
-  .limit(1);
+// Read from the session records: a challenge is a Redis record now, not a row.
+const [challengeRow] = await listClientSessions(account!.id);
 
-check('challenge row is unverified', challengeRow?.otpVerified === false);
+check('challenge record is unverified', challengeRow?.otpVerified === false);
 check('challenge remembers the remember-me choice', challengeRow?.remember === true);
 
 const signInCode = crack(challengeRow!.otpCodeHash!)!;

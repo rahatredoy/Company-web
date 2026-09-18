@@ -1,13 +1,12 @@
 import { and, asc, count, eq, ilike, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { faqs, homepageSections, pages, storefrontSettings } from '../../db/schema/index';
+import { faqs, pages, storefrontSettings } from '../../db/schema/index';
 import { audit } from '../../lib/audit';
 import { invalidateStorefrontOnWrite } from '../../lib/cache';
 import {
   CATEGORY_ICON_KEYS,
   COLOR_THEMES,
-  HOMEPAGE_SECTION_TYPES,
   MOBILE_NAV_ICONS,
   SOCIAL_PLATFORMS,
   STOREFRONT_TEMPLATES,
@@ -29,12 +28,13 @@ import { keyset } from '../../lib/keyset';
 import { sanitiseHtml } from '../../lib/sanitise';
 import { slugify } from '../../lib/utils';
 import { storeOf } from '../../plugins/tenant';
+import { httpsUrl, linkTarget } from '../../lib/secure-url';
 
 const designSchema = z.object({
   templateKey: z.enum(STOREFRONT_TEMPLATES),
   colorThemeKey: z.enum(COLOR_THEMES),
-  logoUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().default(null),
-  faviconUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().default(null),
+  logoUrl: httpsUrl().nullable().default(null),
+  faviconUrl: httpsUrl().nullable().default(null),
   announcement: z
     .object({
       enabled: z.boolean().default(false),
@@ -42,7 +42,7 @@ const designSchema = z.object({
         .array(
           z.object({
             text: z.string().trim().min(1).max(200),
-            linkUrl: z.string().trim().max(2000).nullable().default(null),
+            linkUrl: linkTarget().default(null),
             linkLabel: z.string().trim().max(60).nullable().default(null),
           }),
         )
@@ -65,7 +65,7 @@ const designSchema = z.object({
     .array(
       z.object({
         platform: z.enum(SOCIAL_PLATFORMS),
-        url: z.string().trim().url('Use a full web address.').max(2000),
+        url: httpsUrl(),
       }),
     )
     .max(8)
@@ -128,29 +128,6 @@ const faqSchema = z.object({
   category: z.string().trim().max(60).nullable().default(null),
   isActive: z.boolean().default(true),
   sortOrder: z.coerce.number().int().min(0).max(100_000).default(0),
-});
-
-const sectionSchema = z.object({
-  title: z.string().trim().max(200).nullable().default(null),
-  subtitle: z.string().trim().max(300).nullable().default(null),
-  config: z.record(z.string(), z.unknown()).default({}),
-  isEnabled: z.boolean().default(true),
-  sortOrder: z.coerce.number().int().min(0).max(100_000).default(0),
-});
-
-/**
- * Creating a section additionally fixes its `type`, which updating cannot change.
- *
- * A section's type decides which renderer runs and which `config` keys mean
- * anything, so re-typing one in place would leave a hero's slides sitting in a
- * brands block. Changing the type is delete-and-create.
- *
- * The enum is checked here rather than left to Postgres: an unknown value would
- * otherwise arrive as a driver error and be reported as a 500, when it is really
- * one bad field.
- */
-const createSectionSchema = sectionSchema.extend({
-  type: z.enum(HOMEPAGE_SECTION_TYPES),
 });
 
 /**
@@ -534,97 +511,6 @@ export default async function websiteRoutes(app: FastifyInstance) {
       if (!removed) throw notFound('That question does not exist.');
 
       return noContent(reply);
-    },
-  );
-
-  // ------------------------------------------------------------ homepage ----
-
-  app.get(
-    '/website/homepage',
-    { preHandler: [app.requireStoreAdmin, app.requirePermission('website.view')] },
-    async (request, reply) => {
-      const store = storeOf(request);
-      const rows = await store.db
-        .select()
-        .from(homepageSections)
-        .orderBy(asc(homepageSections.sortOrder));
-      return ok(reply, rows);
-    },
-  );
-
-  app.post(
-    '/website/homepage',
-    { preHandler: [app.requireStoreAdmin, app.requirePermission('website.manage')] },
-    async (request, reply) => {
-      const store = storeOf(request);
-      const body = parseBody(createSectionSchema, request.body);
-
-      const [created] = await store.db.insert(homepageSections).values(body).returning();
-
-      await audit(store.db, request, {
-        action: 'homepage.section.create',
-        module: 'website',
-        entity: 'homepage_section',
-        entityId: created!.id,
-        entityLabel: created!.title ?? created!.type,
-        newValues: { type: created!.type, sortOrder: created!.sortOrder },
-      });
-
-      return ok(reply, created, 201);
-    },
-  );
-
-  app.delete(
-    '/website/homepage/:id',
-    { preHandler: [app.requireStoreAdmin, app.requirePermission('website.manage')] },
-    async (request, reply) => {
-      const store = storeOf(request);
-      const { id } = parseParams(uuidParamSchema, request.params);
-
-      const [removed] = await store.db
-        .delete(homepageSections)
-        .where(eq(homepageSections.id, id))
-        .returning({ id: homepageSections.id, type: homepageSections.type });
-
-      if (!removed) throw notFound('That section does not exist.');
-
-      await audit(store.db, request, {
-        action: 'homepage.section.delete',
-        module: 'website',
-        entity: 'homepage_section',
-        entityId: removed.id,
-        entityLabel: removed.type,
-        oldValues: { type: removed.type },
-      });
-
-      return noContent(reply);
-    },
-  );
-
-  app.put(
-    '/website/homepage/:id',
-    { preHandler: [app.requireStoreAdmin, app.requirePermission('website.manage')] },
-    async (request, reply) => {
-      const store = storeOf(request);
-      const { id } = parseParams(uuidParamSchema, request.params);
-      const body = parseBody(sectionSchema, request.body);
-
-      const [updated] = await store.db
-        .update(homepageSections)
-        .set({
-          title: body.title,
-          subtitle: body.subtitle,
-          config: body.config,
-          isEnabled: body.isEnabled,
-          sortOrder: body.sortOrder,
-          updatedAt: new Date(),
-        })
-        .where(eq(homepageSections.id, id))
-        .returning();
-
-      if (!updated) throw notFound('That section does not exist.');
-
-      return ok(reply, updated);
     },
   );
 }

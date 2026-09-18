@@ -1,4 +1,4 @@
-import { and, count, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, count, eq, ilike, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { brands, products } from '../../db/schema/index';
@@ -8,6 +8,7 @@ import { cursorField, listed, noContent, ok, parseBody, parseParams, parseQuery,
 import { keyset } from '../../lib/keyset';
 import { storeOf } from '../../plugins/tenant';
 import { settleSlug } from './service';
+import { httpsUrl } from '../../lib/secure-url';
 
 const listQuerySchema = z.object({
   ...cursorField,
@@ -21,23 +22,12 @@ const writeSchema = z.object({
   name: z.string().trim().min(1, 'Give the brand a name.').max(140),
   slug: z.string().trim().max(160).optional(),
   description: z.string().trim().max(5000).nullable().default(null),
-  logoUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().default(null),
-  websiteUrl: z.string().trim().url('Use a full web address.').max(2000).nullable().default(null),
+  logoUrl: httpsUrl().nullable().default(null),
   isActive: z.boolean().default(true),
   isFeatured: z.boolean().default(false),
-  sortOrder: z.coerce.number().int().min(0).max(100_000).default(0),
-  seoTitle: z.string().trim().max(160).nullable().default(null),
-  seoDescription: z.string().trim().max(300).nullable().default(null),
 });
 
 const patchSchema = writeSchema.partial();
-
-const reorderSchema = z.object({
-  order: z
-    .array(z.object({ id: z.string().uuid(), sortOrder: z.number().int().min(0).max(100_000) }))
-    .min(1, 'Nothing to reorder.')
-    .max(500),
-});
 
 /**
  * Every column the panel's brand screen reads. The list returns the whole row
@@ -51,12 +41,8 @@ const listColumns = {
   slug: brands.slug,
   description: brands.description,
   logoUrl: brands.logoUrl,
-  websiteUrl: brands.websiteUrl,
   isActive: brands.isActive,
   isFeatured: brands.isFeatured,
-  sortOrder: brands.sortOrder,
-  seoTitle: brands.seoTitle,
-  seoDescription: brands.seoDescription,
   createdAt: brands.createdAt,
   updatedAt: brands.updatedAt,
 } as const;
@@ -84,13 +70,11 @@ export default async function brandRoutes(app: FastifyInstance) {
       const where = filters.length ? and(...filters) : undefined;
 
       /*
-       * Author's order, then name, then the id. The id is what makes the order
-       * total — brands are seeded sharing `sort_order = 0`, so without it a
-       * cursor would point into a set of rows the database may return in any
-       * order, and a batch boundary would drop one brand and repeat another.
+       * By name, then the id. The id is what makes the order total — two brands
+       * may share a name in different case, and without it a batch boundary
+       * could drop one brand and repeat another.
        */
-      const page = keyset<{ id: string; sortOrder: number; name: string }>([
-        { expr: brands.sortOrder, order: 'asc', of: (row) => row.sortOrder },
+      const page = keyset<{ id: string; name: string }>([
         { expr: brands.name, order: 'asc', of: (row) => row.name },
         { expr: brands.id, order: 'asc', of: (row) => row.id },
       ]);
@@ -127,45 +111,6 @@ export default async function brandRoutes(app: FastifyInstance) {
         hasMore: batch.hasMore,
         total: totals?.total,
       });
-    },
-  );
-
-  /**
-   * The whole list's order in one statement, as a `CASE` — one `UPDATE` per row
-   * would leave the list briefly in an order nobody asked for, and the storefront
-   * reads `sort_order`, so a half-applied reorder is visible to shoppers.
-   *
-   * Registered before `/brands/:id` for legibility only; find-my-way matches the
-   * static segment ahead of the parametric one regardless.
-   */
-  app.patch(
-    '/brands/reorder',
-    { preHandler: [app.requireStoreAdmin, app.requirePermission('brands.manage')] },
-    async (request, reply) => {
-      const store = storeOf(request);
-      const { order } = parseBody(reorderSchema, request.body);
-
-      const ids = order.map((entry) => entry.id);
-      const cases = sql.join(
-        order.map((entry) => sql`when ${brands.id} = ${entry.id}::uuid then ${entry.sortOrder}`),
-        sql` `,
-      );
-
-      await store.db
-        .update(brands)
-        .set({ sortOrder: sql`case ${cases} else ${brands.sortOrder} end`, updatedAt: new Date() })
-        .where(inArray(brands.id, ids));
-
-      await audit(store.db, request, {
-        action: 'brand.reorder',
-        module: 'catalog',
-        entity: 'brand',
-        entityId: ids[0]!,
-        entityLabel: `${ids.length} brand${ids.length === 1 ? '' : 's'}`,
-        newValues: { order },
-      });
-
-      return noContent(reply);
     },
   );
 
@@ -218,7 +163,13 @@ export default async function brandRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const store = storeOf(request);
       const { id } = parseParams(uuidParamSchema, request.params);
-      const body = parseBody(patchSchema, request.body);
+      // Zod 4 applies a field's `.default()` even under `.partial()`, so a key the
+      // body omits would come back as its default and overwrite what is stored.
+      // Only the keys actually sent are written.
+      const sent = (request.body ?? {}) as Record<string, unknown>;
+      const body = Object.fromEntries(
+        Object.entries(parseBody(patchSchema, request.body)).filter(([key]) => key in sent),
+      ) as z.infer<typeof patchSchema>;
 
       const existing = (await store.db.select().from(brands).where(eq(brands.id, id)).limit(1))[0];
       if (!existing) throw notFound('That brand no longer exists.');

@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { Eye } from 'lucide-react';
+import { Camera, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ListMeta } from '@/lib/api';
-import { formatDate, formatMoney, titleCase } from '@/lib/format';
+import { titleCase } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
-import { useViewTarget } from '@/hooks/use-detail';
+import { useAddressedView } from '@/hooks/use-detail';
 import type { ReturnRow } from '@/lib/types';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { InfiniteTable, type Column } from './infinite-table';
@@ -23,26 +24,36 @@ export function ReturnList({
   initial,
   query,
   filtered,
+  canApprove,
+  initialView,
 }: {
   initial: { rows: ReturnRow[]; meta: ListMeta };
   query: Record<string, string | undefined>;
   filtered: boolean;
+  canApprove: boolean;
+  /** A return named by `?view=<id>` — how every other screen links to one. */
+  initialView: ReturnRow | null;
 }) {
+  const t = useT();
   const list = useInfiniteList<ReturnRow>({ path: '/api/v1/admin/returns', query, initial });
 
   /** One panel for the whole list; a row's button names which record it shows. */
-  const viewing = useViewTarget<ReturnRow>();
+  const viewing = useAddressedView<ReturnRow>(initialView);
 
   const columns: Column<ReturnRow>[] = [
     {
       key: 'return',
       width: '12rem',
-      header: 'Return',
+      header: t('Return'),
       cell: (row) => (
         <>
-          <Link href={`/returns/${row.id}`} className="block font-mono text-sm font-medium hover:underline">
+          <button
+            type="button"
+            onClick={() => viewing.view(row)}
+            className="block font-mono text-sm font-medium hover:underline"
+          >
             {row.returnNumber}
-          </Link>
+          </button>
           <span className="block truncate text-xs text-muted-foreground">{row.customerName}</span>
         </>
       ),
@@ -50,9 +61,9 @@ export function ReturnList({
     {
       key: 'order',
       width: '10rem',
-      header: 'Order',
+      header: t('Order'),
       cell: (row) => (
-        <Link href={`/orders/${row.orderId}`} className="font-mono text-sm hover:underline">
+        <Link href={`/orders?view=${row.orderId}`} className="font-mono text-sm hover:underline">
           {row.orderNumber}
         </Link>
       ),
@@ -60,29 +71,42 @@ export function ReturnList({
     {
       key: 'requested',
       width: '10rem',
-      header: 'Requested',
+      header: t('Requested'),
       className: 'text-sm text-muted-foreground',
-      cell: (row) => formatDate(row.createdAt),
+      cell: (row) => t.date(row.createdAt),
     },
     {
       key: 'reason',
-      header: 'Reason',
+      header: t('Reason'),
       className: 'text-sm',
-      cell: (row) => <span className="block truncate">{titleCase(row.reason)}</span>,
+      cell: (row) => (
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{t.loose(titleCase(row.reason))}</span>
+          {row.photoCount > 0 ? (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              title={t.plural(row.photoCount, '{count} photo', '{count} photos', { count: row.photoCount })}
+            >
+              <Camera className="size-3" aria-hidden />
+              {t.number(row.photoCount)}
+            </span>
+          ) : null}
+        </span>
+      ),
     },
     {
       key: 'status',
       width: '9rem',
-      header: 'Status',
+      header: t('Status'),
       cell: (row) => <StatusBadge status={row.status} />,
     },
     {
       key: 'refundable',
       width: '9rem',
-      header: 'Refundable',
+      header: t('Refundable'),
       headClassName: 'text-right',
       className: 'text-right tabular-nums',
-      cell: (row) => formatMoney(row.refundableAmount, row.currency),
+      cell: (row) => t.money(row.refundableAmount, row.currency),
     },
     {
       key: 'view',
@@ -93,7 +117,7 @@ export function ReturnList({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`View return ${row.returnNumber}`}
+          aria-label={t('View return {number}', { number: row.returnNumber })}
           onClick={() => viewing.view(row)}
         >
           <Eye />
@@ -116,10 +140,15 @@ export function ReturnList({
         onRetry={list.retry}
         minWidth="66rem"
         estimateRowHeight={62}
-        empty={filtered ? 'No return matches those filters.' : 'No returns yet.'}
+        empty={filtered ? t('No return matches those filters.') : t('No returns yet.')}
       />
 
-      <ReturnDetail row={viewing.row} open={viewing.open} onOpenChange={viewing.onOpenChange} />
+      <ReturnDetail
+        row={viewing.row}
+        open={viewing.open}
+        onOpenChange={viewing.onOpenChange}
+        canApprove={canApprove}
+      />
     </>
   );
 }

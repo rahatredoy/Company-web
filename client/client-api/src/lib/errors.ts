@@ -10,6 +10,8 @@ export const ERROR_CODES = {
   CONFLICT: 'CONFLICT',
   RATE_LIMITED: 'RATE_LIMITED',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+  /** The request arrived over plaintext HTTP. See `plugins/https.ts`. */
+  HTTPS_REQUIRED: 'HTTPS_REQUIRED',
 
   // --- tenant resolution -------------------------------------------------------
   STORE_NOT_FOUND: 'STORE_NOT_FOUND',
@@ -74,14 +76,28 @@ export const ERROR_CODES = {
   WEBHOOK_DUPLICATE: 'WEBHOOK_DUPLICATE',
 
   // --- marketing ------------------------------------------------------------------------
-  COUPON_CODE_TAKEN: 'COUPON_CODE_TAKEN',
-  COUPON_EXPIRED: 'COUPON_EXPIRED',
-  COUPON_LIMIT_REACHED: 'COUPON_LIMIT_REACHED',
+  DISCOUNT_CODE_TAKEN: 'DISCOUNT_CODE_TAKEN',
+  /** A code the shopper entered does not apply to this order; `message` says why in their terms. */
+  DISCOUNT_NOT_APPLICABLE: 'DISCOUNT_NOT_APPLICABLE',
+  /** The last use of a limited discount was taken by another order while this one was being placed. */
+  DISCOUNT_LIMIT_REACHED: 'DISCOUNT_LIMIT_REACHED',
+  /** A bank offer names a bank with no card prefixes on file, so no card could ever match it. */
+  DISCOUNT_BANK_UNVERIFIABLE: 'DISCOUNT_BANK_UNVERIFIABLE',
+  BANK_IN_USE: 'BANK_IN_USE',
 
   // --- content ---------------------------------------------------------------------------
   PAGE_SLUG_TAKEN: 'PAGE_SLUG_TAKEN',
   INVALID_TEMPLATE: 'INVALID_TEMPLATE',
   INVALID_THEME: 'INVALID_THEME',
+
+  // --- settings ---------------------------------------------------------------------------
+  /** Not an ISO 4217 code in circulation. See `lib/currencies.ts`. */
+  UNSUPPORTED_CURRENCY: 'UNSUPPORTED_CURRENCY',
+  /**
+   * A store that has taken orders changed its currency without saying it knew
+   * what that does. Asked for again with `confirmCurrencyChange: true`.
+   */
+  CURRENCY_CHANGE_UNCONFIRMED: 'CURRENCY_CHANGE_UNCONFIRMED',
 
   // --- storage ----------------------------------------------------------------------------
   STORAGE_NOT_CONFIGURED: 'STORAGE_NOT_CONFIGURED',

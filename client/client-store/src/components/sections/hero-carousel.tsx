@@ -5,20 +5,19 @@ import type { TemplatePreset } from '@/templates/meta';
 import {
   Carousel,
   CarouselArrows,
-  CarouselDots,
   CarouselItem,
   CarouselViewport,
 } from '@/components/carousel/carousel';
 import { useAutoAdvance } from '@/components/carousel/use-auto-advance';
-import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 import { HeroSlideView } from './hero-slide';
 
 /**
  * The homepage hero.
  *
- * A single slide renders as a plain panel — no carousel wrapper, no arrows, no
- * dots. Controls for stepping through a set of one are noise, and the extra
- * scroll container would be one more thing for a screen reader to announce.
+ * A single slide renders as a plain panel — no carousel wrapper and no arrows.
+ * Controls for stepping through a set of one are noise, and the extra scroll
+ * container would be one more thing for a screen reader to announce.
  *
  * With several slides every one of them is in the served HTML. Nothing here
  * defers a slide until hydration, so the first paint is the complete hero and
@@ -35,6 +34,8 @@ export function HeroCarousel({
   priority: boolean;
   autoplayMs?: number;
 }) {
+  const t = useT();
+
   if (slides.length === 0) return null;
 
   if (slides.length === 1) {
@@ -42,7 +43,7 @@ export function HeroCarousel({
   }
 
   return (
-    <Carousel label="Featured promotions" className="group/hero">
+    <Carousel label={t('Featured promotions')}>
       <HeroTrack slides={slides} variant={variant} priority={priority} autoplayMs={autoplayMs} />
     </Carousel>
   );
@@ -64,7 +65,6 @@ function HeroTrack({
   autoplayMs: number;
 }) {
   const { pauseProps } = useAutoAdvance({ intervalMs: autoplayMs });
-  const overlaid = variant === 'fullbleed' || variant === 'tech';
 
   return (
     <div className="relative" {...pauseProps}>
@@ -81,13 +81,15 @@ function HeroTrack({
         ))}
       </CarouselViewport>
 
-      {/* Arrows appear on hover on pointer devices, and are always present for keyboards. */}
-      <CarouselArrows className="opacity-0 transition-opacity focus-within:opacity-100 group-hover/hero:opacity-100 focus:opacity-100" />
-
-      <CarouselDots
-        tone={overlaid ? 'light' : 'dark'}
-        className={cn('absolute inset-x-0 z-20', overlaid ? 'bottom-6' : 'bottom-4 lg:bottom-6')}
-      />
+      {/*
+        Always drawn, and never disabled. The hero loops, so neither arrow is
+        ever a dead end — there is no first slide to be stuck at and no last one
+        to run out of, and an arrow that greys out at an edge would be saying
+        otherwise. Revealing them on hover was the other half of the same
+        problem: a control the visitor has to discover by accident is one most
+        of them never find, and a touch screen has no hover to discover it with.
+      */}
+      <CarouselArrows />
     </div>
   );
 }

@@ -1,10 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import { Loader2, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { formatNumber } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
@@ -23,6 +23,44 @@ import { cn } from '@/lib/utils';
  * different content came into view. The widths are therefore declared per column
  * rather than measured, which is why columns are data here instead of JSX.
  */
+
+/**
+ * `virtualizer.measureElement`, run just after React's commit instead of inside it.
+ *
+ * Passed straight to a row's `ref` it is called *during* the commit, and when a
+ * row mounted **above the scroll position** measures differently from its
+ * estimate the virtualiser corrects the scroll offset and re-renders through
+ * `flushSync` — which React refuses mid-commit ("flushSync was called from inside
+ * a lifecycle method"). The categories screen hit it first, because expanding a
+ * branch or a reorder's refresh mounts rows above the fold, but any list that
+ * re-renders while scrolled could.
+ *
+ * A microtask rather than `useFlushSync: false`, because that option would also
+ * switch off the one `flushSync` worth having: the re-render on a range change
+ * *during* a scroll, which fires from the scroll listener outside React and is
+ * what keeps a fast scroll painting filled rows rather than a blank band. A
+ * microtask runs after the commit and before the browser paints, so the
+ * correction still lands in the same frame and nothing flickers.
+ *
+ * Stable per virtualiser (the instance is held in state), so React only calls it
+ * when a row mounts or unmounts — an inline arrow would re-measure every row on
+ * every render.
+ */
+function useCommitSafeMeasure<TElement extends Element>(
+  virtualizer: Virtualizer<HTMLDivElement, TElement>,
+) {
+  return React.useCallback(
+    (node: TElement | null) => {
+      queueMicrotask(() => {
+        // Unmounted before the microtask ran: a detached node measures as zero,
+        // and recording that would collapse the row it used to be.
+        if (node && !node.isConnected) return;
+        virtualizer.measureElement(node);
+      });
+    },
+    [virtualizer],
+  );
+}
 
 export interface Column<T> {
   key: string;
@@ -104,7 +142,11 @@ export function InfiniteTable<T extends { id: string }>({
   onRetry: () => void;
   /** What the whole filtered list holds, counted once by the API. */
   total: number | null;
-  /** Singular noun for the footer tally — "product", "order". */
+  /**
+   * Singular noun for the footer tally — "product", "order". Pass the English
+   * word: the footer adds the English plural itself, and translates the word
+   * when the dictionary has it (a word already translated is shown as it is).
+   */
   noun?: string;
   empty: React.ReactNode;
   /** Starting guess only; every row is measured once it renders. */
@@ -129,7 +171,7 @@ export function InfiniteTable<T extends { id: string }>({
    * their handlers on. Kept as an escape hatch rather than baked in: reordering
    * is two screens' behaviour, not every list's.
    */
-  rowProps?: (row: T, index: number) => React.HTMLAttributes<HTMLTableRowElement> & { draggable?: boolean };
+  rowProps?: (row: T, index: number) => React.HTMLAttributes<HTMLTableRowElement> & { draggable?: boolean }; // i18n-ignore
   className?: string;
 }) {
   const scroller = React.useRef<HTMLDivElement>(null);
@@ -147,6 +189,7 @@ export function InfiniteTable<T extends { id: string }>({
       return row ? (rowKey ? rowKey(row) : row.id) : index;
     },
   });
+  const measureRow = useCommitSafeMeasure(virtualizer);
 
   const items = virtualizer.getVirtualItems();
   const first = items[0];
@@ -239,7 +282,7 @@ export function InfiniteTable<T extends { id: string }>({
                       // of text is not the height of an empty one, and a guess
                       // that is wrong by a few pixels compounds over a thousand
                       // rows into a scrollbar that lies.
-                      ref={virtualizer.measureElement}
+                      ref={measureRow}
                       className={cn(
                         'border-b border-border transition-colors hover:bg-muted/60',
                         rowClassName?.(row, item.index),
@@ -331,6 +374,7 @@ export function InfiniteStack<T extends { id: string }>({
     initialRect: SSR_VIEWPORT,
     getItemKey: (index) => rows[index]?.id ?? index,
   });
+  const measureRow = useCommitSafeMeasure(virtualizer);
 
   const items = virtualizer.getVirtualItems();
   const lastIndex = items[items.length - 1]?.index ?? -1;
@@ -356,7 +400,7 @@ export function InfiniteStack<T extends { id: string }>({
                 <li
                   key={item.key}
                   data-index={item.index}
-                  ref={virtualizer.measureElement}
+                  ref={measureRow}
                   // Absolutely positioned rather than padded into place: a card
                   // list has no rows to pad with, and `transform` keeps the
                   // browser from re-laying-out the whole stack on every scroll.
@@ -418,16 +462,23 @@ function ListFooter({
   onRetry: () => void;
   onLoadMore: () => void;
 }) {
-  const plural = `${noun}${shown === 1 ? '' : 's'}`;
+  const t = useT();
+  // One word, placed into whole sentences below rather than glued to them, so a
+  // language whose counts do not inflect the noun has somewhere to put it.
+  const word = t.loose(noun);
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
       <p className="text-sm text-muted-foreground" aria-live="polite">
         {shown === 0
-          ? `No ${noun}s to show`
+          ? t('No {noun}s to show', { noun: word })
           : total !== null && total > shown
-            ? `Showing ${formatNumber(shown)} of ${formatNumber(total)} ${noun}${total === 1 ? '' : 's'}`
-            : `${formatNumber(shown)} ${plural}`}
+            ? t.plural(total, 'Showing {shown} of {total} {noun}', 'Showing {shown} of {total} {noun}s', {
+                shown,
+                total,
+                noun: word,
+              })
+            : t.plural(shown, '{count} {noun}', '{count} {noun}s', { noun: word })}
       </p>
 
       {error ? (
@@ -437,20 +488,20 @@ function ListFooter({
             {error}
           </span>
           <Button variant="outline" size="sm" onClick={onRetry}>
-            Try again
+            {t('Try again')}
           </Button>
         </div>
       ) : loading ? (
         <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" aria-hidden />
-          Loading more…
+          {t('Loading more…')}
         </span>
       ) : hasMore ? (
         <Button variant="outline" size="sm" onClick={onLoadMore}>
-          Load more
+          {t('Load more')}
         </Button>
       ) : shown > 0 ? (
-        <span className="text-sm text-muted-foreground">End of list</span>
+        <span className="text-sm text-muted-foreground">{t('End of list')}</span>
       ) : null}
     </div>
   );

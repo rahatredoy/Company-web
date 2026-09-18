@@ -26,11 +26,11 @@ export function HowItWorks() {
               <li key={item.step} className="relative flex flex-col items-center text-center">
                 <span className="relative z-10 grid size-16 place-items-center rounded-full border border-border bg-card text-primary shadow-[var(--shadow-soft)]">
                   <Icon className="size-6" aria-hidden />
-                  <span className="absolute -top-1 -right-1 grid size-6 place-items-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
+                  <span className="absolute -top-1 -right-1 grid size-6 place-items-center rounded-full bg-primary text-[10.5px] font-bold text-primary-foreground">
                     {item.step}
                   </span>
                 </span>
-                <h3 className="mt-4 text-[15px] font-semibold">{item.title}</h3>
+                <h3 className="mt-4 text-[14px] font-semibold">{item.title}</h3>
                 <p className="mt-1.5 max-w-52 text-sm text-pretty text-muted-foreground">{item.description}</p>
               </li>
             );

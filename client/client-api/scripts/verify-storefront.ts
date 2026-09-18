@@ -408,7 +408,163 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('\n6. The two surfaces stay apart');
+  console.log('\n6. The filter panel offers only what narrows, and narrows by what it offers');
+  {
+    /*
+     * Every claim here is checked the same way: take the count the panel printed
+     * beside an option, ask the listing for that option, and require the total to
+     * be the number the shopper was shown. A facet that counts one thing and
+     * filters another is the failure this section exists to catch, and it is
+     * invisible from the outside — both halves answer 200.
+     */
+    const list = await shop('/products');
+    const total = Number(list.body?.data?.meta?.total ?? 0);
+    const groups: any[] = list.body?.data?.filters ?? [];
+    const byKey = new Map<string, any>(groups.map((group) => [group.key, group]));
+
+    check(
+      'every group is a shape the storefront knows how to draw',
+      groups.length > 0 &&
+        groups.every(
+          (group) =>
+            (group.type === 'checkbox' || group.type === 'price') &&
+            Array.isArray(group.options) &&
+            group.options.length > 0,
+        ),
+      groups.map((group) => `${group.key}:${group.type}:${group.options?.length}`),
+    );
+
+    check(
+      'no option is a dead end — every one would return something',
+      groups.every((group) => group.options.every((option: any) => Number(option.count) > 0)),
+      groups.flatMap((group) =>
+        group.options.filter((option: any) => !(Number(option.count) > 0)).map((option: any) => `${group.key}=${option.value}`),
+      ),
+    );
+
+    // Colour picks a variant, which is the product page's job; a swatch list in
+    // the sidebar answered a question nobody asks before choosing the product.
+    check(
+      'the sidebar offers no colour list',
+      !groups.some((group) => group.key === 'colour' || group.key === 'color'),
+      groups.map((group) => group.key),
+    );
+    check('nor a star ladder — "Top Rated" is an offer now', !byKey.has('rating'), [...byKey.keys()]);
+
+    const category = byKey.get('sub');
+    check('it opens with the departments', category?.label === 'Category', category?.label);
+
+    if (category?.options?.length) {
+      const [first, second] = category.options;
+      const one = await shop(`/products?sub=${encodeURIComponent(first.value)}`);
+      check(
+        'a department returns exactly what it counted',
+        Number(one.body?.data?.meta?.total) === Number(first.count),
+        { department: first.value, counted: first.count, returned: one.body?.data?.meta?.total },
+      );
+
+      if (second) {
+        const both = await shop(
+          `/products?sub=${encodeURIComponent(first.value)}&sub=${encodeURIComponent(second.value)}`,
+        );
+        // Top-level departments are disjoint subtrees, so the union is the sum.
+        // Intersecting them — the bug a merged category filter would have — would
+        // answer zero here.
+        check(
+          'two departments are a union, not an intersection',
+          Number(both.body?.data?.meta?.total) === Number(first.count) + Number(second.count),
+          { expected: first.count + second.count, returned: both.body?.data?.meta?.total },
+        );
+
+        const facetsWhileTicked: any[] = one.body?.data?.filters ?? [];
+        const stillThere = facetsWhileTicked.find((group) => group.key === 'sub');
+        check(
+          'and ticking one leaves the others on the panel to untick it with',
+          (stillThere?.options ?? []).length === category.options.length,
+          { before: category.options.length, after: stillThere?.options?.length },
+        );
+      }
+    }
+
+    const offers = byKey.get('offer');
+    check('the offers group is there', offers?.label === 'Offers', offers?.label);
+
+    for (const option of offers?.options ?? []) {
+      const narrowed = await shop(`/products?offer=${encodeURIComponent(option.value)}`);
+      check(
+        `"${option.label}" returns exactly what it counted`,
+        Number(narrowed.body?.data?.meta?.total) === Number(option.count),
+        { counted: option.count, returned: narrowed.body?.data?.meta?.total },
+      );
+    }
+
+    if ((offers?.options ?? []).length > 1) {
+      const [first, second] = offers.options;
+      const either = await shop(
+        `/products?offer=${encodeURIComponent(first.value)}&offer=${encodeURIComponent(second.value)}`,
+      );
+      const union = Number(either.body?.data?.meta?.total);
+      check(
+        'two offers are "either", so the result is at least the larger of them',
+        union >= Math.max(Number(first.count), Number(second.count)) &&
+          union <= Math.min(total, Number(first.count) + Number(second.count)),
+        { first: first.count, second: second.count, union },
+      );
+    }
+
+    const price = byKey.get('price');
+    check(
+      'price is a ladder of bands, each carrying its own bounds',
+      price?.type === 'price' &&
+        price.options.length > 1 &&
+        price.options.every((option: any) => typeof option.min === 'number'),
+      price?.options,
+    );
+
+    for (const option of price?.options ?? []) {
+      const narrowed = await shop(`/products?price=${encodeURIComponent(option.value)}`);
+      check(
+        `the ${option.label} band returns exactly what it counted`,
+        Number(narrowed.body?.data?.meta?.total) === Number(option.count),
+        { counted: option.count, returned: narrowed.body?.data?.meta?.total },
+      );
+    }
+
+    // Half-open bounds: a product priced at a boundary belongs to one band only,
+    // so the bands can never add up to more than the shop holds.
+    check(
+      'the bands do not overlap',
+      (price?.options ?? []).reduce((sum: number, option: any) => sum + Number(option.count), 0) <= total,
+      { bands: (price?.options ?? []).map((option: any) => option.count), total },
+    );
+
+    // Both lists are whitelists, so a hand-edited URL asks for nothing rather
+    // than for something the panel could not have offered.
+    const invented = await shop('/products?price=137-999');
+    check(
+      'an invented price band is ignored rather than honoured',
+      Number(invented.body?.data?.meta?.total) === total,
+      invented.body?.data?.meta?.total,
+    );
+
+    const nonsense = await shop('/products?offer=free_unicorn');
+    check(
+      'and so is an invented offer',
+      Number(nonsense.body?.data?.meta?.total) === total,
+      nonsense.body?.data?.meta?.total,
+    );
+
+    // Twenty is what the storefront asks for a batch of; the endpoint still
+    // pages, because a scrolled listing is built out of pages.
+    const batch = await shop('/products?pageSize=20&page=2');
+    check(
+      'the listing still pages, which is what the scroll is made of',
+      batch.status === 200 && (batch.body?.data?.items ?? []).length <= 20,
+      { status: batch.status, items: batch.body?.data?.items?.length },
+    );
+  }
+
+  console.log('\n7. The two surfaces stay apart');
   {
     const adminFromShopHost = await call(STORE_HOST, '/api/v1/admin/products', {
       origin: `http://${STORE_HOST}`,
@@ -423,7 +579,7 @@ async function main(): Promise<void> {
     check('a slug in the query string is ignored', forged.status === 200, forged.status);
   }
 
-  console.log('\n7. Isolation — the claim the architecture exists to make');
+  console.log('\n8. Isolation — the claim the architecture exists to make');
   if (!OTHER || OTHER === SLUG) {
     console.log('  SKIP  no second store given; pass --other <slug> to check cross-tenant isolation');
   } else {

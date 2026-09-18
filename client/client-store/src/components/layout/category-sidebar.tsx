@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 import {
   Baby,
@@ -13,7 +12,6 @@ import {
   Gamepad2,
   HeartPulse,
   Laptop,
-  Menu,
   Music,
   PawPrint,
   Printer,
@@ -26,6 +24,7 @@ import {
 } from 'lucide-react';
 import type { CategoryMenuEntry, StoreConfig } from '@/types';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 /**
  * The vertical category rail beside the hero.
@@ -60,6 +59,12 @@ import { cn } from '@/lib/utils';
  *
  * That makes the two bottom edges line up at every width and for any hero
  * artwork, which a fixed cap could only manage by coincidence.
+ *
+ * **The scrollbar is hidden and the panel has no header.** A track running down
+ * the right of a list this narrow eats a column of the names beside it and
+ * announces the cap rather than the categories; the list still scrolls, by wheel,
+ * touch and keyboard. The `All Categories` bar above it named what the reader
+ * could already see — a list of categories — and cost the panel a row.
  *
  * The department's own page is still one click away, as `All <name>` at the top
  * of what it opens — the same wording `category-menu-button.tsx` uses for the
@@ -103,15 +108,12 @@ function iconFor(entry: CategoryMenuEntry): LucideIcon | null {
 
 export function CategorySidebar({
   config,
-  title = 'All Categories',
-  headerTone = 'primary',
   className,
 }: {
   config: StoreConfig;
-  title?: string;
-  headerTone?: 'primary' | 'dark' | 'plain';
   className?: string;
 }) {
+  const t = useT();
   /** The one open department, or none. A second open closes the first. */
   const [expanded, setExpanded] = React.useState<string | null>(null);
 
@@ -137,22 +139,10 @@ export function CategorySidebar({
      */
     <div className={cn('relative hidden lg:block', className)}>
       <nav
-        aria-label="Categories"
-        className="absolute inset-x-0 top-0 flex max-h-full flex-col overflow-hidden rounded-(--radius-card) border border-border bg-surface"
+        aria-label={t('Categories')}
+        className="absolute inset-x-0 top-0 flex max-h-full flex-col overflow-hidden rounded-[5px] border-[0.5px] border-border/70 bg-surface"
       >
-        <p
-          className={cn(
-            'flex shrink-0 items-center gap-2 px-4 py-3 text-sm font-semibold',
-            headerTone === 'primary' && 'bg-primary text-primary-foreground',
-            headerTone === 'dark' && 'bg-secondary text-secondary-foreground',
-            headerTone === 'plain' && 'border-b border-border text-foreground',
-          )}
-        >
-          <Menu className="size-4" aria-hidden />
-          {title}
-        </p>
-
-        <ul className="min-h-0 flex-auto overflow-y-auto py-1">
+        <ul className="no-scrollbar min-h-0 flex-auto overflow-y-auto py-1.5">
           {entries.map((entry) => {
             const Icon = iconFor(entry);
             const hasChildren = entry.children.length > 0;
@@ -165,11 +155,7 @@ export function CategorySidebar({
              */
             const face = (
               <>
-                {entry.iconUrl ? (
-                  <span className="relative size-4 shrink-0">
-                    <Image src={entry.iconUrl} alt="" aria-hidden fill sizes="16px" className="object-contain" />
-                  </span>
-                ) : Icon ? (
+                {Icon ? (
                   <Icon
                     className={cn(
                       'size-4 shrink-0 transition-colors group-hover:text-primary',
@@ -224,7 +210,7 @@ export function CategorySidebar({
                         href={`/category/${entry.slug}`}
                         className="block truncate rounded-(--radius-button) px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-surface-alt"
                       >
-                        All {entry.name}
+                        {t('All {name}', { name: entry.name })}
                       </Link>
                     </li>
 

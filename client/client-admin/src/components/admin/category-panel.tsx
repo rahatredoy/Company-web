@@ -1,11 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
-import { Input, Textarea } from '@/components/ui/input';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
@@ -22,6 +21,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/toaster';
 import { api, ApiError, errorMessage } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { slugify } from '@/lib/slugify';
 import { cn } from '@/lib/utils';
 import type { CategoryRow } from '@/lib/types';
@@ -37,28 +37,32 @@ import { descendantIds, SELECT_CLASS } from './category-tree';
  * a subcategory is going under is the whole point of the screen. The list stays
  * on screen and the panel closes back onto it.
  *
- * The form is controlled rather than read out of `FormData` because four fields
- * count their own characters, the slug follows the name until it is edited by
- * hand, and the parent select has to exclude the branch you are standing on.
- * None of that can be answered at submit time.
+ * The form is controlled rather than read out of `FormData` because the SEO
+ * title counts its own characters, the slug follows the name until it is
+ * edited by hand, and the parent select has to exclude the branch you are
+ * standing on. None of that can be answered at submit time.
+ *
+ * A category carries one picture and it is uploaded, never pasted: an address
+ * typed here is a hotlink to somebody else's server, which breaks the day they
+ * move the file and is served from outside the store's own storage.
+ *
+ * Two things are deliberately not asked. Position: a new category is placed
+ * after its siblings by the API, and dragging a row in the list is how it moves.
+ * And a meta description: the columns still exist and the API still takes them,
+ * but they are not a question worth putting to someone adding an aisle.
  */
 
-/** Soft limits: what the storefront and search engines actually use. */
-const LIMITS = { description: 500, seoTitle: 60, seoDescription: 160 } as const;
+/** Soft limit: what search engines actually show. */
+const LIMITS = { seoTitle: 60 } as const;
 
 interface Draft {
   name: string;
   slug: string;
   parentId: string;
-  description: string;
   imageUrl: string;
-  iconUrl: string;
-  bannerUrl: string;
   showInMenu: boolean;
   isFeatured: boolean;
-  sortOrder: string;
   seoTitle: string;
-  seoDescription: string;
   isActive: boolean;
 }
 
@@ -67,23 +71,19 @@ function draftFrom(category: CategoryRow | null, presetParentId: string | null):
     name: category?.name ?? '',
     slug: category?.slug ?? '',
     parentId: category?.parentId ?? presetParentId ?? '',
-    description: category?.description ?? '',
     imageUrl: category?.imageUrl ?? '',
-    iconUrl: category?.iconUrl ?? '',
-    bannerUrl: category?.bannerUrl ?? '',
     showInMenu: category?.showInMenu ?? true,
     isFeatured: category?.isFeatured ?? false,
-    sortOrder: String(category?.sortOrder ?? 0),
     seoTitle: category?.seoTitle ?? '',
-    seoDescription: category?.seoDescription ?? '',
     isActive: category?.isActive ?? true,
   };
 }
 
 function Counter({ value, max }: { value: number; max: number }) {
+  const t = useT();
   return (
-    <span className={cn('text-[11px] tabular-nums', value > max ? 'text-warning' : 'text-muted-foreground')}>
-      {value}/{max}
+    <span className={cn('text-[10.5px] tabular-nums', value > max ? 'text-warning' : 'text-muted-foreground')}>
+      {t.number(value)}/{t.number(max)}
     </span>
   );
 }
@@ -109,6 +109,7 @@ export function CategoryPanel({
   /** Passed the saved row's parent, so the list can open the branch it went into. */
   onSaved: (parentId: string | null) => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = React.useState<Draft>(() => draftFrom(category, presetParentId));
   const [slugTouched, setSlugTouched] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -176,8 +177,8 @@ export function CategoryPanel({
     // was opened as "Add Subcategory" — to it, a null parent is a top-level
     // category and perfectly valid.
     if (asSubcategory && !draft.parentId) {
-      setFieldErrors({ parentId: 'Choose the category this one sits inside.' });
-      setError('A subcategory needs a parent category.');
+      setFieldErrors({ parentId: t('Choose the category this one sits inside.') });
+      setError(t('A subcategory needs a parent category.'));
       return;
     }
 
@@ -186,16 +187,11 @@ export function CategoryPanel({
     const payload: Record<string, unknown> = {
       name: draft.name.trim(),
       parentId: draft.parentId === '' ? null : draft.parentId,
-      description: draft.description.trim() || null,
       imageUrl: draft.imageUrl.trim() || null,
-      iconUrl: draft.iconUrl.trim() || null,
-      bannerUrl: draft.bannerUrl.trim() || null,
       isActive: draft.isActive,
       showInMenu: draft.showInMenu,
       isFeatured: draft.isFeatured,
-      sortOrder: Number(draft.sortOrder) || 0,
       seoTitle: draft.seoTitle.trim() || null,
-      seoDescription: draft.seoDescription.trim() || null,
     };
 
     /*
@@ -214,7 +210,9 @@ export function CategoryPanel({
       if (category) await api.patch(`/api/v1/admin/categories/${category.id}`, payload);
       else await api.post('/api/v1/admin/categories', payload);
 
-      toast.success(category ? 'Category saved.' : asSubcategory ? 'Subcategory added.' : 'Category added.');
+      toast.success(
+        category ? t('Category saved.') : asSubcategory ? t('Subcategory added.') : t('Category added.'),
+      );
       onOpenChange(false);
       onSaved((payload.parentId as string | null) ?? null);
     } catch (caught) {
@@ -235,9 +233,6 @@ export function CategoryPanel({
     ? (all.find((row) => row.id === draft.parentId)?.name ?? null)
     : null;
 
-  const stepSort = (by: number) =>
-    set('sortOrder', String(Math.max(0, Math.min(100_000, (Number(draft.sortOrder) || 0) + by))));
-
   /*
    * Written once and placed twice: first in the subcategory form, where it is
    * the question being asked, and after the name in the edit form, where it is
@@ -245,13 +240,13 @@ export function CategoryPanel({
    */
   const parentField = (
     <Field
-      label="Parent Category"
+      label={t('Parent Category')}
       htmlFor="cat-parent"
       required={asSubcategory}
       hint={
         asSubcategory
-          ? 'The subcategory is listed inside this one on the storefront.'
-          : 'Move it under another category, or leave it at the top level.'
+          ? t('The subcategory is listed inside this one on the storefront.')
+          : t('Move it under another category, or leave it at the top level.')
       }
       error={fieldErrors.parentId}
     >
@@ -261,7 +256,7 @@ export function CategoryPanel({
         onChange={(event) => set('parentId', event.target.value)}
         className={SELECT_CLASS}
       >
-        <option value="">{asSubcategory ? 'Select a parent category…' : 'None — top level'}</option>
+        <option value="">{asSubcategory ? t('Select a parent category…') : t('None — top level')}</option>
         {parentOptions.map((option) => (
           <option key={option.id} value={option.id}>
             {option.name}
@@ -277,16 +272,16 @@ export function CategoryPanel({
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
           <SheetHeader>
             <SheetTitle>
-              {category ? 'Edit Category' : asSubcategory ? 'Add Subcategory' : 'Add Category'}
+              {category ? t('Edit Category') : asSubcategory ? t('Add Subcategory') : t('Add Category')}
             </SheetTitle>
             <SheetDescription>
               {category
-                ? 'Update category details and settings.'
+                ? t('Update category details and settings.')
                 : asSubcategory
                   ? parentName
-                    ? `Listed inside ${parentName} on the storefront.`
-                    : 'Pick the category this one goes inside.'
-                  : 'A top-level category. Use Add Subcategory to put one inside another.'}
+                    ? t('Listed inside {name} on the storefront.', { name: parentName })
+                    : t('Pick the category this one goes inside.')
+                  : t('A top-level category. Use Add Subcategory to put one inside another.')}
             </SheetDescription>
           </SheetHeader>
 
@@ -301,7 +296,7 @@ export function CategoryPanel({
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field
-                    label={asSubcategory ? 'Subcategory Name' : 'Category Name'}
+                    label={asSubcategory ? t('Subcategory Name') : t('Category Name')}
                     htmlFor="cat-name"
                     required
                     error={fieldErrors.name}
@@ -319,7 +314,7 @@ export function CategoryPanel({
                     />
                   </Field>
 
-                  <Field label="Slug" htmlFor="cat-slug" required error={fieldErrors.slug}>
+                  <Field label={t('Slug')} htmlFor="cat-slug" required error={fieldErrors.slug}>
                     <Input
                       id="cat-slug"
                       value={draft.slug}
@@ -328,7 +323,7 @@ export function CategoryPanel({
                         set('slug', event.target.value);
                       }}
                       onBlur={(event) => set('slug', slugify(event.target.value))}
-                      placeholder="made-from-the-name"
+                      placeholder={t('made-from-the-name')}
                       maxLength={160}
                       className="font-mono text-xs"
                     />
@@ -337,73 +332,21 @@ export function CategoryPanel({
 
                 {category ? parentField : null}
 
-                <Field label="Description" htmlFor="cat-description" error={fieldErrors.description}>
-                  <div className="relative">
-                    <Textarea
-                      id="cat-description"
-                      value={draft.description}
-                      onChange={(event) => set('description', event.target.value)}
-                      maxLength={LIMITS.description}
-                      rows={3}
-                      className="pb-7"
-                      placeholder="What a shopper finds in here."
-                    />
-                    <span className="absolute right-3 bottom-2">
-                      <Counter value={draft.description.length} max={LIMITS.description} />
-                    </span>
-                  </div>
-                </Field>
-
-                <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
-                  <Field label="Category Image" error={fieldErrors.imageUrl}>
-                    <ImageUpload
-                      name="imageUrl"
-                      purpose="categories"
-                      defaultValue={draft.imageUrl}
-                      onChange={(url) => set('imageUrl', url)}
-                      label="Change"
-                    />
-                  </Field>
-
-                  <Field label="Menu Icon" error={fieldErrors.iconUrl}>
-                    <ImageUpload
-                      name="iconUrl"
-                      purpose="categories"
-                      defaultValue={draft.iconUrl}
-                      onChange={(url) => set('iconUrl', url)}
-                      label="Change"
-                      compact
-                    />
-                  </Field>
-                </div>
-
-                {/*
-                  The wide artwork across the top of the category's own page.
-
-                  Its own field rather than a second use of the image above: that
-                  one is a tile in a grid and this is a masthead, so they are
-                  different crops of different pictures. The column has always
-                  been there and the API has always accepted it — the form simply
-                  never asked, which left the banner unsettable from the panel.
-                */}
-                <Field
-                  label="Page Banner"
-                  hint="Shown across the top of this category's page."
-                  error={fieldErrors.bannerUrl}
-                >
+                <Field label={t('Category Image')} error={fieldErrors.imageUrl}>
                   <ImageUpload
-                    name="bannerUrl"
+                    name="imageUrl"
                     purpose="categories"
-                    defaultValue={draft.bannerUrl}
-                    onChange={(url) => set('bannerUrl', url)}
-                    label="Change"
+                    defaultValue={draft.imageUrl}
+                    onChange={(url) => set('imageUrl', url)}
+                    label={draft.imageUrl ? t('Change') : t('Upload')}
+                    pasteable={false}
                   />
                 </Field>
               </SheetColumn>
 
               <SheetColumn>
                 <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="cat-menu">Show in Navigation</Label>
+                  <Label htmlFor="cat-menu">{t('Show in Navigation')}</Label>
                   <Switch
                     id="cat-menu"
                     checked={draft.showInMenu}
@@ -412,7 +355,7 @@ export function CategoryPanel({
                 </div>
 
                 <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="cat-featured">Featured Category</Label>
+                  <Label htmlFor="cat-featured">{t('Featured Category')}</Label>
                   <Switch
                     id="cat-featured"
                     checked={draft.isFeatured}
@@ -420,44 +363,7 @@ export function CategoryPanel({
                   />
                 </div>
 
-                <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="cat-sort">Sort Order</Label>
-                  <div className="relative w-32">
-                    <Input
-                      id="cat-sort"
-                      type="number"
-                      min={0}
-                      max={100_000}
-                      value={draft.sortOrder}
-                      onChange={(event) => set('sortOrder', event.target.value)}
-                      className="pr-8 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      aria-describedby="cat-sort-hint"
-                    />
-                    <span className="absolute inset-y-1 right-1 grid w-6 grid-rows-2 overflow-hidden rounded border border-border">
-                      <button
-                        type="button"
-                        onClick={() => stepSort(1)}
-                        aria-label="Increase sort order"
-                        className="grid place-items-center text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <ChevronUp className="size-3" aria-hidden />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => stepSort(-1)}
-                        aria-label="Decrease sort order"
-                        className="grid place-items-center border-t border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <ChevronDown className="size-3" aria-hidden />
-                      </button>
-                    </span>
-                  </div>
-                </div>
-                <p id="cat-sort-hint" className="-mt-3 text-xs text-muted-foreground">
-                  Lower numbers come first among categories at the same level.
-                </p>
-
-                <Field label="SEO Title" htmlFor="cat-seo-title" error={fieldErrors.seoTitle}>
+                <Field label={t('SEO Title')} htmlFor="cat-seo-title" error={fieldErrors.seoTitle}>
                   <div className="relative">
                     <Input
                       id="cat-seo-title"
@@ -465,7 +371,7 @@ export function CategoryPanel({
                       onChange={(event) => set('seoTitle', event.target.value)}
                       maxLength={LIMITS.seoTitle}
                       className="pr-14"
-                      placeholder={draft.name || 'Shown as the browser tab and search result title'}
+                      placeholder={draft.name || t('Shown as the browser tab and search result title')}
                     />
                     <span className="absolute top-1/2 right-3 -translate-y-1/2">
                       <Counter value={draft.seoTitle.length} max={LIMITS.seoTitle} />
@@ -473,24 +379,7 @@ export function CategoryPanel({
                   </div>
                 </Field>
 
-                <Field label="Meta Description" htmlFor="cat-seo-description" error={fieldErrors.seoDescription}>
-                  <div className="relative">
-                    <Textarea
-                      id="cat-seo-description"
-                      value={draft.seoDescription}
-                      onChange={(event) => set('seoDescription', event.target.value)}
-                      maxLength={LIMITS.seoDescription}
-                      rows={3}
-                      className="pb-7"
-                      placeholder="The sentence search engines show under the title."
-                    />
-                    <span className="absolute right-3 bottom-2">
-                      <Counter value={draft.seoDescription.length} max={LIMITS.seoDescription} />
-                    </span>
-                  </div>
-                </Field>
-
-                <Field label="Status" error={fieldErrors.isActive}>
+                <Field label={t('Status')} error={fieldErrors.isActive}>
                   <RadioGroup
                     value={draft.isActive ? 'active' : 'hidden'}
                     onValueChange={(value) => set('isActive', value === 'active')}
@@ -498,13 +387,13 @@ export function CategoryPanel({
                     <div className="flex items-center gap-2">
                       <RadioGroupItem value="active" id="cat-status-active" />
                       <Label htmlFor="cat-status-active" className="font-normal">
-                        Active (Visible)
+                        {t('Active (Visible)')}
                       </Label>
                     </div>
                     <div className="flex items-center gap-2">
                       <RadioGroupItem value="hidden" id="cat-status-hidden" />
                       <Label htmlFor="cat-status-hidden" className="font-normal">
-                        Hidden
+                        {t('Hidden')}
                       </Label>
                     </div>
                   </RadioGroup>
@@ -515,10 +404,10 @@ export function CategoryPanel({
 
           <SheetFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t('Cancel')}
             </Button>
             <Button type="submit" loading={busy}>
-              {category ? 'Save Category' : asSubcategory ? 'Add Subcategory' : 'Add Category'}
+              {category ? t('Save Category') : asSubcategory ? t('Add Subcategory') : t('Add Category')}
             </Button>
           </SheetFooter>
         </form>

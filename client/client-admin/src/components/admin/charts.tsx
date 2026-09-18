@@ -17,7 +17,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { formatMoney, formatNumber } from '@/lib/format';
+import { useT, type MessageKey } from '@/lib/i18n';
 
 const AXIS = {
   stroke: 'var(--muted-foreground)',
@@ -28,10 +28,16 @@ const AXIS = {
 
 const GRID = { stroke: 'var(--border)', strokeDasharray: '3 3', vertical: false } as const;
 
-function shortDate(value: string) {
+/** `12.5%` — a percentage to one decimal, in the panel's digits. */
+function percent(value: number, locale: string): string {
+  return `${new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1, useGrouping: false }).format(value)}%`;
+}
+
+/** `locale` is `t.locale`, so the axis reads in the panel's language. */
+function shortDate(value: string, locale: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
 }
 
 function ChartTooltip({
@@ -45,17 +51,18 @@ function ChartTooltip({
   label?: string;
   formatter?: (value: number, key: string) => string;
 }) {
+  const t = useT();
   if (!active || !payload?.length) return null;
 
   return (
     <div className="rounded-lg border border-border bg-popover px-3 py-2 shadow-[var(--shadow-raised)]">
-      <p className="mb-1 text-xs font-medium text-muted-foreground">{label ? shortDate(label) : ''}</p>
+      <p className="mb-1 text-xs font-medium text-muted-foreground">{label ? shortDate(label, t.locale) : ''}</p>
       {payload.map((entry) => (
         <p key={String(entry.dataKey)} className="flex items-center gap-2 text-xs">
           <span className="size-2 rounded-full" style={{ background: entry.color }} aria-hidden />
           <span className="text-muted-foreground">{entry.name}</span>
           <span className="ml-auto font-semibold tabular-nums">
-            {formatter ? formatter(entry.value ?? 0, String(entry.dataKey)) : formatNumber(entry.value ?? 0)}
+            {formatter ? formatter(entry.value ?? 0, String(entry.dataKey)) : t.number(entry.value ?? 0)}
           </span>
         </p>
       ))}
@@ -70,6 +77,7 @@ export function RevenueChart({
   data: { date: string; revenue: number; mrr: number }[];
   currency?: string;
 }) {
+  const t = useT();
   return (
     <div className="h-64 w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -81,16 +89,20 @@ export function RevenueChart({
             </linearGradient>
           </defs>
           <CartesianGrid {...GRID} />
-          <XAxis dataKey="date" tickFormatter={shortDate} {...AXIS} minTickGap={24} />
-          <YAxis tickFormatter={(v: number) => `$${v >= 1000 ? `${Math.round(v / 1000)}K` : v}`} {...AXIS} width={52} />
+          <XAxis dataKey="date" tickFormatter={(value: string) => shortDate(value, t.locale)} {...AXIS} minTickGap={24} />
+          <YAxis
+            tickFormatter={(v: number) => `$${v >= 1000 ? `${t.number(Math.round(v / 1000), { useGrouping: false })}K` : t.number(v)}`}
+            {...AXIS}
+            width={52}
+          />
           <Tooltip
-            content={<ChartTooltip formatter={(value) => formatMoney(value, currency)} />}
+            content={<ChartTooltip formatter={(value) => t.money(value, currency)} />}
             cursor={{ stroke: 'var(--border-strong)' }}
           />
           <Area
             type="monotone"
             dataKey="revenue"
-            name="Revenue"
+            name={t('Revenue')}
             stroke="var(--chart-1)"
             strokeWidth={2}
             fill="url(#revenueFill)"
@@ -100,7 +112,7 @@ export function RevenueChart({
           <Line
             type="monotone"
             dataKey="mrr"
-            name="MRR"
+            name={t('MRR')}
             stroke="var(--chart-2)"
             strokeWidth={2}
             dot={false}
@@ -114,25 +126,26 @@ export function RevenueChart({
 
 export function GrowthChart({
   data,
-  label = 'Clients',
+  label,
   color = 'var(--chart-2)',
 }: {
   data: { date: string; total: number }[];
   label?: string;
   color?: string;
 }) {
+  const t = useT();
   return (
     <div className="h-64 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
           <CartesianGrid {...GRID} />
-          <XAxis dataKey="date" tickFormatter={shortDate} {...AXIS} minTickGap={24} />
-          <YAxis {...AXIS} width={42} allowDecimals={false} />
+          <XAxis dataKey="date" tickFormatter={(value: string) => shortDate(value, t.locale)} {...AXIS} minTickGap={24} />
+          <YAxis {...AXIS} width={42} allowDecimals={false} tickFormatter={(v: number) => t.number(v, { useGrouping: false })} />
           <Tooltip content={<ChartTooltip />} cursor={{ stroke: 'var(--border-strong)' }} />
           <Line
             type="monotone"
             dataKey="total"
-            name={label}
+            name={label ?? t('Clients')}
             stroke={color}
             strokeWidth={2}
             dot={{ r: 2.5, strokeWidth: 0, fill: color }}
@@ -153,7 +166,7 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: 'var(--muted-foreground)',
 };
 
-const STATUS_LABELS: Record<string, string> = {
+const STATUS_LABELS: Record<string, MessageKey> = {
   active: 'Active',
   trial: 'Trial',
   past_due: 'Past Due',
@@ -163,11 +176,12 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export function SubscriptionDonut({ data }: { data: { status: string; count: number }[] }) {
+  const t = useT();
   const total = data.reduce((sum, item) => sum + item.count, 0);
 
   if (total === 0) {
     return (
-      <div className="grid h-56 place-items-center text-sm text-muted-foreground">No subscriptions yet</div>
+      <div className="grid h-56 place-items-center text-sm text-muted-foreground">{t('No subscriptions yet')}</div>
     );
   }
 
@@ -192,7 +206,7 @@ export function SubscriptionDonut({ data }: { data: { status: string; count: num
             <Tooltip
               content={
                 <ChartTooltip
-                  formatter={(value) => `${formatNumber(value)} (${((value / total) * 100).toFixed(1)}%)`}
+                  formatter={(value) => `${t.number(value)} (${percent((value / total) * 100, t.locale)})`}
                 />
               }
             />
@@ -200,8 +214,8 @@ export function SubscriptionDonut({ data }: { data: { status: string; count: num
         </ResponsiveContainer>
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
           <div>
-            <p className="text-2xl font-bold tabular-nums">{formatNumber(total)}</p>
-            <p className="text-xs text-muted-foreground">Total Clients</p>
+            <p className="text-2xl font-bold tabular-nums">{t.number(total)}</p>
+            <p className="text-xs text-muted-foreground">{t('Total Clients')}</p>
           </div>
         </div>
       </div>
@@ -214,10 +228,10 @@ export function SubscriptionDonut({ data }: { data: { status: string; count: num
               style={{ background: STATUS_COLORS[entry.status] ?? 'var(--muted-foreground)' }}
               aria-hidden
             />
-            <span className="text-muted-foreground">{STATUS_LABELS[entry.status] ?? entry.status}</span>
+            <span className="text-muted-foreground">{STATUS_LABELS[entry.status] ? t(STATUS_LABELS[entry.status]!) : entry.status}</span>
             <span className="ml-auto font-medium tabular-nums">
-              {formatNumber(entry.count)}{' '}
-              <span className="text-muted-foreground">({((entry.count / total) * 100).toFixed(1)}%)</span>
+              {t.number(entry.count)}{' '}
+              <span className="text-muted-foreground">({percent((entry.count / total) * 100, t.locale)})</span>
             </span>
           </li>
         ))}
@@ -227,24 +241,25 @@ export function SubscriptionDonut({ data }: { data: { status: string; count: num
 }
 
 export function ConversionBars({ data }: { data: { date: string; value: number }[] }) {
+  const t = useT();
   return (
     <div className="h-40 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 4, right: 4, left: -24, bottom: 0 }} barCategoryGap={2}>
           <CartesianGrid {...GRID} />
-          <XAxis dataKey="date" tickFormatter={shortDate} {...AXIS} minTickGap={28} />
+          <XAxis dataKey="date" tickFormatter={(value: string) => shortDate(value, t.locale)} {...AXIS} minTickGap={28} />
           <YAxis
             {...AXIS}
             width={40}
             domain={[0, 100]}
             ticks={[0, 50, 100]}
-            tickFormatter={(v: number) => `${v}%`}
+            tickFormatter={(v: number) => `${t.number(v)}%`}
           />
           <Tooltip
-            content={<ChartTooltip formatter={(value) => `${value.toFixed(1)}%`} />}
+            content={<ChartTooltip formatter={(value) => percent(value, t.locale)} />}
             cursor={{ fill: 'var(--muted)' }}
           />
-          <Bar dataKey="value" name="Conversion" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
+          <Bar dataKey="value" name={t('Conversion')} fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
