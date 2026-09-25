@@ -48,9 +48,17 @@ function connectSource(pattern: string): string {
 const devStoreSlug = process.env.NEXT_PUBLIC_DEV_STORE_SLUG || undefined;
 
 /**
+ * Cloudflare Web Analytics. The proxy in front of every app injects its beacon
+ * script into each page, and the CSP would otherwise block it on every load.
+ * The script comes from one host and reports to another, so both are named.
+ */
+const CLOUDFLARE_INSIGHTS_SCRIPT = 'https://static.cloudflareinsights.com';
+const CLOUDFLARE_INSIGHTS_BEACON = 'https://cloudflareinsights.com';
+
+/**
  * The admin panel is the highest-value surface on the platform, so it ships a
  * tighter policy than the public site: no indexing, no framing, no third-party
- * connections at all.
+ * connections beyond Cloudflare's analytics beacon.
  */
 const csp = [
   "default-src 'self'",
@@ -75,10 +83,10 @@ const csp = [
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   isProduction
-    ? "script-src 'self' 'unsafe-inline'"
-    : "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    ? `script-src 'self' 'unsafe-inline' ${CLOUDFLARE_INSIGHTS_SCRIPT}`
+    : `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${CLOUDFLARE_INSIGHTS_SCRIPT}`,
   "style-src 'self' 'unsafe-inline'",
-  `connect-src 'self' ${connectSource(apiUrl)}`.trimEnd(),
+  `connect-src 'self' ${CLOUDFLARE_INSIGHTS_BEACON} ${connectSource(apiUrl)}`.trimEnd(),
   'upgrade-insecure-requests',
 ].join('; ');
 

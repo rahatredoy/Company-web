@@ -4,6 +4,14 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 const isProduction = process.env.NODE_ENV === 'production';
 
 /**
+ * Cloudflare Web Analytics. The proxy in front of every app injects its beacon
+ * script into each page, and the CSP would otherwise block it on every load.
+ * The script comes from one host and reports to another, so both are named.
+ */
+const CLOUDFLARE_INSIGHTS_SCRIPT = 'https://static.cloudflareinsights.com';
+const CLOUDFLARE_INSIGHTS_BEACON = 'https://cloudflareinsights.com';
+
+/**
  * The admin panel is the highest-value surface on the platform, so it ships a
  * tighter policy than the public site: no indexing, no framing, no third-party
  * connections at all.
@@ -17,10 +25,10 @@ const csp = [
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   isProduction
-    ? "script-src 'self' 'unsafe-inline'"
-    : "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    ? `script-src 'self' 'unsafe-inline' ${CLOUDFLARE_INSIGHTS_SCRIPT}`
+    : `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${CLOUDFLARE_INSIGHTS_SCRIPT}`,
   "style-src 'self' 'unsafe-inline'",
-  `connect-src 'self' ${apiUrl}`,
+  `connect-src 'self' ${CLOUDFLARE_INSIGHTS_BEACON} ${apiUrl}`,
   'upgrade-insecure-requests',
 ].join('; ');
 

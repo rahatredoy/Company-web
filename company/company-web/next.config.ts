@@ -4,6 +4,14 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 const isProduction = process.env.NODE_ENV === 'production';
 
 /**
+ * Cloudflare Web Analytics. The proxy in front of every app injects its beacon
+ * script into each page, and the CSP would otherwise block it on every load.
+ * The script comes from one host and reports to another, so both are named.
+ */
+const CLOUDFLARE_INSIGHTS_SCRIPT = 'https://static.cloudflareinsights.com';
+const CLOUDFLARE_INSIGHTS_BEACON = 'https://cloudflareinsights.com';
+
+/**
  * Security headers. The CSP intentionally allows only this origin plus the
  * company API — no third-party script hosts, no inline event handlers.
  */
@@ -18,10 +26,10 @@ const csp = [
   // Next injects a small inline runtime; 'unsafe-inline' stays out of script-src
   // in production because Next emits nonces for its own inline chunks.
   isProduction
-    ? "script-src 'self' 'unsafe-inline'"
-    : "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    ? `script-src 'self' 'unsafe-inline' ${CLOUDFLARE_INSIGHTS_SCRIPT}`
+    : `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${CLOUDFLARE_INSIGHTS_SCRIPT}`,
   "style-src 'self' 'unsafe-inline'",
-  `connect-src 'self' ${apiUrl}`,
+  `connect-src 'self' ${CLOUDFLARE_INSIGHTS_BEACON} ${apiUrl}`,
   'upgrade-insecure-requests',
 ].join('; ');
 

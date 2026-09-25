@@ -33,6 +33,14 @@ function connectSource(pattern: string): string {
 }
 
 /**
+ * Cloudflare Web Analytics. The proxy in front of every app injects its beacon
+ * script into each page, and the CSP would otherwise block it on every load.
+ * The script comes from one host and reports to another, so both are named.
+ */
+const CLOUDFLARE_INSIGHTS_SCRIPT = 'https://static.cloudflareinsights.com';
+const CLOUDFLARE_INSIGHTS_BEACON = 'https://cloudflareinsights.com';
+
+/**
  * Unlike the admin panels, this app is meant to be indexed and shared, so the
  * policy is public-facing rather than locked down. It still refuses framing and
  * inline scripts from anywhere but ourselves — product descriptions and CMS
@@ -49,9 +57,9 @@ const csp = [
   "img-src 'self' data: blob: https:",
   "media-src 'self' https:",
   "font-src 'self' data:",
-  isProduction ? "script-src 'self' 'unsafe-inline'" : "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  isProduction ? `script-src 'self' 'unsafe-inline' ${CLOUDFLARE_INSIGHTS_SCRIPT}` : `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${CLOUDFLARE_INSIGHTS_SCRIPT}`,
   "style-src 'self' 'unsafe-inline'",
-  `connect-src 'self' ${connectSource(apiUrl)}`.trimEnd(),
+  `connect-src 'self' ${CLOUDFLARE_INSIGHTS_BEACON} ${connectSource(apiUrl)}`.trimEnd(),
   'upgrade-insecure-requests',
 ].join('; ');
 
