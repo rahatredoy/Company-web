@@ -841,6 +841,7 @@ function VariantTable({
   unit: MeasureUnit | null;
   currency: string;
 }) {
+  const t = useT();
   const anyCost = variants.some((variant) => variant.costPrice !== null);
   const anyBarcode = variants.some((variant) => variant.barcode);
   const anyOff = variants.some((variant) => !variant.isActive);
@@ -879,9 +880,9 @@ function VariantTable({
           align: 'right',
           cell: (variant) => (
             <>
-              {formatMoney(sellOf(variant), currency)}
+              {t.money(sellOf(variant), currency)}
               {saleIsLive(variant) ? (
-                <s className="block text-xs text-muted-foreground">{formatMoney(variant.price, currency)}</s>
+                <s className="block text-xs text-muted-foreground">{t.money(variant.price, currency)}</s>
               ) : null}
             </>
           ),
@@ -896,7 +897,7 @@ function VariantTable({
                   variant.costPrice === null ? (
                     <span className="text-muted-foreground">Not set</span>
                   ) : (
-                    formatMoney(variant.costPrice, currency)
+                    t.money(variant.costPrice, currency)
                   ),
               },
               {
@@ -910,7 +911,7 @@ function VariantTable({
                   return (
                     <>
                       <span className={profit < 0 ? 'text-destructive' : 'text-success'}>
-                        {formatMoney(profit, currency)}
+                        {t.money(profit, currency)}
                       </span>
                       {sell > 0 ? (
                         <span className="block text-xs text-muted-foreground">
@@ -933,11 +934,11 @@ function VariantTable({
             ) : (
               <>
                 <span className={variant.stock <= 0 ? 'text-destructive' : undefined}>
-                  {quantity(variant.stock, unit)}
+                  {quantity(variant.stock, unit, t)}
                 </span>
                 {variant.reserved > 0 ? (
                   <span className="block text-xs text-muted-foreground">
-                    {quantity(variant.reserved, unit)} reserved
+                    {quantity(variant.reserved, unit, t)} reserved
                   </span>
                 ) : null}
               </>
@@ -1092,8 +1093,13 @@ function measureUnitOf(product: ProductView): MeasureUnit | null {
 }
 
 /** Stock of a weighed-out product is grams or millilitres, and reads as such. */
-function quantity(value: number, unit: MeasureUnit | null): string {
-  return unit ? formatMeasure(value, unit) : formatNumber(value);
+function quantity(value: number, unit: MeasureUnit | null, t: Translator): string {
+  return unit ? formatMeasure(value, unit) : t.number(value);
+}
+
+/** `12%`, in the panel's own digits. */
+function percentOf(value: number, t: Translator): string {
+  return `${t.number(value, { maximumFractionDigits: 0 })}%`;
 }
 
 /**
@@ -1103,8 +1109,8 @@ function quantity(value: number, unit: MeasureUnit | null): string {
 function stockState(row: ProductRow): {
   counted: boolean;
   tone: 'success' | 'warning' | 'danger' | 'muted';
-  label: string;
-  note?: string;
+  label: MessageKey;
+  note?: MessageKey;
 } {
   if (!row.trackInventory) return { counted: false, tone: 'muted', label: 'Not tracked', note: 'Never refuses a sale' };
   if (row.stockRecords === 0) {

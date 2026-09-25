@@ -1,3 +1,6 @@
 # Production environment for Dokploy — holds real secrets, pasted into each
 # application's Environment tab by hand. Never committed.
 deploy/dokploy/*.env
+
+# Localhost copies of each app's .env, kept while .env holds the Dokploy values.
+**/.env.localhost

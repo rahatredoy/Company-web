@@ -75,7 +75,10 @@ export async function checkMailCredentials(): Promise<void> {
   if (!resend) return;
 
   const { error } = await resend.domains.list().catch((err: unknown) => ({ error: err as Error }));
-  if (error) {
+  // A send-only key cannot list domains, and is refused with `restricted_api_key`.
+  // That refusal proves the key is genuine — it is exactly the key a mailer should hold.
+  const sendOnly = Boolean(error && 'name' in error && error.name === 'restricted_api_key');
+  if (error && !sendOnly) {
     logger.error(
       { err: 'message' in error ? error.message : String(error), from: config.mail.fromEmail },
       'RESEND_API_KEY was rejected — no email will be delivered until it is replaced',
