@@ -1,0 +1,18 @@
+# Dokploy → Build Type: Nixpacks, Build Path: /company/company-api
+# No build step: the API runs its TypeScript through tsx. tsx is a devDependency,
+# and Nixpacks keeps devDependencies installed, so it is present at runtime.
+# The BullMQ worker is a second Dokploy application from this same folder with
+# NIXPACKS_START_CMD="npm run worker" in its environment.
+providers = ["node"]
+
+[variables]
+NIXPACKS_NODE_VERSION = "22"
+
+[phases.install]
+cmds = ["npm ci --no-audit --no-fund"]
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "npm run start"

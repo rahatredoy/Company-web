@@ -120,6 +120,7 @@ npx tsx scripts/verify-admin-trusted-device.ts # 24 checks: admin sign-in, passc
 npx tsx scripts/verify-domain-routing.ts       # 13 checks: hostname → tenant → surface; needs client-api on 4100
 npx tsx scripts/verify-https.ts                # 32 checks: transport posture — needs no server, database or network
 npx tsx scripts/list-tenants.ts
+npx tsx scripts/connect-domain.ts --slug e-comarch --storefront clientweb.igadgets.store --admin clientadmin.igadgets.store   # verified custom domain without the DNS check; dry until --yes
 npm run admin:credentials -- --email you@example.com --password '…'   # move the one admin login
 npx tsx scripts/delete-tenant.ts --slug old-shop                      # dry run; --yes to go ahead
 npx tsx scripts/delete-tenant.ts --all --keep e-comarch --yes         # drop every other store

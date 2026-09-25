@@ -1,0 +1,17 @@
+# Dokploy → Build Type: Nixpacks, Build Path: /company/company-admin
+# NEXT_PUBLIC_* values are inlined by `next build`, so they must be set in
+# Dokploy's Environment tab *before* deploying — changing one means a rebuild.
+providers = ["node"]
+
+[variables]
+NIXPACKS_NODE_VERSION = "22"
+NEXT_TELEMETRY_DISABLED = "1"
+
+[phases.install]
+cmds = ["npm ci --no-audit --no-fund"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npx next start -H 0.0.0.0 -p ${PORT:-3001}"

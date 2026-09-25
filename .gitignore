@@ -1,0 +1,3 @@
+# Production environment for Dokploy — holds real secrets, pasted into each
+# application's Environment tab by hand. Never committed.
+deploy/dokploy/*.env
