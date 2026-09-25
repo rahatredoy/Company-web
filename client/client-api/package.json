@@ -8,10 +8,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tsx watch --clear-screen=false src/server.ts",
+    "dev": "tsx watch --clear-screen=false --env-file-if-exists=.env.localhost src/server.ts",
     "start": "tsx src/server.ts",
     "worker": "tsx src/workers/index.ts",
-    "worker:dev": "tsx watch --clear-screen=false src/workers/index.ts",
+    "worker:dev": "tsx watch --clear-screen=false --env-file-if-exists=.env.localhost src/workers/index.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate:tenants": "tsx src/db/migrate-tenants.ts",
