@@ -192,6 +192,48 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
  * paying for it again. A caller therefore has to *keep* the first answer rather
  * than read it off the batch in hand; `useInfiniteList` does.
  */
+/**
+ * Uploads one file to `POST /admin/uploads` and returns its public address.
+ *
+ * Not `apiFetch`: that sets a JSON content type, and a multipart body needs the
+ * browser to write its own header so the boundary is included. It still has to
+ * go to the same origin with the same store header as every other call — an
+ * upload posted to the raw `{slug}` pattern names no store and is refused as
+ * `STORE_NOT_FOUND`.
+ */
+export async function uploadFile(purpose: string, file: File): Promise<string> {
+  const body = new FormData();
+  body.append('file', file);
+
+  let response: Response;
+  try {
+    response = await fetch(buildUrl('/api/v1/admin/uploads', { purpose }), {
+      method: 'POST',
+      body,
+      headers: { Accept: 'application/json', ...devStoreHeader() },
+      credentials: 'include',
+    });
+  } catch {
+    throw new ApiError(0, {
+      code: 'NETWORK_ERROR',
+      message: localText('Cannot reach the server. Check your connection and try again.'),
+    });
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | ({ data?: { url?: string } } & Partial<ApiErrorBody>)
+    | null;
+  if (!response.ok || !payload?.data?.url) {
+    throw new ApiError(response.status, {
+      code: payload?.code ?? 'INTERNAL_ERROR',
+      message: payload?.message ?? '',
+      requestId: payload?.requestId,
+      details: payload?.details,
+    });
+  }
+  return payload.data.url;
+}
+
 export interface ListMeta {
   pageSize: number;
   /** Opaque marker for the row after the last one sent; null when the list ends. */

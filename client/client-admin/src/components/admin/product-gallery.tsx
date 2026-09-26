@@ -3,8 +3,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowDown, ArrowUp, ImagePlus, Loader2, Trash2, Upload } from 'lucide-react';
-import { api, errorMessage } from '@/lib/api';
-import { publicEnv } from '@/lib/env';
+import { api, errorMessage, uploadFile } from '@/lib/api';
 import type { ProductMediaRow } from '@/lib/types';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -82,26 +81,8 @@ export function ProductGallery({
     // Uploaded one at a time on purpose: the API checks size and type per file
     // and a rejected one should not take the rest of the selection with it.
     for (const file of files.slice(0, LIMIT - rows.length)) {
-      const body = new FormData();
-      body.append('file', file);
-
       try {
-        const response = await fetch(`${publicEnv.apiUrl}/api/v1/admin/uploads?purpose=products`, {
-          method: 'POST',
-          body,
-          credentials: 'include',
-        });
-
-        const payload = (await response.json().catch(() => null)) as
-          | { data?: { url?: string }; message?: string }
-          | null;
-
-        if (!response.ok || !payload?.data?.url) {
-          setError(payload?.message ?? t('{file} could not be uploaded.', { file: file.name }));
-          continue;
-        }
-
-        const url = payload.data.url;
+        const url = await uploadFile('products', file);
         setRows((current) => [...current, { key: nextKey(), url, altText: '' }]);
       } catch (caught) {
         setError(errorMessage(caught, t('We could not reach the store. Try again.')));

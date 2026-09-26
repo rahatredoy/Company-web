@@ -2,8 +2,7 @@
 
 import * as React from 'react';
 import { ImagePlus, Loader2, Upload, X } from 'lucide-react';
-import { publicEnv } from '@/lib/env';
-import { errorMessage } from '@/lib/api';
+import { errorMessage, uploadFile } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useT } from '@/lib/i18n';
@@ -70,30 +69,8 @@ export function ImageUpload({
     setUploading(true);
     setError('');
 
-    const body = new FormData();
-    body.append('file', file);
-
     try {
-      /*
-       * `fetch` directly rather than the shared `api` client: that wrapper sets
-       * a JSON content type, and a multipart body needs the browser to set its
-       * own header so the boundary is included.
-       */
-      const response = await fetch(
-        `${publicEnv.apiUrl}/api/v1/admin/uploads?purpose=${purpose}`,
-        { method: 'POST', body, credentials: 'include' },
-      );
-
-      const payload = (await response.json().catch(() => null)) as
-        | { data?: { url?: string }; message?: string }
-        | null;
-
-      if (!response.ok || !payload?.data?.url) {
-        setError(payload?.message ?? t('That file could not be uploaded.'));
-        return;
-      }
-
-      commit(payload.data.url);
+      commit(await uploadFile(purpose, file));
     } catch (caught) {
       setError(errorMessage(caught, t('We could not reach the store. Try again.')));
     } finally {
